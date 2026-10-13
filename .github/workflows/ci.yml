@@ -47,12 +47,15 @@ jobs:
       - run: bash .github/ci.sh check
       - run: bash .github/ci.sh test
 
-  # The self-hosted Mac (mac-m4) runs only trusted code: pushes to main and
-  # manual runs, never pull requests. It uses its own Odin (~/Work/odin).
   macos:
-    if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Odin
+        run: |
+          mkdir -p "$RUNNER_TEMP/odin"
+          curl -fsSL "https://github.com/odin-lang/Odin/releases/download/$ODIN_RELEASE/odin-macos-arm64-$ODIN_RELEASE.tar.gz" |
+            tar xz --strip-components=1 -C "$RUNNER_TEMP/odin"
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
       - run: bash .github/ci.sh check
       - run: bash .github/ci.sh test
