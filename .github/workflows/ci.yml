@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ODIN_RELEASE: dev-2026-10
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Odin
+        run: |
+          mkdir -p "$RUNNER_TEMP/odin"
+          curl -fsSL "https://github.com/odin-lang/Odin/releases/download/$ODIN_RELEASE/odin-linux-amd64-$ODIN_RELEASE.tar.gz" |
+            tar xz --strip-components=1 -C "$RUNNER_TEMP/odin"
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+      - run: bash .github/ci.sh check --programs
+      - run: bash .github/ci.sh test
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - name: Install Odin
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/odin.zip" "https://github.com/odin-lang/Odin/releases/download/$ODIN_RELEASE/odin-windows-amd64-$ODIN_RELEASE.zip"
+          unzip -q "$RUNNER_TEMP/odin.zip" -d "$RUNNER_TEMP/odin"
+          cygpath -w "$RUNNER_TEMP/odin/dist" >> "$GITHUB_PATH"
+      - run: bash .github/ci.sh check
+      - run: bash .github/ci.sh test
+
+  # The self-hosted Mac (mac-m4) runs only trusted code: pushes to main and
+  # manual runs, never pull requests. It uses its own Odin (~/Work/odin).
+  macos:
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash .github/ci.sh check
+      - run: bash .github/ci.sh test
