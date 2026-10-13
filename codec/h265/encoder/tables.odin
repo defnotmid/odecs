@@ -1,0 +1,506 @@
+package h265_encoder
+
+// Context model initialization values and helper tables from kvazaar's
+// context.c and encoderstate.h. Rows are indexed by slice type.
+
+// Contexts the reference marks CNU are still initialised with this value
+// (kvazaar's context.h: `#define CNU 154`); the decoder derives a state from
+// it even though most of those contexts are never coded in this encoder.
+CNU :: 154
+
+INIT_SAO_MERGE_FLAG := [3]u8{153, 153, 153}
+INIT_SAO_TYPE_IDX := [3]u8{160, 185, 200}
+
+INIT_QT_ROOT_CBF := [3][1]u8{{79}, {79}, {CNU}}
+INIT_MVP_IDX := [3][2]u8{{168, CNU}, {168, CNU}, {CNU, CNU}}
+INIT_REF_PIC := [3][2]u8{{153, 153}, {153, 153}, {CNU, CNU}}
+INIT_MVD := [3][2]u8{{169, 198}, {140, 198}, {CNU, CNU}}
+INIT_MERGE_FLAG_EXT := [3][1]u8{{154}, {110}, {CNU}}
+INIT_MERGE_IDX_EXT := [3][1]u8{{137}, {122}, {CNU}}
+INIT_CU_TRANSQUANT_BYPASS := [3][1]u8{{154}, {154}, {154}}
+INIT_SKIP_FLAG := [3][3]u8{{197, 185, 201}, {197, 185, 201}, {CNU, CNU, CNU}}
+INIT_PRED_MODE := [3][1]u8{{134}, {149}, {CNU}}
+INIT_PART_SIZE := [3][4]u8{{154, 139, CNU, CNU}, {154, 139, CNU, CNU}, {184, CNU, CNU, CNU}}
+INIT_SPLIT_FLAG := [3][3]u8{{107, 139, 126}, {107, 139, 126}, {139, 141, 157}}
+INIT_INTRA_PRED_MODE := [3]u8{183, 154, 184}
+INIT_CHROMA_PRED_MODE := [3][2]u8{{152, 139}, {152, 139}, {63, 139}}
+INIT_INTER_DIR := [3][5]u8{{95, 79, 63, 31, 31}, {95, 79, 63, 31, 31}, {CNU, CNU, CNU, CNU, CNU}}
+INIT_TRANS_SUBDIV_FLAG := [3][3]u8{{224, 167, 122}, {124, 138, 94}, {153, 138, 138}}
+INIT_QT_CBF := [3][8]u8 {
+	{153, 111, CNU, CNU, 149, 92, 167, 154},
+	{153, 111, CNU, CNU, 149, 107, 167, 154},
+	{111, 141, CNU, CNU, 94, 138, 182, 154},
+}
+INIT_CU_QP_DELTA_ABS := [3][2]u8{{154, 154}, {154, 154}, {154, 154}}
+INIT_SIG_CG_FLAG := [3][4]u8{{121, 140, 61, 154}, {121, 140, 61, 154}, {91, 171, 134, 141}}
+INIT_SIG_FLAG := [3][42]u8 {
+	{
+		170,
+		154,
+		139,
+		153,
+		139,
+		123,
+		123,
+		63,
+		124,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		170,
+		153,
+		138,
+		138,
+		122,
+		121,
+		122,
+		121,
+		167,
+		151,
+		183,
+		140,
+		151,
+		183,
+		140,
+	},
+	{
+		155,
+		154,
+		139,
+		153,
+		139,
+		123,
+		123,
+		63,
+		153,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		166,
+		183,
+		140,
+		136,
+		153,
+		154,
+		170,
+		153,
+		123,
+		123,
+		107,
+		121,
+		107,
+		121,
+		167,
+		151,
+		183,
+		140,
+		151,
+		183,
+		140,
+	},
+	{
+		111,
+		111,
+		125,
+		110,
+		110,
+		94,
+		124,
+		108,
+		124,
+		107,
+		125,
+		141,
+		179,
+		153,
+		125,
+		107,
+		125,
+		141,
+		179,
+		153,
+		125,
+		107,
+		125,
+		141,
+		179,
+		153,
+		125,
+		140,
+		139,
+		182,
+		182,
+		152,
+		136,
+		152,
+		136,
+		153,
+		136,
+		139,
+		111,
+		136,
+		139,
+		111,
+	},
+}
+INIT_LAST := [3][30]u8 {
+	{
+		125,
+		110,
+		124,
+		110,
+		95,
+		94,
+		125,
+		111,
+		111,
+		79,
+		125,
+		126,
+		111,
+		111,
+		79,
+		108,
+		123,
+		93,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+	},
+	{
+		125,
+		110,
+		94,
+		110,
+		95,
+		79,
+		125,
+		111,
+		110,
+		78,
+		110,
+		111,
+		111,
+		95,
+		94,
+		108,
+		123,
+		108,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+	},
+	{
+		110,
+		110,
+		124,
+		125,
+		140,
+		153,
+		125,
+		127,
+		140,
+		109,
+		111,
+		143,
+		127,
+		111,
+		79,
+		108,
+		123,
+		63,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+		CNU,
+	},
+}
+INIT_ONE_FLAG := [3][24]u8 {
+	{
+		154,
+		196,
+		167,
+		167,
+		154,
+		152,
+		167,
+		182,
+		182,
+		134,
+		149,
+		136,
+		153,
+		121,
+		136,
+		122,
+		169,
+		208,
+		166,
+		167,
+		154,
+		152,
+		167,
+		182,
+	},
+	{
+		154,
+		196,
+		196,
+		167,
+		154,
+		152,
+		167,
+		182,
+		182,
+		134,
+		149,
+		136,
+		153,
+		121,
+		136,
+		137,
+		169,
+		194,
+		166,
+		167,
+		154,
+		167,
+		137,
+		182,
+	},
+	{
+		140,
+		92,
+		137,
+		138,
+		140,
+		152,
+		138,
+		139,
+		153,
+		74,
+		149,
+		92,
+		139,
+		107,
+		122,
+		152,
+		140,
+		179,
+		166,
+		182,
+		140,
+		227,
+		122,
+		197,
+	},
+}
+INIT_ABS_FLAG := [3][6]u8 {
+	{107, 167, 91, 107, 107, 167},
+	{107, 167, 91, 122, 107, 167},
+	{138, 153, 136, 167, 152, 152},
+}
+INIT_TRANSFORMSKIP_FLAG := [3][2]u8{{139, 139}, {139, 139}, {139, 139}}
+INIT_CROSS_COMPONENT_PREDICTION := [3][10]u8 {
+	{154, 154, 154, 154, 154, 154, 154, 154, 154, 154},
+	{154, 154, 154, 154, 154, 154, 154, 154, 154, 154},
+	{154, 154, 154, 154, 154, 154, 154, 154, 154, 154},
+}
+
+// Last significant coefficient group mapping.
+GROUP_IDX := [32]u8 {
+	0,
+	1,
+	2,
+	3,
+	4,
+	4,
+	5,
+	5,
+	6,
+	6,
+	6,
+	6,
+	7,
+	7,
+	7,
+	7,
+	8,
+	8,
+	8,
+	8,
+	8,
+	8,
+	8,
+	8,
+	9,
+	9,
+	9,
+	9,
+	9,
+	9,
+	9,
+	9,
+}
+MIN_IN_GROUP := [10]u8{0, 1, 2, 3, 4, 6, 8, 12, 16, 24}
+
+// Number of reference pixels available to the left/top of a prediction unit,
+// indexed by 4x4 cell inside the CTU. Generated by kvazaar's
+// tools/generate_ref_pixel_tables.py from the HEVC Z-scan decoding order.
+NUM_REF_PIXELS_TOP := [16][16]u8 {
+	{64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{32, 28, 24, 20, 16, 12, 8, 4, 32, 28, 24, 20, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{64, 60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{32, 28, 24, 20, 16, 12, 8, 4, 32, 28, 24, 20, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4, 16, 12, 8, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+}
+NUM_REF_PIXELS_LEFT := [16][16]u8 {
+	{64, 4, 8, 4, 16, 4, 8, 4, 32, 4, 8, 4, 16, 4, 8, 4},
+	{60, 4, 4, 4, 12, 4, 4, 4, 28, 4, 4, 4, 12, 4, 4, 4},
+	{56, 4, 8, 4, 8, 4, 8, 4, 24, 4, 8, 4, 8, 4, 8, 4},
+	{52, 4, 4, 4, 4, 4, 4, 4, 20, 4, 4, 4, 4, 4, 4, 4},
+	{48, 4, 8, 4, 16, 4, 8, 4, 16, 4, 8, 4, 16, 4, 8, 4},
+	{44, 4, 4, 4, 12, 4, 4, 4, 12, 4, 4, 4, 12, 4, 4, 4},
+	{40, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{36, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4},
+	{32, 4, 8, 4, 16, 4, 8, 4, 32, 4, 8, 4, 16, 4, 8, 4},
+	{28, 4, 4, 4, 12, 4, 4, 4, 28, 4, 4, 4, 12, 4, 4, 4},
+	{24, 4, 8, 4, 8, 4, 8, 4, 24, 4, 8, 4, 8, 4, 8, 4},
+	{20, 4, 4, 4, 4, 4, 4, 4, 20, 4, 4, 4, 4, 4, 4, 4},
+	{16, 4, 8, 4, 16, 4, 8, 4, 16, 4, 8, 4, 16, 4, 8, 4},
+	{12, 4, 4, 4, 12, 4, 4, 4, 12, 4, 4, 4, 12, 4, 4, 4},
+	{8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4, 8, 4},
+	{4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4},
+}
+
+// ---------------------------------------------------------------------------
+// Coefficient context derivation (kvz_context_get_sig_coeff_group and
+// kvz_context_calc_pattern_sig_ctx / kvz_context_get_sig_ctx_inc).
+// ---------------------------------------------------------------------------
+
+context_get_sig_coeff_group :: proc(sig_coeff_group_flag: []u32, pos_x, pos_y, width: int) -> u32 {
+	right, lower: u32
+	w := width < 4 ? 1 : width >> 2
+	if pos_x < w - 1 do right = sig_coeff_group_flag[pos_y * w + pos_x + 1] != 0 ? 1 : 0
+	if pos_y < w - 1 do lower = sig_coeff_group_flag[(pos_y + 1) * w + pos_x] != 0 ? 1 : 0
+	return right | lower
+}
+
+context_calc_pattern_sig_ctx :: proc(
+	sig_coeff_group_flag: []u32,
+	pos_x, pos_y, width: int,
+) -> i32 {
+	if width <= 4 do return -1
+	w := width >> 2
+	sig_right, sig_lower: i32
+	if pos_x < w - 1 do sig_right = sig_coeff_group_flag[pos_y * w + pos_x + 1] != 0 ? 1 : 0
+	if pos_y < w - 1 do sig_lower = sig_coeff_group_flag[(pos_y + 1) * w + pos_x] != 0 ? 1 : 0
+	return sig_right + (sig_lower << 1)
+}
+
+context_get_sig_ctx_inc :: proc(
+	pattern_sig_ctx, scan_idx, pos_x, pos_y, block_type: i32,
+	texture_type: i32,
+) -> i32 {
+	ctx_ind_map := [16]i32{0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8}
+	if pos_x + pos_y == 0 do return 0
+	if block_type == 2 do return ctx_ind_map[4 * pos_y + pos_x]
+
+	offset: i32
+	if block_type == 3 {
+		offset = scan_idx == i32(Scan_Order.Diag) ? 9 : 9 + (texture_type == 0 ? 6 : 0)
+	} else {
+		offset = texture_type == 0 ? 21 : 12
+	}
+	pos_x_in_subset := pos_x - ((pos_x >> 2) << 2)
+	pos_y_in_subset := pos_y - ((pos_y >> 2) << 2)
+
+	cnt: i32
+	switch pattern_sig_ctx {
+	case 0:
+		if pos_x_in_subset + pos_y_in_subset <= 2 {
+			cnt = pos_x_in_subset + pos_y_in_subset == 0 ? 2 : 1
+		}
+	case 1:
+		if pos_y_in_subset <= 1 do cnt = pos_y_in_subset == 0 ? 2 : 1
+	case 2:
+		if pos_x_in_subset <= 1 do cnt = pos_x_in_subset == 0 ? 2 : 1
+	case:
+		cnt = 2
+	}
+
+	base: i32
+	if texture_type == 0 && ((pos_x >> 2) + (pos_y >> 2)) > 0 do base = 3
+	return base + offset + cnt
+}
+
+// Scan order selection (kvz_get_scan_order): angular modes use directional
+// scans for 4x4 and 8x8 blocks.
+get_scan_order :: proc(cu_type: Cu_Type, intra_mode: u8, depth: u8) -> Scan_Order {
+	if cu_type == .Intra && depth >= 3 {
+		if intra_mode >= 6 && intra_mode <= 14 do return .Vertical
+		if intra_mode >= 22 && intra_mode <= 30 do return .Horizontal
+	}
+	return .Diag
+}
