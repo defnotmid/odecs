@@ -1,9 +1,10 @@
 // FLAC (RFC 9639): stream metadata, frame headers, CRCs and the bit reader
 // shared by the decoder (decoder.odin) and the native-file reader
-// (reader.odin). Depends only on Odin core.
+// (reader.odin). Depends only on Odin core and codec/common.
 package flac
 
 import "base:intrinsics"
+import common "../common"
 
 Error :: enum {
 	None,
@@ -231,79 +232,12 @@ crc16 :: proc(data: []u8, c: u16 = 0) -> u16 #no_bounds_check {
 	return c
 }
 
-// ---- Bit reader -------------------------------------------------------------
+// ---- Bit reader (shared in codec/common) ------------------------------------
 
-// MSB-first reader with a 64-bit cache. Reading past the end yields zero
-// bits and drives `left` negative, which callers check once per stage.
-@(private)
-Bit_Reader :: struct {
-	cache: u64,
-	count: int, // valid bits in cache
-	left:  int, // bits remaining in data; negative after an overrun
-	next:  int, // next byte to load
-	data:  []u8,
-}
-
-@(private)
-refill :: #force_inline proc(r: ^Bit_Reader) {
-	if r.count > 56 do return
-	if r.next + 8 <= len(r.data) {
-		v := u64(intrinsics.unaligned_load((^u64be)(raw_data(r.data[r.next:]))))
-		r.cache |= v >> uint(r.count)
-		r.next += (63 - r.count) >> 3
-		r.count |= 56
-		return
-	}
-	for r.count <= 56 {
-		b := r.next < len(r.data) ? r.data[r.next] : 0
-		r.cache |= u64(b) << uint(56 - r.count)
-		r.next += 1
-		r.count += 8
-	}
-}
-
-@(private)
-skip :: #force_inline proc(r: ^Bit_Reader, n: int) {
-	r.cache <<= uint(n)
-	r.count -= n
-	r.left -= n
-}
-
-// Up to 32 bits, unsigned.
-@(private)
-read :: #force_inline proc(r: ^Bit_Reader, n: int) -> u32 {
-	if n == 0 do return 0
-	refill(r)
-	v := u32(r.cache >> uint(64 - n))
-	skip(r, n)
-	return v
-}
-
-// Up to 33 bits (a 32-bit side channel), two's complement.
-@(private)
-read_signed :: #force_inline proc(r: ^Bit_Reader, n: int) -> i64 {
-	if n == 0 do return 0
-	v := n > 32 ? i64(read(r, n - 32)) << 32 | i64(read(r, 32)) : i64(read(r, n))
-	return v << uint(64 - n) >> uint(64 - n)
-}
-
-// A unary count of zero bits ended by a one bit. A run that reaches the
-// end of the data leaves `left` negative.
-@(private)
-read_unary :: #force_inline proc(r: ^Bit_Reader) -> (q: u64) {
-	refill(r)
-	for r.cache == 0 {
-		q += u64(r.count)
-		skip(r, r.count)
-		if r.left < 0 do return
-		refill(r)
-	}
-	z := int(intrinsics.count_leading_zeros(r.cache))
-	skip(r, z + 1)
-	return q + u64(z)
-}
-
-@(private)
-byte_position :: proc(r: ^Bit_Reader) -> int {
-	return len(r.data) - (r.left + 7) / 8
-}
+Bit_Reader :: common.Bit_Reader
+refill :: common.refill_bits
+skip :: common.skip_bits
+read :: common.read_bits
+read_signed :: common.read_signed_bits
+read_unary :: common.read_unary
+byte_position :: common.byte_position

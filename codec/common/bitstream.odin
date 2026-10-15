@@ -1,6 +1,101 @@
 package common
 
+import "base:intrinsics"
 import "core:math/bits"
+
+// ---------------------------------------------------------------------------
+// MSB-first bit reader with a 64-bit cache. Reading past the end yields zero
+// bits and drives `left` negative, which callers check once per stage.
+// ---------------------------------------------------------------------------
+
+Bit_Reader :: struct {
+	cache: u64,
+	count: int, // valid bits in cache
+	left:  int, // bits remaining in data; negative after an overrun
+	next:  int, // next byte to load
+	data:  []u8,
+}
+
+refill_bits :: #force_inline proc(r: ^Bit_Reader) {
+	if r.count > 56 do return
+	if r.next + 8 <= len(r.data) {
+		v := u64(intrinsics.unaligned_load((^u64be)(raw_data(r.data[r.next:]))))
+		r.cache |= v >> uint(r.count)
+		r.next += (63 - r.count) >> 3
+		r.count |= 56
+		return
+	}
+	for r.count <= 56 {
+		b := r.next < len(r.data) ? r.data[r.next] : 0
+		r.cache |= u64(b) << uint(56 - r.count)
+		r.next += 1
+		r.count += 8
+	}
+}
+
+skip_bits :: #force_inline proc(r: ^Bit_Reader, n: int) {
+	r.cache <<= uint(n)
+	r.count -= n
+	r.left -= n
+}
+
+// Up to 32 bits, unsigned.
+read_bits :: #force_inline proc(r: ^Bit_Reader, n: int) -> u32 {
+	if n <= 0 do return 0
+	refill_bits(r)
+	v := u32(r.cache >> uint(64 - n))
+	skip_bits(r, n)
+	return v
+}
+
+// Up to 33 bits (e.g. a 32-bit FLAC side channel), two's complement.
+read_signed_bits :: #force_inline proc(r: ^Bit_Reader, n: int) -> i64 {
+	if n <= 0 do return 0
+	v := n > 32 ? i64(read_bits(r, n - 32)) << 32 | i64(read_bits(r, 32)) : i64(read_bits(r, n))
+	return v << uint(64 - n) >> uint(64 - n)
+}
+
+// A unary count of zero bits ended by a one bit.
+read_unary :: #force_inline proc(r: ^Bit_Reader) -> (q: u64) {
+	refill_bits(r)
+	for r.cache == 0 {
+		q += u64(r.count)
+		skip_bits(r, r.count)
+		if r.left < 0 do return
+		refill_bits(r)
+	}
+	z := int(intrinsics.count_leading_zeros(r.cache))
+	skip_bits(r, z + 1)
+	return q + u64(z)
+}
+
+advance_bits :: proc(r: ^Bit_Reader, n: int) {
+	if n <= r.count {
+		skip_bits(r, n)
+		return
+	}
+	pos := (len(r.data) * 8 - r.left) + n
+	r.left = len(r.data) * 8 - pos
+	if r.left < 0 {
+		r.cache, r.count, r.next = 0, 0, len(r.data)
+		return
+	}
+	r.next = pos >> 3
+	bit_off := pos & 7
+	r.cache, r.count = 0, 0
+	refill_bits(r)
+	r.cache <<= uint(bit_off)
+	r.count -= bit_off
+}
+
+align_byte :: #force_inline proc(r: ^Bit_Reader) {
+	bit_off := (len(r.data) * 8 - r.left) & 7
+	if bit_off != 0 do skip_bits(r, 8 - bit_off)
+}
+
+byte_position :: #force_inline proc(r: ^Bit_Reader) -> int {
+	return len(r.data) - (r.left + 7) / 8
+}
 
 // ---------------------------------------------------------------------------
 // RBSP bit writer shared by the H.264 and H.265 encoders. `cache` holds up to

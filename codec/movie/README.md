@@ -65,6 +65,9 @@ movie.destroy(&w)
     a second. Supply audio before or alongside the video; audio written after
     the last frame is stored after the video, which is valid but not
     interleaved.
+  - **Audio-only `.m4a`:** `default_audio_writer_config(sample_rate, channels)`
+    (or `width == 0 && height == 0` with `sample_rate > 0 && channels > 0`)
+    writes an audio-only AAC-LC `.m4a` (`ftyp` major brand `M4A `).
 - **VP9 / WebM:** `codec = .VP9` writes WebM with the native VP9 encoder
   (`base_q_idx = 5 * qp`, video only: audio is `Unsupported`). With
   `transparency = .Straight` the alpha travels as a second VP9 stream in
@@ -113,11 +116,12 @@ movie.seek_audio(&r, 12.34)
 movie.close_reader(&r)
 ```
 
-- **Inputs:** MP4 and QuickTime `.mov` (H.264, H.265, ProRes, AV1; AAC-LC or
+- **Inputs:** MP4, `.m4a` and QuickTime `.mov` (including fragmented
+  `moof`/`traf`; H.264, H.265, ProRes, AV1; AAC-LC, ALAC, FLAC, MP3, Opus or
   PCM audio) and WebM/Matroska `.webm`/`.mkv` (VP9, H.264, H.265, AV1; AAC-LC,
   FLAC, MP3, Opus (every mode, surround included; see [`codec/opus`](../opus/README.md)) or
-  PCM audio; Vorbis is reported in `Audio_Info.codec` but not decoded), FLAC
-  and MP3 in MP4, and audio-only WAV, Ogg Opus (`.opus`, `.ogg`), native `.flac`
+  PCM audio; Vorbis is reported in `Audio_Info.codec` but not decoded), and
+  audio-only WAV, Ogg Opus (`.opus`, `.ogg`), native `.flac`
   (which seeks with its seek table and bisection, never reading the whole
   file) and `.mp3` (frames indexed at open, LAME gapless trimming; seeks
   pre-roll 13 frames so the bit reservoir is complete and the output exact).
@@ -294,10 +298,10 @@ odin run tools/mp4_smoke -o:speed -- /tmp/smoke.mp4 --codec h264
   - It reads x264 B-frame, open-GOP, x265 B-frame, Main10, QuickTime MOV
     (including full range signalled only by the VUI), cropped 646x358 at
     24000/1001, edit-list-trimmed and stream-copy-cut files (hidden pre-roll,
-    a frame straddling zero). The checks
+    a frame straddling zero), fragmented MP4/M4A, ALAC `.m4a` (16-bit and
+    24-bit 96 kHz), and Opus in MP4. The checks
     are frame alignment, the oracle's first frame time, the exact audio
-    sample count, and SNR against FFmpeg's AAC decode, which exceeds 80 dB.
-  - Fragmented MP4 must be refused.
+    sample count, and SNR against FFmpeg's decode.
 - **Manual browser check:** headless Chromium 152 played the H.264 output
   (native Baseline and Vulkan High) with the right size and duration and
   with audio. Flat colours came back as BT.709, red and green exact. Blue

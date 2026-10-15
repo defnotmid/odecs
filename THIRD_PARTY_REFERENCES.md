@@ -21,6 +21,7 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [edge264](https://github.com/tvlabs/edge264) | read: H.264 decoder study | `third_party/edge264` | `2c2ab95d63c1ad89c5687f9e50b57cad772c871b` | 2026-07-28 | BSD-3-Clause |
 | [hevc.js](https://github.com/lid-labs/hevc.js) | read: HEVC decoder study | `third_party/hevc.js` | `fa6c1bb2a58fbc1e425030555ef57121717de746` | 2026-10-01 | MIT |
 | [Glint](https://github.com/CrispStrobe/glint) | read: AAC study | `third_party/glint` | `77738f3ed9b15f627196cc5bbd7f6406814ba2fb` | 2026-08-19 | MIT |
+| [Apple ALAC](https://github.com/macosforge/alac) | ported: `codec/alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
@@ -46,3 +47,4 @@ against.
 | `third_party/edge264/LICENSE_BSD.txt` | `3566842dee53b6a1457f334185060793286bb567fd0510889de8ca8303aa4167` |
 | `third_party/hevc.js/LICENSE` | `9b3c1a02861d51028709ff474e32154ab9d759494f6072c1eb30a17adb80c975` |
 | `third_party/glint/LICENSE` | `ab08fb7ec4a030bd27a9a0d1fb60a39b832f7779fb11d0f2753e85593f6f944e` |
+| `third_party/alac/LICENSE` | `a337314dd82d26791112c1e5a85725b2eb92f5b7e6f9102fa4eaa2903f77518f` |

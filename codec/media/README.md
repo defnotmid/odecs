@@ -18,6 +18,7 @@ platforms, so it can be listed everywhere.
 | ProRes decode | 422 Proxy/LT/Standard/HQ (10-bit), 4444/XQ (12-bit) with alpha, interlaced | Unsupported | Unsupported |
 | VP9 decode | Profiles 0–3, 8/10/12-bit, 4:2:0/4:2:2/4:4:4/sRGB, alpha stream | Unsupported | Unsupported |
 | FLAC decode | RFC 9639: 4–32-bit, 1–8 channels, every subframe type and stereo mode | Unsupported | Unsupported |
+| ALAC decode | 16/20/24/32-bit, 1–8 channels (MPEG/AAC canonical order); see [`codec/alac`](../alac/README.md) | Unsupported | Unsupported |
 | MP3 decode | MPEG-1/2/2.5 Layer III, mono/stereo (Layers I/II and free format refused) | Unsupported | Unsupported |
 | Opus decode | SILK, hybrid and CELT at 48 kHz, DTX, multistream up to 255 channels (Opus mapping order); see [`codec/opus`](../opus/README.md) | Unsupported | Unsupported |
 | AV1 decode | Unsupported (hardware only) | Main 4:2:0, 8/10-bit, host output; see [`codec/av1`](../av1/README.md) | Unsupported |

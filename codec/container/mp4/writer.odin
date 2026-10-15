@@ -118,7 +118,7 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, tracks: []Track_Config, opt
 			if t.width <= 0 || t.height <= 0 || t.width > 65535 || t.height > 65535 do return .Invalid_Argument
 		case .AAC:
 			if t.sample_rate <= 0 || t.channels <= 0 || t.channels > 255 do return .Invalid_Argument
-		case .ProRes, .PCM, .FLAC, .MP3, .AV1:
+		case .ProRes, .PCM, .FLAC, .MP3, .AV1, .ALAC, .Opus:
 			return .Unsupported // sample entries that are read, not yet written
 		case .Unknown:
 			return .Invalid_Argument
@@ -170,13 +170,24 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, tracks: []Track_Config, opt
 
 @(private)
 write_ftyp :: proc(w: ^Writer, b: ^[dynamic]u8) {
+	all_audio := true
+	for t in w.tracks do if t.config.codec != .AAC do all_audio = false
 	start := begin_box(b, "ftyp")
-	put_type(b, "isom")
-	put_u32(b, 0x200)
-	put_type(b, "isom")
-	put_type(b, "iso2")
-	for t in w.tracks do if t.config.codec == .H264 {put_type(b, "avc1"); break}
-	put_type(b, "mp41")
+	if all_audio {
+		put_type(b, "M4A ")
+		put_u32(b, 0x200)
+		put_type(b, "M4A ")
+		put_type(b, "isom")
+		put_type(b, "iso2")
+		put_type(b, "mp41")
+	} else {
+		put_type(b, "isom")
+		put_u32(b, 0x200)
+		put_type(b, "isom")
+		put_type(b, "iso2")
+		for t in w.tracks do if t.config.codec == .H264 {put_type(b, "avc1"); break}
+		put_type(b, "mp41")
+	}
 	end_box(b, start)
 }
 
@@ -280,7 +291,7 @@ add_nal :: proc(w: ^Writer, nal: []u8) -> Error {
 		case 16 ..= 21:
 			w.sample.irap = true
 		}
-	case .AAC, .Unknown, .ProRes, .PCM, .FLAC, .MP3, .AV1:
+	case .AAC, .Unknown, .ProRes, .PCM, .FLAC, .MP3, .AV1, .ALAC, .Opus:
 		return .Invalid_Argument
 	}
 	if len(nal) > int(max(u32)) - 4 - int(w.sample.size) do return .Unsupported
@@ -702,7 +713,7 @@ build_stbl :: proc(w: ^Writer, b: ^[dynamic]u8, t: ^Track_Writer, id: u32, timin
 		build_visual_entry(w, b, t) or_return
 	case .AAC:
 		build_audio_entry(b, t, id, timing)
-	case .Unknown, .ProRes, .PCM, .FLAC, .MP3, .AV1:
+	case .Unknown, .ProRes, .PCM, .FLAC, .MP3, .AV1, .ALAC, .Opus:
 		return .Invalid_Argument
 	}
 	end_box(b, stsd)

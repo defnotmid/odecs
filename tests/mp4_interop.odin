@@ -141,9 +141,10 @@ main :: proc() {
 				noise += d * d
 			}
 			snr := 10 * math.log10(signal / max(noise, 1e-30))
-			// The reader ends at the edit list's presented end. An oracle that
-			// ignores an edit ending inside the last AU returns that AU's tail.
-			trimmed := a.edit.duration > 0 && i64(total) == r.audio.samples && total < expected && expected - total < 2048
+			// The reader ends at the track's presented end (from elst or the
+			// final sample's duration). An oracle that decodes the full last
+			// AU returns that AU's tail.
+			trimmed := i64(total) == r.audio.samples && total < expected && expected - total < 2048
 			ok := (total == expected || trimmed) && snr > 60
 			if !ok do failures += 1
 			fmt.printfln("audio: %d/%d samples per channel (edit end %d), %d Hz x%d, SNR vs reference %.1f dB %s", total, expected, r.audio.samples, r.audio.sample_rate, ch, snr, ok ? "ok" : "FAIL")

@@ -1,5 +1,6 @@
 package movie
 
+import alac "../alac"
 import mp4 "../container/mp4"
 import flac "../flac"
 import ogg "../container/ogg"
@@ -47,6 +48,7 @@ Audio_Codec :: enum u8 {
 	FLAC,
 	MP3, // MPEG-1/2/2.5 Layer III
 	Opus, // CELT packets; SILK and hybrid (speech) packets are not decoded yet
+	ALAC, // Apple Lossless (.m4a, .mov, .mp4)
 	Vorbis, // demuxed, not decoded
 	Other,
 }
@@ -752,6 +754,14 @@ describe_audio :: proc(r: ^Reader) {
 	case .MP3:
 		r.audio.codec = .MP3
 		r.audio.present = t.sample_rate > 0 && t.channels >= 1 && t.channels <= 2
+	case .ALAC:
+		r.audio.codec = .ALAC
+		cfg, e := alac.parse_config(t.audio_specific_config)
+		r.audio.present = e == .None && cfg.sample_rate == t.sample_rate && cfg.channels == t.channels
+	case .Opus:
+		r.audio.codec = .Opus
+		h, e := opus.parse_head(t.audio_specific_config)
+		r.audio.present = e == .None && h.channels == t.channels && t.sample_rate == 48000
 	case:
 		r.audio.codec = .Other
 	}
@@ -924,23 +934,20 @@ close_reader :: proc(r: ^Reader) {
 	r^ = {}
 }
 
+@(private, rodata)
+VIDEO_CODECS := [Video_Codec]media.Codec {
+	.H264   = .H264,
+	.H265   = .H265,
+	.ProRes = .ProRes,
+	.VP9    = .VP9,
+	.AV1    = .AV1,
+}
+
 // Restarts video decoding at decode-order sample k (a keyframe).
 @(private)
 reset_video :: proc(r: ^Reader, k: int) -> Error {
 	if r.session_open {media.close(&r.session); r.session_open = false}
-	codec: media.Codec
-	switch r.video.codec {
-	case .H264:
-		codec = .H264
-	case .H265:
-		codec = .H265
-	case .ProRes:
-		codec = .ProRes
-	case .VP9:
-		codec = .VP9
-	case .AV1:
-		codec = .AV1
-	}
+	codec := VIDEO_CODECS[r.video.codec]
 	config := media.default_config(codec, .Decode)
 	config.preference = r.preference
 	// The hardware decoders decode only an HEVC stream's base layer.
@@ -1371,23 +1378,21 @@ seek_audio :: proc(r: ^Reader, seconds: f64) -> Error {
 	return reset_audio(r, clamp(target, 0, r.audio_end))
 }
 
+@(private, rodata)
+AUDIO_CODECS := #partial [Audio_Codec]media.Codec {
+	.AAC  = .AAC,
+	.FLAC = .FLAC,
+	.MP3  = .MP3,
+	.Opus = .Opus,
+	.ALAC = .ALAC,
+}
+
 @(private)
 reset_audio :: proc(r: ^Reader, position: i64) -> Error {
 	if r.audio_open {media.close(&r.audio_session); r.audio_open = false}
-	coded := r.audio.codec == .AAC || r.audio.codec == .FLAC || r.audio.codec == .MP3 || r.audio.codec == .Opus
+	coded := r.audio.codec == .AAC || r.audio.codec == .FLAC || r.audio.codec == .MP3 || r.audio.codec == .Opus || r.audio.codec == .ALAC
 	if coded {
-		codec: media.Codec
-		#partial switch r.audio.codec {
-		case .AAC:
-			codec = .AAC
-		case .FLAC:
-			codec = .FLAC
-		case .MP3:
-			codec = .MP3
-		case .Opus:
-			codec = .Opus
-		}
-		config := media.default_config(codec, .Decode)
+		config := media.default_config(AUDIO_CODECS[r.audio.codec], .Decode)
 		config.sample_rate, config.channels = r.audio.sample_rate, r.audio.channels
 		config.extradata = r.audio_config
 		providers := [1]media.Provider{native.provider()}
@@ -1408,9 +1413,9 @@ reset_audio :: proc(r: ^Reader, position: i64) -> Error {
 	// One packet of pre-roll restores the AAC overlap of the target's frame,
 	// and covers a FLAC frame placed by a rounded timestamp; MP3 needs the
 	// bit reservoir (up to 511 bytes back, 11 of the smallest frames) and
-	// the frame before; PCM chunks start exactly.
+	// the frame before; ALAC frames and PCM chunks start exactly.
 	k := audio_packet_at(r, position)
-	preroll := coded ? 1 : 0
+	preroll := r.audio.codec == .AAC || r.audio.codec == .FLAC ? 1 : 0
 	if r.audio.codec == .MP3 do preroll = MP3_PREROLL
 	if r.audio.codec == .Opus {
 		// 80 ms for the decoder to converge (RFC 7845 4.6).
@@ -1418,9 +1423,6 @@ reset_audio :: proc(r: ^Reader, position: i64) -> Error {
 		preroll = 0
 	}
 	r.audio_cursor = max(k - preroll, 0)
-	r.audio_next = position
-	clear(&r.pcm)
-	r.pcm_head = 0
 	return .None
 }
 

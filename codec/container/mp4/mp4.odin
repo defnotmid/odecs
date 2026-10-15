@@ -17,6 +17,8 @@ Codec :: enum u8 {
 	FLAC,   // fLaC sample entry; dfLa metadata blocks in audio_specific_config
 	MP3,    // mp4a with object type 0x6B/0x69, or QuickTime .mp3; one frame per sample
 	AV1,    // av01 sample entry; av1C record in config; one temporal unit per sample (reading only)
+	ALAC,   // alac sample entry; 24-byte ALACSpecificConfig in audio_specific_config (reading only)
+	Opus,   // Opus sample entry; dOps converted to OpusHead in audio_specific_config (reading only)
 }
 
 // Uncompressed QuickTime audio: interleaved frames of `channels` samples.

@@ -343,6 +343,7 @@ test_adts_input_supplies_the_audio_config :: proc(t: ^testing.T) {
 	r: Reader
 	testing.expect_value(t, open_stream(&r, memory_stream(&m)), Error.None)
 	defer close(&r)
+	testing.expect_value(t, string(r.major_brand[:]), "M4A ")
 	a := &r.tracks[0]
 	testing.expect_value(t, len(a.audio_specific_config), 2)
 	testing.expect_value(t, a.audio_specific_config[0], 0x12)
@@ -405,31 +406,184 @@ test_damaged_files_are_refused_safely :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_fragmented_files_are_refused :: proc(t: ^testing.T) {
+test_fragmented_opus_and_alac_entries :: proc(t: ^testing.T) {
 	b: [dynamic]u8
 	defer delete(b)
 	ftyp := begin_box(&b, "ftyp")
-	put_type(&b, "isom")
+	put_type(&b, "M4A ")
 	put_u32(&b, 0)
 	end_box(&b, ftyp)
+
 	moov := begin_box(&b, "moov")
 	mvhd := begin_full_box(&b, "mvhd", 0, 0)
 	put_u32(&b, 0)
 	put_u32(&b, 0)
-	put_u32(&b, 1000)
+	put_u32(&b, 48000)
 	put_u32(&b, 0)
 	put_zeros(&b, 80)
 	end_box(&b, mvhd)
+
+	// Track 1: Opus with dOps (pre_skip = 312, stereo).
+	trak1 := begin_box(&b, "trak")
+	tkhd1 := begin_full_box(&b, "tkhd", 0, 3)
+	put_zeros(&b, 8)
+	put_u32(&b, 1) // track_ID = 1
+	put_zeros(&b, 68)
+	end_box(&b, tkhd1)
+	mdia1 := begin_box(&b, "mdia")
+	mdhd1 := begin_full_box(&b, "mdhd", 0, 0)
+	put_zeros(&b, 8)
+	put_u32(&b, 48000)
+	put_zeros(&b, 8)
+	end_box(&b, mdhd1)
+	hdlr1 := begin_full_box(&b, "hdlr", 0, 0)
+	put_u32(&b, 0)
+	put_type(&b, "soun")
+	put_zeros(&b, 13)
+	end_box(&b, hdlr1)
+	minf1 := begin_box(&b, "minf")
+	stbl1 := begin_box(&b, "stbl")
+	stsd1 := begin_full_box(&b, "stsd", 0, 0)
+	put_u32(&b, 1)
+	opus_entry := begin_box(&b, "Opus")
+	put_zeros(&b, 16)
+	put_u16(&b, 2)
+	put_u16(&b, 16)
+	put_zeros(&b, 4)
+	put_u32(&b, 48000 << 16)
+	dops := begin_box(&b, "dOps")
+	put_u8(&b, 0)      // Version
+	put_u8(&b, 2)      // OutputChannelCount
+	put_u16(&b, 312)   // PreSkip
+	put_u32(&b, 48000) // InputSampleRate
+	put_u16(&b, 0)     // OutputGain
+	put_u8(&b, 0)      // ChannelMappingFamily
+	end_box(&b, dops)
+	end_box(&b, opus_entry)
+	end_box(&b, stsd1)
+	stsz1 := begin_full_box(&b, "stsz", 0, 0)
+	put_u32(&b, 0)
+	put_u32(&b, 0) // empty moov sample tables
+	end_box(&b, stsz1)
+	end_box(&b, stbl1)
+	end_box(&b, minf1)
+	end_box(&b, mdia1)
+	end_box(&b, trak1)
+
+	// Track 2: ALAC (96 kHz stereo, 4096 frame length).
+	trak2 := begin_box(&b, "trak")
+	tkhd2 := begin_full_box(&b, "tkhd", 0, 3)
+	put_zeros(&b, 8)
+	put_u32(&b, 2) // track_ID = 2
+	put_zeros(&b, 68)
+	end_box(&b, tkhd2)
+	mdia2 := begin_box(&b, "mdia")
+	mdhd2 := begin_full_box(&b, "mdhd", 0, 0)
+	put_zeros(&b, 8)
+	put_u32(&b, 96000)
+	put_zeros(&b, 8)
+	end_box(&b, mdhd2)
+	hdlr2 := begin_full_box(&b, "hdlr", 0, 0)
+	put_u32(&b, 0)
+	put_type(&b, "soun")
+	put_zeros(&b, 13)
+	end_box(&b, hdlr2)
+	minf2 := begin_box(&b, "minf")
+	stbl2 := begin_box(&b, "stbl")
+	stsd2 := begin_full_box(&b, "stsd", 0, 0)
+	put_u32(&b, 1)
+	alac_entry := begin_box(&b, "alac")
+	put_zeros(&b, 16)
+	put_u16(&b, 2)
+	put_u16(&b, 16)
+	put_zeros(&b, 4)
+	put_u32(&b, 30464 << 16) // wrapped 16-bit rate, overridden by ALACSpecificConfig
+	alac_box := begin_full_box(&b, "alac", 0, 0)
+	put_u32(&b, 4096) // frameLength
+	put_u8(&b, 0)     // compatibleVersion
+	put_u8(&b, 24)    // bitDepth
+	put_u8(&b, 40)    // pb
+	put_u8(&b, 10)    // mb
+	put_u8(&b, 14)    // kb
+	put_u8(&b, 2)     // numChannels
+	put_u16(&b, 255)  // maxRun
+	put_u32(&b, 0)    // maxFrameBytes
+	put_u32(&b, 0)    // avgBitRate
+	put_u32(&b, 96000) // sampleRate
+	end_box(&b, alac_box)
+	end_box(&b, alac_entry)
+	end_box(&b, stsd2)
+	stsz2 := begin_full_box(&b, "stsz", 0, 0)
+	put_u32(&b, 0)
+	put_u32(&b, 0)
+	end_box(&b, stsz2)
+	end_box(&b, stbl2)
+	end_box(&b, minf2)
+	end_box(&b, mdia2)
+	end_box(&b, trak2)
+
 	mvex := begin_box(&b, "mvex")
+	trex1 := begin_full_box(&b, "trex", 0, 0)
+	put_u32(&b, 1)   // track_ID
+	put_u32(&b, 1)   // default_sample_description_index
+	put_u32(&b, 960) // default_sample_duration
+	put_u32(&b, 3)   // default_sample_size
+	put_u32(&b, 0)   // default_sample_flags
+	end_box(&b, trex1)
 	end_box(&b, mvex)
 	end_box(&b, moov)
-	moof := begin_box(&b, "moof")
-	end_box(&b, moof)
+
+	// Fragment 1: Track 1 with 2 samples of 3 bytes each in mdat.
+	moof1_at := len(b)
+	moof1 := begin_box(&b, "moof")
+	traf1 := begin_box(&b, "traf")
+	tfhd1 := begin_full_box(&b, "tfhd", 0, 0x020000) // default-base-is-moof
+	put_u32(&b, 1) // track_ID = 1
+	end_box(&b, tfhd1)
+	tfdt1 := begin_full_box(&b, "tfdt", 0, 0)
+	put_u32(&b, 0) // baseMediaDecodeTime = 0
+	end_box(&b, tfdt1)
+	trun1 := begin_full_box(&b, "trun", 0, 0x000001) // data-offset-present, sizes/durations from trex
+	put_u32(&b, 2) // sample_count = 2
+	data_off_patch := len(b)
+	put_u32(&b, 0)
+	end_box(&b, trun1)
+	end_box(&b, traf1)
+	end_box(&b, moof1)
+	mdat1 := begin_box(&b, "mdat")
+	patch_u32(&b, data_off_patch, u32(len(b) - moof1_at))
+	append(&b, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF)
+	end_box(&b, mdat1)
+
 	m := Memory_Stream {
 		data = b,
 	}
 	r: Reader
-	testing.expect_value(t, open_stream(&r, memory_stream(&m)), Error.Unsupported)
+	testing.expect_value(t, open_stream(&r, memory_stream(&m)), Error.None)
+	defer close(&r)
+	testing.expect_value(t, len(r.tracks), 2)
+
+	t1 := &r.tracks[0]
+	testing.expect_value(t, t1.codec, Codec.Opus)
+	testing.expect_value(t, t1.sample_rate, 48000)
+	testing.expect_value(t, t1.channels, 2)
+	testing.expect_value(t, string(t1.audio_specific_config[:8]), "OpusHead")
+	testing.expect_value(t, t1.edit.media_time, i64(312))
+	testing.expect_value(t, len(t1.samples), 2)
+	testing.expect_value(t, t1.samples[0].pts, i64(-312))
+	testing.expect_value(t, t1.samples[1].pts, i64(960 - 312))
+	p0, e0 := read_sample(&r, 0, 0)
+	testing.expect_value(t, e0, Error.None)
+	testing.expect_value(t, p0.data[0], 0xAA)
+	p1, e1 := read_sample(&r, 0, 1)
+	testing.expect_value(t, e1, Error.None)
+	testing.expect_value(t, p1.data[0], 0xDD)
+
+	t2 := &r.tracks[1]
+	testing.expect_value(t, t2.codec, Codec.ALAC)
+	testing.expect_value(t, t2.sample_rate, 96000)
+	testing.expect_value(t, t2.channels, 2)
+	testing.expect_value(t, len(t2.audio_specific_config), 24)
 	b = m.data
 }
 

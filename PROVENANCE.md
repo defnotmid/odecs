@@ -2,10 +2,10 @@
 
 odecs is MIT licensed. This file records what each package was written from,
 and what it was ported from, with each source's license. Everything ported
-is under a license compatible with MIT (MIT, BSD-2-Clause, BSD-3-Clause, CC0,
-public domain), and the notices those licenses require are kept beside the
-code. No code from copyleft projects (FFmpeg, x264, x265) is in odecs; they
-are used only as binaries to make fixtures and check output.
+is under a license compatible with MIT (MIT, BSD-2-Clause, BSD-3-Clause,
+Apache-2.0, CC0, public domain), and the notices those licenses require are
+kept beside the code. No code from copyleft projects (FFmpeg, x264, x265) is
+in odecs; they are used only as binaries to make fixtures and check output.
 
 The reference sources are pinned in
 [THIRD_PARTY_REFERENCES.md](THIRD_PARTY_REFERENCES.md) and fetched by
@@ -21,6 +21,7 @@ The reference sources are pinned in
 | `codec/h265/decoder`, `codec/h265` | OxideAV oxideav-h265 (Rust), cross-reference | MIT | `codec/h265/LICENSE-oxideav-h265.txt` |
 | `codec/h265/encoder`, `codec/h265` | Kvazaar | BSD-3-Clause | `codec/h265/LICENSE-kvazaar.txt` |
 | `codec/h264/decoder` | OpenH264 (CABAC tables) | BSD-2-Clause | `codec/h264/decoder/LICENSE-openh264.txt` |
+| `codec/alac` | Apple Lossless Audio Codec | Apache-2.0 | `codec/alac/LICENSE-alac.txt` |
 | `codec/mp3` | minimp3; PDMP3 | CC0 1.0; public domain (Unlicense) | none required |
 
 ### Opus
@@ -54,6 +55,12 @@ VP8 (RFC 6386), and the details the documents leave to the reference, were porte
 - `demux/anim_decode.c`.
 
 `tools/tables` copies the tables.
+
+### ALAC
+
+`codec/alac` is a restructured Odin port of Apple's open-source ALAC decoder
+(`ALACDecoder.cpp`, `ag_dec.c`, `dp_dec.c`, `matrix_dec.c`, `ALACBitUtilities.c`,
+and `ALACAudioTypes.h`).
 
 ### MP3
 

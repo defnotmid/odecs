@@ -20,13 +20,14 @@ Audio:
 - `codec/aac/{encoder,decoder}`: AAC-LC, 1 to 8 channels ([README](codec/aac/README.md)).
 - `codec/opus`: Opus decoding (SILK, hybrid, CELT), with loss concealment, FEC, DTX and surround ([README](codec/opus/README.md)).
 - `codec/flac`: FLAC decoding, 4 to 32 bits ([README](codec/flac/README.md)).
+- `codec/alac`: Apple Lossless (ALAC) decoding, 16/20/24/32-bit, 1 to 8 channels ([README](codec/alac/README.md)).
 - `codec/mp3`: MPEG-1/2/2.5 Layer III decoding ([README](codec/mp3/README.md)).
 
 Images:
 - `codec/webp`: WebP lossy, lossless, alpha and animation to RGBA8 ([README](codec/webp/README.md)).
 
 Containers:
-- `codec/container/mp4`: MP4/MOV reading and writing ([README](codec/container/mp4/README.md)).
+- `codec/container/mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](codec/container/mp4/README.md)).
 - `codec/container/webm`: WebM/Matroska reading, and VP9 WebM writing with alpha ([README](codec/container/webm/README.md)).
 - `codec/container/ogg`: Ogg (for Ogg Opus) ([README](codec/container/ogg/README.md)).
 - `codec/container/wav`: WAV, RF64 and RIFX ([README](codec/container/wav/README.md)).
@@ -35,7 +36,7 @@ Putting them together:
 - `codec/media`: one encode/decode API over the native codecs and the hardware ones, choosing what the machine supports ([README](codec/media/README.md)).
 - `codec/gpu`: Vulkan Video sessions for H.264, H.265 and AV1 ([README](codec/gpu/README.md)).
 - `codec/videotoolbox`: H.264 and HEVC hardware decoding and encoding on macOS ([README](codec/videotoolbox/README.md)).
-- `codec/movie`: RGBA or planar frames and `f32` PCM from and to movie files, with frame-accurate seeking; writes MP4 (H.264, H.265, HEVC with alpha) and WebM (VP9, with alpha) ([README](codec/movie/README.md)).
+- `codec/movie`: RGBA or planar frames and `f32` PCM from and to movie and audio files, with frame-accurate seeking; writes MP4/M4A (H.264, H.265, HEVC with alpha, AAC-LC) and WebM (VP9, with alpha) ([README](codec/movie/README.md)).
 - `viewer`: an SDL3 player for all of the above.
 
 Parallel work runs on the caller's `common.Work_Pool`; the codecs never create
@@ -87,8 +88,8 @@ Vulkan Video.
 ## Sources and licenses
 
 Some packages are ported from permissively licensed projects (libopus,
-libwebp, minimp3, PDMP3, gen2brain/h265, oxideav-h265, Kvazaar, OpenH264). Their
-notices are kept beside the code (`codec/*/LICENSE-*.txt`) and
+libwebp, Apple ALAC, minimp3, PDMP3, gen2brain/h265, oxideav-h265, Kvazaar,
+OpenH264). Their notices are kept beside the code (`codec/*/LICENSE-*.txt`) and
 [PROVENANCE.md](PROVENANCE.md) records what came from where. The reference
 sources themselves are never committed: `bash tools/fetch_third_party.sh`
 fetches them at the commits pinned in

@@ -60,13 +60,18 @@ default_writer_config :: proc(width, height, fps_num, fps_den: int) -> Writer_Co
 	return {width = width, height = height, fps_num = fps_num, fps_den = fps_den, qp = 23, faststart = true}
 }
 
-// RGBA frames and PCM in, an MP4 file out. Video is BT.709 limited-range
+default_audio_writer_config :: proc(sample_rate, channels: int) -> Writer_Config {
+	return {sample_rate = sample_rate, channels = channels, faststart = true}
+}
+
+// RGBA frames and PCM in, an MP4 or M4A file out. Video is BT.709 limited-range
 // 4:2:0 with the colour description in both the bitstream and `colr`.
 Writer :: struct {
 	config:         Writer_Config,
 	mux:            mp4.Writer,
 	webm:           webm.Writer, // VP9 output
 	video, audio:   media.Session,
+	has_video:      bool,
 	has_audio:      bool,
 	video_track:    int,
 	audio_track:    int,
@@ -159,60 +164,81 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, config: Writer_Config) -> E
 create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: io.Stream) -> Error {
 	if w == nil do return .Invalid_Config
 	w^ = {
-		config = config,
+		config      = config,
+		video_track = -1,
+		audio_track = -1,
 	}
 	c := &w.config
-	if c.qp == 0 do c.qp = 23
-	if c.width < 16 || c.height < 16 || c.width > 8192 || c.height > 8192 || (c.width | c.height) & 1 != 0 do return .Invalid_Config
-	if c.codec != .H264 && c.codec != .H265 && c.codec != .VP9 do return .Unsupported // ProRes and AV1 are decoded, not written
-	if c.fps_num <= 0 || c.fps_den <= 0 || c.fps_num > 1 << 20 || c.fps_den > 1 << 20 || c.qp < 1 || c.qp > 51 || c.gop < 0 do return .Invalid_Config
-	if c.transparency != .None {
-		if c.codec == .H264 do return .Unsupported
-		if c.codec == .VP9 && c.transparency != .Straight do return .Invalid_Config // VP9 alpha is straight
-		if c.alpha == .Opaque do return .Invalid_Config
-	}
-	if c.gop == 0 do c.gop = max(1, (c.fps_num + c.fps_den / 2) / c.fps_den)
+	w.has_video = c.width != 0 || c.height != 0
 	w.has_audio = c.sample_rate != 0
-	if w.has_audio && c.codec == .VP9 do return .Unsupported // WebM audio would need an Opus encoder
-	if w.has_audio {
-		if aac.sample_rate_index(c.sample_rate) < 0 do return .Unsupported
-		if c.channels < 1 || c.channels > 8 || c.audio_bit_rate < 0 do return .Invalid_Config
-	}
-	// Video ticks: the frame rate's numerator doubled up to at least 10 kHz,
-	// so every frame lasts an exact integer number of ticks.
-	timescale := c.fps_num
-	for timescale < 10000 do timescale *= 2
-	w.timescale = u32(timescale)
-	w.frame_duration = i64(c.fps_den * (timescale / c.fps_num))
-
+	if !w.has_video && !w.has_audio do return .Invalid_Config
 	providers := [3]media.Provider{native.provider(c.native_options), videotoolbox.provider(), vulkan.provider(c.gpu_context)}
-	video := media.default_config(c.codec == .H264 ? .H264 : (c.codec == .H265 ? .H265 : .VP9), .Encode)
-	video.preference = c.preference
-	video.width, video.height = c.width, c.height
-	video.qp = i32(c.qp)
-	video.gop_size = c.gop
-	video.color = BT709_LIMITED
-	video.frame_rate_num, video.frame_rate_den = c.fps_num, c.fps_den
-	video.alpha = c.transparency != .None
-	video.alpha_premultiplied = c.transparency == .Premultiplied
-	if e := media.open(&w.video, video, providers[:]); e != .None {
-		w.error_detail = "video encoder unavailable for this configuration"
-		return media_error(e)
+	if w.has_video {
+		if c.qp == 0 do c.qp = 23
+		if c.width < 16 || c.height < 16 || c.width > 8192 || c.height > 8192 || (c.width | c.height) & 1 != 0 do return .Invalid_Config
+		if c.codec != .H264 && c.codec != .H265 && c.codec != .VP9 do return .Unsupported // ProRes and AV1 are decoded, not written
+		if c.fps_num <= 0 || c.fps_den <= 0 || c.fps_num > 1 << 20 || c.fps_den > 1 << 20 || c.qp < 1 || c.qp > 51 || c.gop < 0 do return .Invalid_Config
+		if c.transparency != .None {
+			if c.codec == .H264 do return .Unsupported
+			if c.codec == .VP9 && c.transparency != .Straight do return .Invalid_Config // VP9 alpha is straight
+			if c.alpha == .Opaque do return .Invalid_Config
+		}
+		if c.gop == 0 do c.gop = max(1, (c.fps_num + c.fps_den / 2) / c.fps_den)
+		if w.has_audio && c.codec == .VP9 do return .Unsupported // WebM audio would need an Opus encoder
+		// Video ticks: the frame rate's numerator doubled up to at least 10 kHz,
+		// so every frame lasts an exact integer number of ticks.
+		timescale := c.fps_num
+		for timescale < 10000 do timescale *= 2
+		w.timescale = u32(timescale)
+		w.frame_duration = i64(c.fps_den * (timescale / c.fps_num))
+
+		video := media.default_config(c.codec == .H264 ? .H264 : (c.codec == .H265 ? .H265 : .VP9), .Encode)
+		video.preference = c.preference
+		video.width, video.height = c.width, c.height
+		video.qp = i32(c.qp)
+		video.gop_size = c.gop
+		video.color = BT709_LIMITED
+		video.frame_rate_num, video.frame_rate_den = c.fps_num, c.fps_den
+		video.alpha = c.transparency != .None
+		video.alpha_premultiplied = c.transparency == .Premultiplied
+		if e := media.open(&w.video, video, providers[:]); e != .None {
+			w.error_detail = "video encoder unavailable for this configuration"
+			return media_error(e)
+		}
+		if c.codec == .VP9 do return create_webm(w, path, stream)
+	} else {
+		if c.transparency != .None || c.codec == .VP9 do return .Invalid_Config
 	}
-	if c.codec == .VP9 do return create_webm(w, path, stream)
+	if w.has_audio {
+		if aac.sample_rate_index(c.sample_rate) < 0 {
+			media.close(&w.video)
+			return .Unsupported
+		}
+		if c.channels < 1 || c.channels > 8 || c.audio_bit_rate < 0 {
+			media.close(&w.video)
+			return .Invalid_Config
+		}
+	}
 	tracks: [2]mp4.Track_Config
-	tracks[0] = {
-		codec            = c.codec == .H264 ? .H264 : .H265,
-		timescale        = w.timescale,
-		width            = c.width,
-		height           = c.height,
-		color            = {1, 1, 1, false},
-		default_duration = u32(w.frame_duration),
+	track_count := 0
+	hevc_sei: []u8
+	defer delete(hevc_sei)
+	if w.has_video {
+		// hvcC declares the alpha channel information beside the parameter
+		// sets, as Apple's files do; the encoder repeats it at each keyframe.
+		if c.transparency != .None do hevc_sei = hevce.alpha_info_sei_nal(c.transparency == .Premultiplied, 8)
+		w.video_track = track_count
+		tracks[track_count] = {
+			codec            = c.codec == .H264 ? .H264 : .H265,
+			timescale        = w.timescale,
+			width            = c.width,
+			height           = c.height,
+			color            = {1, 1, 1, false},
+			hevc_sei         = hevc_sei,
+			default_duration = u32(w.frame_duration),
+		}
+		track_count += 1
 	}
-	// hvcC declares the alpha channel information beside the parameter
-	// sets, as Apple's files do; the encoder repeats it at each keyframe.
-	if c.transparency != .None do tracks[0].hevc_sei = hevce.alpha_info_sei_nal(c.transparency == .Premultiplied, 8)
-	defer delete(tracks[0].hevc_sei)
 	asc: [dynamic]u8
 	defer delete(asc)
 	if w.has_audio {
@@ -229,7 +255,8 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 			media.close(&w.audio)
 			return .Unsupported
 		}
-		tracks[1] = {
+		w.audio_track = track_count
+		tracks[track_count] = {
 			codec                 = .AAC,
 			timescale             = u32(c.sample_rate),
 			sample_rate           = c.sample_rate,
@@ -237,20 +264,24 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 			audio_specific_config = asc[:],
 			default_duration      = 1024,
 		}
+		track_count += 1
 	}
 	options := mp4.Options {
 		faststart = c.faststart,
 	}
-	e := stream.procedure != nil ? mp4.create_stream(&w.mux, stream, tracks[:w.has_audio ? 2 : 1], options) : mp4.create(&w.mux, path, tracks[:w.has_audio ? 2 : 1], options)
+	e := stream.procedure != nil ? mp4.create_stream(&w.mux, stream, tracks[:track_count], options) : mp4.create(&w.mux, path, tracks[:track_count], options)
 	if e != .None {
 		media.close(&w.video)
 		media.close(&w.audio)
 		w.error_detail = "could not create the output file"
 		return mp4_error(e)
 	}
-	w.video_track, w.audio_track = 0, 1
 	if w.has_audio do w.pcm = make([]f32, 1024 * c.channels)
-	open_frames(w)
+	if w.has_video {
+		open_frames(w)
+	} else {
+		w.open = true
+	}
 	return .None
 }
 
@@ -289,6 +320,7 @@ open_frames :: proc(w: ^Writer) {
 // Encodes one frame of tightly or loosely packed RGBA8 (stride in bytes).
 write_frame :: proc(w: ^Writer, rgba: []u8, stride: int) -> Error {
 	if w == nil || !w.open do return .Closed
+	if !w.has_video do return .Invalid_Config
 	if w.err != .None do return w.err
 	c := &w.config
 	if stride < c.width * 4 || len(rgba) < (c.height - 1) * stride + c.width * 4 do return .Invalid_Input
@@ -326,6 +358,7 @@ write_nv12 :: proc(w: ^Writer, planes: [2][]u8, strides: [2]int, alpha: []u8 = n
 @(private)
 write_converted :: proc(w: ^Writer, planes: [3][]u8, strides: [3]int, interleaved: bool, alpha: []u8, alpha_stride: int) -> Error {
 	if w == nil || !w.open do return .Closed
+	if !w.has_video do return .Invalid_Config
 	if w.err != .None do return w.err
 	if (w.config.transparency != .None) != (len(alpha) > 0) do return .Invalid_Input
 	frame := media.Video_Frame {
@@ -492,17 +525,19 @@ finish :: proc(w: ^Writer) -> Error {
 		}
 		if e := mp4.set_track_end(&w.mux, w.audio_track, w.pcm_total); e != .None do return mp4_error(e)
 	}
-	if e := media.drain(&w.video, {packet = on_video_packet, user = w}); e != .None {
-		w.error_detail = w.video.error_detail
-		w.err = media_error(e)
-		return w.err
-	}
-	close_video_sample(w)
-	if w.err != .None do return w.err
-	if w.samples != w.frames {
-		w.error_detail = "encoder access units do not match submitted frames"
-		w.err = .Codec_Error
-		return w.err
+	if w.has_video {
+		if e := media.drain(&w.video, {packet = on_video_packet, user = w}); e != .None {
+			w.error_detail = w.video.error_detail
+			w.err = media_error(e)
+			return w.err
+		}
+		close_video_sample(w)
+		if w.err != .None do return w.err
+		if w.samples != w.frames {
+			w.error_detail = "encoder access units do not match submitted frames"
+			w.err = .Codec_Error
+			return w.err
+		}
 	}
 	flush_audio(w, 0, -1)
 	if w.err != .None do return w.err

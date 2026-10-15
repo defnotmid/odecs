@@ -45,12 +45,17 @@ Track :: struct {
 	// Audio.
 	sample_rate, channels: int,
 	pcm:                   Pcm_Format, // codec PCM
-	audio_specific_config: []u8, // AAC AudioSpecificConfig, or FLAC metadata blocks (dfLa)
+	audio_specific_config: []u8, // AAC AudioSpecificConfig, FLAC dfLa blocks, ALACSpecificConfig or OpusHead
 	// Decode-order samples and presentation order (indices sorted by pts).
-	samples:               #soa[]Sample,
+	samples:               #soa[dynamic]Sample,
 	presentation:          []i32,
 	no_reordering:         bool, // every pts equals its dts after the edit shift
 	cursor:                int, // next sample for next_packet
+	// Fragmented MP4 (mvex/trex defaults and progressive decode time).
+	default_sample_duration: u32,
+	default_sample_size:     u32,
+	default_sample_flags:    u32,
+	next_dts:                i64,
 }
 
 Reader :: struct {
@@ -156,7 +161,33 @@ scan_top_level :: proc(r: ^Reader) -> Error {
 	}
 	if !found_moov do return .Invalid_Data
 	parse_moov(r, r.moov) or_return
-	if fragmented do return .Unsupported
+	if fragmented {
+		moof_buf: [dynamic]u8
+		defer delete(moof_buf)
+		pos = 0
+		for pos + 8 <= r.size {
+			header: [16]u8
+			read_all_at(r.stream, header[:8], pos) or_return
+			size := i64(get_u32(header[:]))
+			type := get_u32(header[4:])
+			head: i64 = 8
+			if size == 1 {
+				read_all_at(r.stream, header[8:16], pos + 8) or_return
+				size = i64(get_u64(header[8:]))
+				head = 16
+			} else if size == 0 {
+				size = r.size - pos
+			}
+			if type == fourcc("moof") {
+				if size - head > 1 << 28 do return .Unsupported
+				if resize(&moof_buf, int(size - head)) != nil do return .Out_Of_Memory
+				read_all_at(r.stream, moof_buf[:], pos + head) or_return
+				parse_moof(r, moof_buf[:], pos) or_return
+			}
+			pos += size
+		}
+	}
+	for &t in r.tracks do finalize_track(&t) or_return
 	return .None
 }
 
@@ -217,27 +248,165 @@ parse_moov :: proc(r: ^Reader, moov: []u8) -> Error {
 	}
 	if r.movie_timescale == 0 do return .Invalid_Data
 	pos := 0
-	has_mvex := false
 	for {
 		box, ok, err := next_box(moov, &pos)
 		if err != .None do return err
 		if !ok do break
-		switch box.type {
-		case fourcc("trak"):
+		if box.type == fourcc("trak") {
 			t: Track
 			if err = parse_trak(r, &t, box.body); err != .None {
 				destroy_track(&t)
 				return err
 			}
 			append(&r.tracks, t)
-		case fourcc("mvex"):
-			has_mvex = true
 		}
 	}
-	if has_mvex {
-		for t in r.tracks do if len(t.samples) > 0 do return .Unsupported
-		return .Unsupported
+	if mvex, has_mvex := find_box(moov, "mvex") or_return; has_mvex {
+		parse_mvex(r, mvex) or_return
 	}
+	return .None
+}
+
+@(private)
+parse_mvex :: proc(r: ^Reader, mvex: []u8) -> Error {
+	pos := 0
+	for {
+		box, ok, err := next_box(mvex, &pos)
+		if err != .None do return err
+		if !ok do break
+		if box.type != fourcc("trex") do continue
+		if len(box.body) < 24 do return .Invalid_Data
+		track_id := get_u32(box.body[4:])
+		for &t in r.tracks do if t.id == track_id {
+			t.default_sample_duration = get_u32(box.body[12:])
+			t.default_sample_size = get_u32(box.body[16:])
+			t.default_sample_flags = get_u32(box.body[20:])
+			break
+		}
+	}
+	return .None
+}
+
+@(private)
+parse_moof :: proc(r: ^Reader, moof: []u8, moof_offset: i64) -> Error {
+	pos := 0
+	for {
+		box, ok, err := next_box(moof, &pos)
+		if err != .None do return err
+		if !ok do break
+		if box.type == fourcc("traf") do parse_traf(r, box.body, moof_offset) or_return
+	}
+	return .None
+}
+
+@(private)
+parse_traf :: proc(r: ^Reader, traf: []u8, moof_offset: i64) -> Error {
+	tfhd, has_tfhd := find_box(traf, "tfhd") or_return
+	if !has_tfhd || len(tfhd) < 8 do return .Invalid_Data
+	tfhd_flags := get_u24(tfhd[1:])
+	track_id := get_u32(tfhd[4:])
+	t: ^Track
+	for &track in r.tracks do if track.id == track_id {
+		t = &track
+		break
+	}
+	if t == nil do return .None
+	base_data_offset := moof_offset
+	default_duration := t.default_sample_duration
+	default_size := t.default_sample_size
+	default_flags := t.default_sample_flags
+	p := 8
+	if tfhd_flags & 0x000001 != 0 {
+		if p + 8 > len(tfhd) do return .Invalid_Data
+		base_data_offset = i64(get_u64(tfhd[p:]))
+		p += 8
+	}
+	if tfhd_flags & 0x000002 != 0 {
+		if p + 4 > len(tfhd) do return .Invalid_Data
+		p += 4
+	}
+	if tfhd_flags & 0x000008 != 0 {
+		if p + 4 > len(tfhd) do return .Invalid_Data
+		default_duration = get_u32(tfhd[p:])
+		p += 4
+	}
+	if tfhd_flags & 0x000010 != 0 {
+		if p + 4 > len(tfhd) do return .Invalid_Data
+		default_size = get_u32(tfhd[p:])
+		p += 4
+	}
+	if tfhd_flags & 0x000020 != 0 {
+		if p + 4 > len(tfhd) do return .Invalid_Data
+		default_flags = get_u32(tfhd[p:])
+		p += 4
+	}
+	dts := t.next_dts
+	if tfdt, has_tfdt := find_box(traf, "tfdt") or_return; has_tfdt {
+		if len(tfdt) < 8 do return .Invalid_Data
+		if tfdt[0] == 1 {
+			if len(tfdt) < 12 do return .Invalid_Data
+			dts = i64(get_u64(tfdt[4:]))
+		} else {
+			dts = i64(get_u32(tfdt[4:]))
+		}
+	}
+	data_offset := base_data_offset
+	pos := 0
+	for {
+		box, ok, err := next_box(traf, &pos)
+		if err != .None do return err
+		if !ok do break
+		if box.type != fourcc("trun") do continue
+		trun := box.body
+		if len(trun) < 8 do return .Invalid_Data
+		trun_flags := get_u24(trun[1:])
+		sample_count := int(get_u32(trun[4:]))
+		tp := 8
+		if trun_flags & 0x000001 != 0 {
+			if tp + 4 > len(trun) do return .Invalid_Data
+			data_offset = base_data_offset + i64(i32(get_u32(trun[tp:])))
+			tp += 4
+		}
+		first_sample_flags := default_flags
+		has_first_flags := (trun_flags & 0x000004) != 0
+		if has_first_flags {
+			if tp + 4 > len(trun) do return .Invalid_Data
+			first_sample_flags = get_u32(trun[tp:])
+			tp += 4
+		}
+		has_duration := (trun_flags & 0x000100) != 0
+		has_size := (trun_flags & 0x000200) != 0
+		has_flags := (trun_flags & 0x000400) != 0
+		has_cto := (trun_flags & 0x000800) != 0
+		row_bytes := (has_duration ? 4 : 0) + (has_size ? 4 : 0) + (has_flags ? 4 : 0) + (has_cto ? 4 : 0)
+		if sample_count < 0 || (row_bytes > 0 && sample_count > (len(trun) - tp) / row_bytes) do return .Invalid_Data
+		if len(t.samples) + sample_count > MAX_SAMPLES do return .Unsupported
+		base := len(t.samples)
+		if resize(&t.samples, base + sample_count) != nil do return .Out_Of_Memory
+		for i in 0 ..< sample_count {
+			dur := default_duration
+			size := default_size
+			flags := i == 0 && has_first_flags ? first_sample_flags : default_flags
+			cto: i64
+			if has_duration {dur = get_u32(trun[tp:]); tp += 4}
+			if has_size {size = get_u32(trun[tp:]); tp += 4}
+			if has_flags {flags = get_u32(trun[tp:]); tp += 4}
+			if has_cto {cto = i64(i32(get_u32(trun[tp:]))); tp += 4}
+			if data_offset < 0 || i64(size) > r.size - data_offset do return .Invalid_Data
+			sync := (flags & 0x00010000) == 0 && ((flags >> 24) & 3) != 1
+			t.samples[base + i] = {
+				offset   = data_offset,
+				dts      = dts,
+				pts      = dts + cto,
+				size     = size,
+				duration = dur,
+				sync     = sync,
+			}
+			data_offset += i64(size)
+			dts += i64(dur)
+		}
+	}
+	t.next_dts = dts
 	return .None
 }
 
@@ -351,6 +520,43 @@ rescale_i64 :: proc(v: i64, from, to: u32) -> i64 {
 }
 
 @(private)
+clone_bytes :: proc(src: []u8) -> ([]u8, Error) {
+	dst, err := make([]u8, len(src))
+	if err != nil do return nil, .Out_Of_Memory
+	copy(dst, src)
+	return dst, .None
+}
+
+@(private)
+find_audio_box :: proc(children: []u8, name: string) -> (body: []u8, found: bool, err: Error) {
+	body, found = find_box(children, name) or_return
+	if !found {
+		if wave, has_wave := find_box(children, "wave") or_return; has_wave do body, found = find_box(wave, name) or_return
+	}
+	return body, found, .None
+}
+
+// Parses the common AudioSampleEntry / QuickTime sound description header
+// (versions 0, 1, 2 and ISO AudioSampleEntryV1) and returns its child boxes.
+@(private)
+audio_entry_children :: proc(t: ^Track, body: []u8, iso_v1: bool) -> (children: []u8, version: u16, err: Error) {
+	if len(body) < 28 do return nil, 0, .Invalid_Data
+	version = iso_v1 ? 0 : get_u16(body[8:])
+	t.channels = int(get_u16(body[16:]))
+	t.sample_rate = int(get_u32(body[24:]) >> 16)
+	children_at := 28
+	if version == 1 do children_at = 44
+	if version == 2 {
+		children_at = 64
+		if len(body) < 64 do return nil, 0, .Invalid_Data
+		t.sample_rate = int(transmute(f64)get_u64(body[32:]))
+		t.channels = int(get_u32(body[40:]))
+	}
+	if len(body) < children_at do return nil, 0, .Invalid_Data
+	return body[children_at:], version, .None
+}
+
+@(private)
 parse_stsd :: proc(t: ^Track, stbl: []u8) -> Error {
 	stsd, ok := find_box(stbl, "stsd") or_return
 	if !ok || len(stsd) < 8 do return .Invalid_Data
@@ -386,10 +592,7 @@ parse_stsd :: proc(t: ^Track, stbl: []u8) -> Error {
 			t.nal_length_size = int(record[21] & 3) + 1
 		}
 		if t.nal_length_size == 3 do return .Invalid_Data
-		config, err := make([]u8, len(record))
-		if err != nil do return .Out_Of_Memory
-		copy(config, record)
-		t.config = config
+		t.config = clone_bytes(record) or_return
 		t.codec = h264 ? .H264 : .H265
 		parse_colr(t, children) or_return
 	case fourcc("av01"):
@@ -401,19 +604,14 @@ parse_stsd :: proc(t: ^Track, stbl: []u8) -> Error {
 		children := body[78:]
 		record, found := find_box(children, "av1C") or_return
 		if !found || len(record) < 4 || record[0] != 0x81 do return .Invalid_Data
-		config, err := make([]u8, len(record))
-		if err != nil do return .Out_Of_Memory
-		copy(config, record)
-		t.config = config
+		t.config = clone_bytes(record) or_return
 		t.codec = .AV1
 		parse_colr(t, children) or_return
 	case fourcc("raw "), fourcc("twos"), fourcc("sowt"), fourcc("in24"), fourcc("in32"), fourcc("fl32"), fourcc("fl64"), fourcc("lpcm"):
 		parse_pcm_entry(t, entry.type, body, iso_v1) or_return
 	case fourcc(".mp3"):
 		// QuickTime's MP3 sound description: version 0/1 fields only.
-		if len(body) < 28 do return .Invalid_Data
-		t.channels = int(get_u16(body[16:]))
-		t.sample_rate = int(get_u32(body[24:]) >> 16)
+		_, _ = audio_entry_children(t, body, iso_v1) or_return
 		t.codec = .MP3
 	case fourcc("fLaC"):
 		// FLAC in ISO BMFF: an AudioSampleEntry whose dfLa (a full box)
@@ -427,34 +625,50 @@ parse_stsd :: proc(t: ^Track, stbl: []u8) -> Error {
 		info := blocks[4:]
 		t.sample_rate = int(get_u32(info[10:]) >> 12)
 		t.channels = int(info[12] >> 1 & 7) + 1
-		config, err := make([]u8, len(blocks))
-		if err != nil do return .Out_Of_Memory
-		copy(config, blocks)
-		t.audio_specific_config = config
+		t.audio_specific_config = clone_bytes(blocks) or_return
 		t.codec = .FLAC
-	case fourcc("mp4a"):
+	case fourcc("alac"):
+		// Apple Lossless in ISO BMFF: an AudioSampleEntry whose child `alac`
+		// FullBox holds the 24-byte ALACSpecificConfig (and optional layout).
+		children, _ := audio_entry_children(t, body, iso_v1) or_return
+		alac_box, found := find_audio_box(children, "alac") or_return
+		if !found || len(alac_box) < 4 + 24 || alac_box[0] != 0 do return .Invalid_Data
+		cookie := alac_box[4:28]
+		t.channels = int(cookie[9])
+		t.sample_rate = int(get_u32(cookie[20:]))
+		if t.channels < 1 || t.channels > 8 || t.sample_rate <= 0 do return .Invalid_Data
+		t.audio_specific_config = clone_bytes(cookie) or_return
+		t.codec = .ALAC
+	case fourcc("Opus"):
+		// Opus in ISO BMFF: an AudioSampleEntry whose `dOps` box (a plain Box)
+		// is converted into a standard OpusHead for codec/opus.
 		if len(body) < 28 do return .Invalid_Data
-		version := get_u16(body[8:])
-		t.channels = int(get_u16(body[16:]))
-		t.sample_rate = int(get_u32(body[24:]) >> 16)
-		children_at := 28
-		// QuickTime sound description versions 1 and 2 (in a version-0 stsd)
-		// extend the entry; ISO AudioSampleEntryV1 does not.
-		if version == 1 && !iso_v1 do children_at = 44
-		if version == 2 && !iso_v1 {
-			children_at = 64
-			if len(body) < 64 do return .Invalid_Data
-			rate := transmute(f64)get_u64(body[32:])
-			t.sample_rate = int(rate)
-			t.channels = int(get_u32(body[40:]))
+		dops, found := find_box(body[28:], "dOps") or_return
+		if !found || len(dops) < 11 || dops[0] != 0 || dops[1] == 0 do return .Invalid_Data
+		channels := int(dops[1])
+		family := dops[10]
+		mapping_len := family != 0 ? 2 + channels : 0
+		if len(dops) < 11 + mapping_len do return .Invalid_Data
+		head, err := make([]u8, 19 + mapping_len)
+		if err != nil do return .Out_Of_Memory
+		copy(head[:8], "OpusHead")
+		head[8], head[9] = 1, u8(channels)
+		head[10], head[11] = dops[3], dops[2]
+		head[12], head[13], head[14], head[15] = dops[7], dops[6], dops[5], dops[4]
+		head[16], head[17] = dops[9], dops[8]
+		head[18] = family
+		if mapping_len > 0 do copy(head[19:], dops[11:11 + mapping_len])
+		t.audio_specific_config = head
+		t.channels = channels
+		t.sample_rate = 48000
+		pre_skip := get_u16(dops[2:])
+		if t.edit.media_time == 0 && t.edit.delay == 0 && pre_skip > 0 {
+			t.edit.media_time = rescale_i64(i64(pre_skip), 48000, t.timescale)
 		}
-		if len(body) < children_at do return .Invalid_Data
-		children := body[children_at:]
-		esds, found := find_box(children, "esds") or_return
-		if !found {
-			wave, has_wave := find_box(children, "wave") or_return
-			if has_wave do esds, found = find_box(wave, "esds") or_return
-		}
+		t.codec = .Opus
+	case fourcc("mp4a"):
+		children, _ := audio_entry_children(t, body, iso_v1) or_return
+		esds, found := find_audio_box(children, "esds") or_return
 		if !found do return .Unsupported
 		asc, object := parse_esds(esds) or_return
 		if object == 0x69 || object == 0x6B {
@@ -463,10 +677,7 @@ parse_stsd :: proc(t: ^Track, stbl: []u8) -> Error {
 		}
 		info, parsed := parse_asc(asc)
 		if !parsed do return .Invalid_Data
-		config, err := make([]u8, len(asc))
-		if err != nil do return .Out_Of_Memory
-		copy(config, asc)
-		t.audio_specific_config = config
+		t.audio_specific_config = clone_bytes(asc) or_return
 		t.sample_rate = info.sample_rate
 		if info.channel_config > 0 && info.channel_config <= 7 {
 			channels_for_config := [8]u8{0, 1, 2, 3, 4, 5, 6, 8}
@@ -502,27 +713,15 @@ parse_colr :: proc(t: ^Track, children: []u8) -> Error {
 // version 2 (lpcm) states rate, channels, bits and flags explicitly.
 @(private)
 parse_pcm_entry :: proc(t: ^Track, type: u32, body: []u8, iso_v1: bool) -> Error {
-	if len(body) < 28 do return .Invalid_Data
-	version := iso_v1 ? 0 : get_u16(body[8:])
-	t.channels = int(get_u16(body[16:]))
+	children, version := audio_entry_children(t, body, iso_v1) or_return
 	bits := int(get_u16(body[18:]))
-	t.sample_rate = int(get_u32(body[24:]) >> 16)
-	children_at := 28
 	f := &t.pcm
-	switch version {
-	case 1:
-		children_at = 44
-	case 2:
-		children_at = 64
-		if len(body) < 64 do return .Invalid_Data
-		t.sample_rate = int(transmute(f64)get_u64(body[32:]))
-		t.channels = int(get_u32(body[40:]))
+	if version == 2 {
 		bits = int(get_u32(body[48:]))
 		flags := get_u32(body[52:])
 		f.float, f.little_endian = flags & 1 != 0, flags & 2 == 0
 		f.unsigned = flags & 5 == 0 && bits == 8
 	}
-	if len(body) < children_at do return .Invalid_Data
 	switch type {
 	case fourcc("raw "):
 		bits, f.unsigned = 8, true
@@ -538,11 +737,7 @@ parse_pcm_entry :: proc(t: ^Track, type: u32, body: []u8, iso_v1: bool) -> Error
 		bits, f.float = 64, true
 	}
 	if type != fourcc("lpcm") && type != fourcc("sowt") {
-		children := body[children_at:]
-		enda, has_enda := find_box(children, "enda") or_return
-		if !has_enda {
-			if wave, has_wave := find_box(children, "wave") or_return; has_wave do enda, has_enda = find_box(wave, "enda") or_return
-		}
+		enda, has_enda := find_audio_box(children, "enda") or_return
 		f.little_endian = has_enda && len(enda) >= 2 && get_u16(enda) != 0
 	}
 	// Other layouts keep codec Unknown, so the rest of the file still opens.
@@ -636,9 +831,8 @@ parse_sample_tables :: proc(r: ^Reader, t: ^Track, stbl: []u8) -> Error {
 	}
 	if count > MAX_SAMPLES do return .Unsupported
 	if count == 0 do return .None
-	samples, alloc_err := make(#soa[]Sample, count)
-	if alloc_err != nil do return .Out_Of_Memory
-	t.samples = samples
+	if resize(&t.samples, count) != nil do return .Out_Of_Memory
+	samples := t.samples[:]
 	for i in 0 ..< count {
 		size := constant_size
 		if constant_size == 0 {
@@ -742,20 +936,27 @@ parse_sample_tables :: proc(r: ^Reader, t: ^Track, stbl: []u8) -> Error {
 		}
 	}
 	if n < count do return .Invalid_Data
+	t.next_dts = dts
+	return .None
+}
 
+@(private)
+finalize_track :: proc(t: ^Track) -> Error {
+	count := len(t.samples)
+	if count == 0 || len(t.presentation) > 0 do return .None
 	// Move onto the movie timeline: presented time = media time - media_time + delay.
 	shift := t.edit.delay - t.edit.media_time
 	t.no_reordering = true
 	for i in 0 ..< count {
-		samples[i].dts += shift
-		samples[i].pts += shift
-		if samples[i].pts != samples[i].dts do t.no_reordering = false
+		t.samples[i].dts += shift
+		t.samples[i].pts += shift
+		if t.samples[i].pts != t.samples[i].dts do t.no_reordering = false
 	}
 	presentation, err := make([]i32, count)
 	if err != nil do return .Out_Of_Memory
 	t.presentation = presentation
 	for i in 0 ..< count do presentation[i] = i32(i)
-	if !t.no_reordering do sort_presentation(presentation, samples.pts[:count]) or_return
+	if !t.no_reordering do sort_presentation(presentation, t.samples.pts[:count]) or_return
 	return .None
 }
 
@@ -790,9 +991,8 @@ parse_pcm_chunks :: proc(r: ^Reader, t: ^Track, stbl: []u8) -> Error {
 	if !has_stsc || len(stsc) < 8 do return .Invalid_Data
 	runs := int(get_u32(stsc[4:]))
 	if runs == 0 || runs > (len(stsc) - 8) / 12 do return .Invalid_Data
-	samples, alloc_err := make(#soa[]Sample, chunks)
-	if alloc_err != nil do return .Out_Of_Memory
-	t.samples = samples
+	if resize(&t.samples, chunks) != nil do return .Out_Of_Memory
+	samples := t.samples[:]
 	n := 0
 	ticks := t.edit.delay - t.edit.media_time
 	for run in 0 ..< runs {
@@ -811,7 +1011,7 @@ parse_pcm_chunks :: proc(r: ^Reader, t: ^Track, stbl: []u8) -> Error {
 			n += 1
 		}
 	}
-	t.samples = samples[:n]
+	resize(&t.samples, n)
 	t.no_reordering = true
 	presentation, err := make([]i32, n)
 	if err != nil do return .Out_Of_Memory

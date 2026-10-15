@@ -68,3 +68,42 @@ pack_s16le :: proc(input: []f32, output: []u8) -> (samples: int, err: PCM_Error)
 	}
 	return samples, .None
 }
+
+// Interleaves planar i32 channel buffers into `out` (at least samples * len(planes)
+// values) as normalized f32 in [-1, 1): sample / 2^(bit_depth - 1).
+interleave_i32_f32 :: proc(planes: [][]i32, samples, bit_depth: int, out: []f32) #no_bounds_check {
+	n, ch := samples, len(planes)
+	scale := f32(1.0 / f64(u64(1) << uint(bit_depth - 1)))
+	if ch == 1 {
+		p := planes[0][:n]
+		sv := simd.f32x8(scale)
+		i := 0
+		for ; i + 8 <= n; i += 8 {
+			iv := intrinsics.unaligned_load((^simd.i32x8)(&p[i]))
+			intrinsics.unaligned_store((^simd.f32x8)(&out[i]), simd.f32x8(iv) * sv)
+		}
+		for ; i < n; i += 1 do out[i] = f32(p[i]) * scale
+		return
+	}
+	if ch == 2 {
+		l, r := planes[0][:n], planes[1][:n]
+		sv := simd.f32x8(scale)
+		i := 0
+		for ; i + 8 <= n; i += 8 {
+			lv := simd.to_array(simd.f32x8(intrinsics.unaligned_load((^simd.i32x8)(&l[i]))) * sv)
+			rv := simd.to_array(simd.f32x8(intrinsics.unaligned_load((^simd.i32x8)(&r[i]))) * sv)
+			#unroll for k in 0 ..< 8 {
+				out[(i + k) * 2 + 0] = lv[k]
+				out[(i + k) * 2 + 1] = rv[k]
+			}
+		}
+		for ; i < n; i += 1 {
+			out[i * 2 + 0] = f32(l[i]) * scale
+			out[i * 2 + 1] = f32(r[i]) * scale
+		}
+		return
+	}
+	for c in 0 ..< ch {
+		for x, i in planes[c][:n] do out[i * ch + c] = f32(x) * scale
+	}
+}

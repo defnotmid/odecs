@@ -1,6 +1,7 @@
 package flac
 
 import "base:intrinsics"
+import common "../common"
 
 // Frame decoding (section 9). Each subframe decodes into its channel's own
 // plane, so channels stay planar (structure of arrays) from the bitstream to
@@ -75,11 +76,8 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> (f: Frame, used: int, err: Erro
 // Interleaves a frame into out (at least block_size * channels values) as
 // f32 in [-1, 1): sample / 2^(bits-1), which is exact for every depth.
 interleave_f32 :: proc(f: Frame, out: []f32) #no_bounds_check {
-	n, ch := f.header.block_size, f.header.channels
-	scale := 1 / f32(u64(1) << uint(f.header.bits - 1))
-	for c in 0 ..< ch {
-		for x, i in f.planes[c][:n] do out[i * ch + c] = f32(x) * scale
-	}
+	f := f
+	common.interleave_i32_f32(f.planes[:f.header.channels], f.header.block_size, f.header.bits, out)
 }
 
 // The coded side channel's index, or -1 for independent channels.

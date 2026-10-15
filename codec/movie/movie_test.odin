@@ -478,3 +478,51 @@ test_transparent_round_trip :: proc(t: ^testing.T) {
 		testing.expectf(t, worst <= 8, "%v: max error %d", stored, worst)
 	}
 }
+
+@(test)
+test_audio_only_m4a_round_trip :: proc(t: ^testing.T) {
+	RATE, CHANNELS, SAMPLES :: 48000, 2, 16000
+	m: mp4.Memory_Stream
+	defer delete(m.data)
+	config := default_audio_writer_config(RATE, CHANNELS)
+	w: Writer
+	testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.None)
+	pcm := make([]f32, SAMPLES * CHANNELS)
+	defer delete(pcm)
+	for i in 0 ..< SAMPLES do for c in 0 ..< CHANNELS do pcm[i * CHANNELS + c] = tone(i, c, RATE)
+	testing.expect_value(t, write_audio(&w, pcm), Error.None)
+	testing.expect_value(t, write_frame(&w, nil, 0), Error.Invalid_Config)
+	testing.expect_value(t, finish(&w), Error.None)
+	destroy(&w)
+
+	r: Reader
+	testing.expect_value(t, open_reader_stream(&r, mp4.memory_stream(&m)), Error.None)
+	defer close_reader(&r)
+	testing.expect_value(t, string(r.demux.major_brand[:]), "M4A ")
+	testing.expect_value(t, r.video.frame_count, 0)
+	_, ve := next_frame(&r)
+	testing.expect_value(t, ve, Error.Unsupported)
+	testing.expect(t, r.audio.present)
+	testing.expect_value(t, r.audio.codec, Audio_Codec.AAC)
+	testing.expect_value(t, r.audio.sample_rate, RATE)
+	testing.expect_value(t, r.audio.channels, CHANNELS)
+	testing.expect_value(t, r.audio.samples, i64(SAMPLES))
+
+	decoded := make([]f32, (SAMPLES + 1024) * CHANNELS)
+	defer delete(decoded)
+	n, ae := read_audio(&r, decoded)
+	testing.expect_value(t, ae, Error.None)
+	testing.expect_value(t, n, SAMPLES)
+	signal, noise: f64
+	for i in 2048 ..< SAMPLES - 2048 {
+		for c in 0 ..< CHANNELS {
+			s := f64(pcm[i * CHANNELS + c])
+			d := f64(decoded[i * CHANNELS + c]) - s
+			signal += s * s
+			noise += d * d
+		}
+	}
+	snr := 10 * math.log10(signal / max(noise, 1e-20))
+	testing.expectf(t, snr > 12, "audio-only M4A SNR %v dB", snr)
+}
+

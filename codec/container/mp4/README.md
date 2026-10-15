@@ -116,26 +116,42 @@ mp4.close(&r)
   metadata blocks in `audio_specific_config`, rate and channels from their
   streaminfo (the entry's 16-bit rate cannot hold rates above 65535 Hz).
   One frame per sample; writing it returns `Unsupported`.
+- **ALAC:** the `alac` sample entry reads as codec `ALAC`, its 24-byte
+  `ALACSpecificConfig` (from the inner `alac` box, or inside `wave`) in
+  `audio_specific_config`, with rate and channels taken from the magic
+  cookie. Writing it returns `Unsupported`.
+- **Opus:** the `Opus` sample entry reads as codec `Opus` at 48 kHz; its
+  `dOps` (`OpusSpecificBox`) is converted to an RFC 7845 `OpusHead` record in
+  `audio_specific_config` (swapping big-endian fields to little-endian), and
+  when no `elst` box is present `pre_skip` is applied as `edit.media_time`.
+  Writing it returns `Unsupported`.
 - **AV1:** the `av01` sample entry reads as codec `AV1`, its whole `av1C`
   record (4-byte header, then the configuration OBUs) in `config`, one
   temporal unit per sample, `colr` as for the other video entries. Writing
   it returns `Unsupported`.
-- **Accepted inputs:** `avc1`/`avc3`, `hvc1`/`hev1` and `mp4a`, including
+- **Fragmented MP4/M4A:** `mvex`/`trex` defaults in `moov` and `moof`/`traf`
+  (`tfhd`, `tfdt`, `trun` versions 0 and 1, including negative composition
+  offsets, `default-base-is-moof` and empty `moov` tables) are appended to
+  each track's sample table in fragment order.
+- **Audio-only `.m4a` brand:** when all tracks passed to `mp4.create` are
+  audio, `ftyp` uses major brand `M4A ` (`M4A `, `isom`, `iso2`).
+- **Accepted inputs:** `avc1`/`avc3`, `hvc1`/`hev1`, `mp4a`, `alac`, `fLaC`,
+  `Opus` and `av01`, including
   the QuickTime sound description versions 1 and 2 (in a version-0 `stsd`),
-  ISO `AudioSampleEntryV1` (in a version-1 `stsd`), and an `esds` inside
+  ISO `AudioSampleEntryV1` (in a version-1 `stsd`), and `esds`/`alac` inside
   `wave`. Also 64-bit box sizes, `co64`, `stz2`, `ctts` versions 0 and 1 (read
-  signed), `mvhd` anywhere in `moov`, a `moov` after `mdat`, and multiple
-  tracks.
+  signed), `mvhd` anywhere in `moov`, a `moov` after `mdat`, fragmented
+  `moof`/`traf`, and multiple tracks.
 - **Defensive limits:** malformed tables return `Invalid_Data`. Samples per
   track are capped at 2^26, and every sample must lie inside the file.
 
 ## Not supported
 
-- **Fragmented MP4:** `moof`/`mvex` returns `Unsupported`, both for reading
-  and writing.
+- **Fragmented MP4 writing:** only reading is supported; `mp4.Writer` writes
+  single-`moov` MP4/M4A files.
 - **Multiple sample descriptions per track** return `Unsupported`.
-- **Encrypted entries** (`encv`/`enca`) and compressed audio other than AAC
-  keep codec `Unknown`. Their samples are still readable.
+- **Encrypted entries** (`encv`/`enca`) and other unimplemented compressed
+  audio codecs keep codec `Unknown`. Their samples are still readable.
 - **Edit lists** beyond one empty edit plus one rate-1 edit are not fully
   applied (`Edit.complex`).
 - **Not written:** metadata (`udta`/`meta`), chapters, and `sdtp`
@@ -150,7 +166,8 @@ bash tests/mp4_check.sh /tmp/odecs-mp4
 
 The unit tests round-trip reordered video and primed audio, with and without
 faststart. They cover `co64`, `hvcC` fields, parameter-set refusal, ADTS
-stripping, fragmented refusal, `mvhd` after `trak`, ISO audio entry v1, and
+stripping, fragmented `moof`/`traf` reading, `alac` and `Opus`/`dOps` sample
+entries, `M4A ` branding, `mvhd` after `trak`, ISO audio entry v1, and
 50k samples in reversed composition order. Every truncation and a byte-corruption sweep
 of a muxed file must be refused, or must read consistently without
 out-of-bounds access. `tests/mp4_check.sh` uses FFmpeg/ffprobe as oracles

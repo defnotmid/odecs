@@ -21,6 +21,7 @@ refs=(
 	"PDMP3        https://github.com/technosaurus/PDMP3.git            2a206a3ada78ec4d13434847f05f50097c60c36a"
 	"opus         https://gitlab.xiph.org/xiph/opus.git                22244de5a79bd1d6d623c32e72bf1954b56235be"
 	"libwebp      https://chromium.googlesource.com/webm/libwebp       4fa21912338357f89e4fd51cf2368325b59e9bd9"
+	"alac         https://github.com/macosforge/alac.git               c38887c5c5e64a4b31108733bd79ca9b2496d987"
 )
 
 fetch() { # name upstream commit

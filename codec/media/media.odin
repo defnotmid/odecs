@@ -14,10 +14,11 @@ Codec :: enum {
 	MP3,    // decode only; MPEG-1/2/2.5 Layer III, one frame per packet (Framing.Frame)
 	AV1,    // decode only, Vulkan Video; one temporal unit per packet (Framing.Frame), Main 4:2:0 8/10-bit
 	Opus,   // decode only, 48 kHz; one packet per Packet (Framing.Frame), OpusHead in Config.extradata; channels in the Opus mapping order
+	ALAC,   // decode only; one packet per Packet (Framing.Frame), 24-byte ALACSpecificConfig in Config.extradata
 }
 
 is_audio :: proc(codec: Codec) -> bool {
-	return codec == .AAC || codec == .FLAC || codec == .MP3 || codec == .Opus
+	return codec == .AAC || codec == .FLAC || codec == .MP3 || codec == .Opus || codec == .ALAC
 }
 Operation :: enum {
 	Decode,
@@ -219,7 +220,7 @@ validate_config :: proc(config: Config) -> Error {
 		if config.channels < 1 || config.channels > 255 || config.sample_rate != 48000 do return .Invalid_Config // multistream
 		return config.operation == .Decode ? .None : .Unsupported
 	}
-	if config.codec == .FLAC || config.codec == .MP3 {
+	if config.codec == .FLAC || config.codec == .MP3 || config.codec == .ALAC {
 		if config.channels < 1 || config.channels > (config.codec == .MP3 ? 2 : 8) || config.sample_rate <= 0 do return .Invalid_Config
 		return config.operation == .Decode ? .None : .Unsupported
 	}
