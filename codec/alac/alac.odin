@@ -290,11 +290,22 @@ unmix_stereo :: proc(u, v: []i32, mix_res: i32, mix_bits: uint) #no_bounds_check
 	}
 }
 
-// Interleaves a decoded frame into `out` (at least f.samples * f.channels
-// values) as f32 in [-1, 1): sample / 2^(bit_depth - 1).
-interleave_f32 :: proc(f: Frame, out: []f32) #no_bounds_check {
+// Interleaves a decoded frame into `out` (at least f.samples * kept channels
+// values), keeping the first `channels` channels, or all of them for 0: as
+// f32 in [-1, 1), sample / 2^(bit_depth - 1), or as i16 (common.scale_i16).
+interleave :: proc {
+	interleave_f32,
+	interleave_i16,
+}
+
+interleave_f32 :: proc(f: Frame, out: []f32, channels := 0) {
 	f := f
-	common.interleave_i32_f32(f.planes[:f.channels], f.samples, f.bit_depth, out)
+	common.interleave_i32_f32(f.planes[:common.kept_channels(f.channels, channels)], f.samples, f.bit_depth, out)
+}
+
+interleave_i16 :: proc(f: Frame, out: []i16, channels := 0) {
+	f := f
+	common.interleave_i32_i16(f.planes[:common.kept_channels(f.channels, channels)], f.samples, f.bit_depth, out)
 }
 
 @(private)

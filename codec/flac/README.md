@@ -11,7 +11,7 @@ flac.init_decoder(&d, r.info)
 flac.seek(&r, sample)                       // optional: the frame holding `sample`
 p, e := flac.read_frame(&r)                 // p.data, p.first_sample, p.block_size
 f, used, de := flac.decode_frame(&d, p.data) // f.planes[c][:f.header.block_size]
-flac.interleave_f32(f, pcm)                 // or use the i32 planes directly
+flac.interleave(f, pcm)                     // pcm: []f32 or []i16; optional leading-channel count; or the i32 planes
 flac.destroy_decoder(&d)
 flac.close(&r)
 ```

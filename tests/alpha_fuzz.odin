@@ -178,6 +178,16 @@ main :: proc() {
 				if wav.open_stream(&r, mp4.memory_stream(&m)) == .None {
 					for first: i64 = 0; first < r.frames; first += 1000 do wav.read_frames(&r, first, 1000)
 					wav.close(&r)
+					// From memory, converted: two channels to i16, all to f32.
+					if wav.open_bytes(&r, buffer[:]) == .None {
+						pcm: [2000]i16
+						x: [4000]f32
+						for first: i64 = 0; first < r.frames; first += 1000 {
+							wav.read(&r, first, pcm[:], 2)
+							wav.read(&r, first, x[:])
+						}
+						wav.close(&r)
+					}
 				} else {
 					refused[0] += 1
 				}

@@ -73,11 +73,23 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> (f: Frame, used: int, err: Erro
 	return f, end + 2, .None
 }
 
-// Interleaves a frame into out (at least block_size * channels values) as
-// f32 in [-1, 1): sample / 2^(bits-1), which is exact for every depth.
-interleave_f32 :: proc(f: Frame, out: []f32) #no_bounds_check {
+// Interleaves a frame into out (at least block_size * kept channels values),
+// keeping the first `channels` channels, or all of them for 0: as f32 in
+// [-1, 1), sample / 2^(bits-1), which is exact for every depth, or as i16
+// (common.scale_i16).
+interleave :: proc {
+	interleave_f32,
+	interleave_i16,
+}
+
+interleave_f32 :: proc(f: Frame, out: []f32, channels := 0) {
 	f := f
-	common.interleave_i32_f32(f.planes[:f.header.channels], f.header.block_size, f.header.bits, out)
+	common.interleave_i32_f32(f.planes[:common.kept_channels(f.header.channels, channels)], f.header.block_size, f.header.bits, out)
+}
+
+interleave_i16 :: proc(f: Frame, out: []i16, channels := 0) {
+	f := f
+	common.interleave_i32_i16(f.planes[:common.kept_channels(f.header.channels, channels)], f.header.block_size, f.header.bits, out)
 }
 
 // The coded side channel's index, or -1 for independent channels.

@@ -1,6 +1,7 @@
 package movie
 
 import alac "../alac"
+import common "../common"
 import mp4 "../container/mp4"
 import flac "../flac"
 import ogg "../container/ogg"
@@ -112,8 +113,7 @@ Reader :: struct {
 	nal_length_size: int, // bytes before each NAL unit in a sample
 	audio_config:   []u8, // AAC AudioSpecificConfig or FLAC metadata, borrowed from the demuxer
 	audio_done:     bool, // native FLAC: the last frame has been fed
-	pcm_format:     mp4.Pcm_Format,
-	pcm_law:        wav.Companding, // WAV G.711 instead of linear PCM
+	pcm_sample:     common.Sample_Format, // PCM: how each sample is stored
 	// Matroska: the PCM index of each audio packet, from the frame sizes
 	// (block timestamps are rounded to the timestamp scale), and the
 	// decoded samples to discard at the start (CodecDelay).
@@ -730,8 +730,7 @@ describe_audio :: proc(r: ^Reader) {
 			samples     = r.wave.frames,
 		}
 		r.audio_end = r.wave.frames
-		r.pcm_format = {bits = u8(f.bits), float = f.float, little_endian = !f.big_endian, unsigned = f.unsigned}
-		r.pcm_law = f.companding
+		r.pcm_sample = f.sample
 		return
 	}
 	t := &r.demux.tracks[r.audio_index]
@@ -739,11 +738,12 @@ describe_audio :: proc(r: ^Reader) {
 	r.audio.samples = mp4.track_end(t) * i64(t.sample_rate) / i64(t.timescale)
 	r.audio_end = r.audio.samples
 	r.audio_config = t.audio_specific_config
-	r.pcm_format = t.pcm
 	#partial switch t.codec {
 	case .PCM:
 		r.audio.codec = .PCM
-		r.audio.present = t.channels >= 1
+		ok: bool
+		r.pcm_sample, ok = common.sample_format(int(t.pcm.bits), t.pcm.float, t.pcm.unsigned, !t.pcm.little_endian)
+		r.audio.present = ok && t.channels >= 1
 	case .AAC:
 		r.audio.codec = .AAC
 		info, ok := mp4.parse_asc(t.audio_specific_config)
@@ -874,8 +874,9 @@ describe_webm_audio :: proc(r: ^Reader) {
 	case .PCM:
 		r.audio.codec = .PCM
 		f := t.pcm_format
-		r.pcm_format = {bits = f.bits, float = f.float, little_endian = f.little_endian, unsigned = f.unsigned}
-		r.audio.present = t.channels >= 1 && rate > 0
+		ok: bool
+		r.pcm_sample, ok = common.sample_format(int(f.bits), f.float, f.unsigned, !f.little_endian)
+		r.audio.present = ok && t.channels >= 1 && rate > 0
 	case:
 		r.audio.codec = .Other
 	}
@@ -884,7 +885,7 @@ describe_webm_audio :: proc(r: ^Reader) {
 	if !r.audio.present do return
 	n := len(t.samples)
 	r.audio_starts = make([]i64, n)
-	frame_bytes := i64(r.pcm_format.bits / 8) * i64(t.channels)
+	frame_bytes := i64(common.SAMPLE_BYTES[r.pcm_sample]) * i64(t.channels)
 	position: i64
 	for i in 0 ..< n {
 		s := t.samples[i]
@@ -1546,15 +1547,10 @@ advance_audio :: proc(r: ^Reader) -> Error {
 		r.audio_cursor += 1
 	}
 	if r.audio.codec == .PCM {
-		frames: int
-		if r.pcm_law != .None {
-			frames = len(data) / r.audio.channels
-			resize(&r.pcm_input, frames * r.audio.channels)
-			wav.expand_g711(r.pcm_law, data, r.pcm_input[:])
-		} else {
-			frames = pcm_to_f32(data, r.pcm_format, r.audio.channels, &r.pcm_input)
-		}
-		on_audio({samples = r.pcm_input[:], sample_rate = r.audio.sample_rate, channels = r.audio.channels, samples_per_channel = frames, sample_index = sample_index}, r)
+		ch := r.audio.channels
+		resize(&r.pcm_input, len(data) / common.SAMPLE_BYTES[r.pcm_sample])
+		frames := common.convert_pcm(data, r.pcm_sample, ch, r.pcm_input[:], ch)
+		on_audio({samples = r.pcm_input[:frames * ch], sample_rate = r.audio.sample_rate, channels = r.audio.channels, samples_per_channel = frames, sample_index = sample_index}, r)
 		return .None
 	}
 	packet := media.Packet {
@@ -1570,33 +1566,3 @@ advance_audio :: proc(r: ^Reader) -> Error {
 	return .None
 }
 
-// Converts a chunk of interleaved PCM to f32 in [-1, 1]; returns frames.
-@(private)
-pcm_to_f32 :: proc(data: []u8, f: mp4.Pcm_Format, channels: int, out: ^[dynamic]f32) -> int {
-	bytes := int(f.bits) / 8
-	count := len(data) / bytes
-	count -= count % channels
-	resize(out, count)
-	for i in 0 ..< count {
-		b := data[i * bytes:][:bytes]
-		v: u64
-		for k in 0 ..< bytes {
-			byte := f.little_endian ? b[k] : b[bytes - 1 - k]
-			v |= u64(byte) << uint(8 * k)
-		}
-		x: f32
-		switch {
-		case f.float && bytes == 4:
-			x = transmute(f32)u32(v)
-		case f.float:
-			x = f32(transmute(f64)v)
-		case f.unsigned:
-			x = (f32(v) - 128) / 128
-		case:
-			shift := uint(64 - 8 * bytes)
-			x = f32(f64(i64(v << shift) >> shift) / f64(u64(1) << uint(8 * bytes - 1)))
-		}
-		out[i] = x != x ? 0 : clamp(x, -1, 1)
-	}
-	return count / channels
-}

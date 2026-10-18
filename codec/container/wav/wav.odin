@@ -1,10 +1,11 @@
 // WAV demuxing: RIFF/WAVE, its big-endian RIFX form and RF64 (64-bit sizes
 // from a ds64 chunk), with integer or IEEE float PCM in WAVE_FORMAT_PCM,
 // WAVE_FORMAT_IEEE_FLOAT or WAVE_FORMAT_EXTENSIBLE, and G.711 A-law and
-// mu-law (expanded by expand_g711). The reader locates the data chunk at
-// open and reads frames from it on request. Depends only on Odin core.
+// mu-law. The reader locates the data chunk and the first smpl loop at open,
+// and reads frames on request: as stored, or converted to i16 or f32.
 package wav
 
+import common "../../common"
 import "core:io"
 import "core:os"
 
@@ -19,35 +20,36 @@ Error :: enum {
 	Closed,
 }
 
-Companding :: enum u8 {
-	None,
-	A_Law, // G.711, 8 bits per sample
-	Mu_Law,
-}
-
 // Interleaved sample layout. Samples are `bits` wide in the file; integer
 // samples narrower than that (valid_bits) are left-justified, so reading
 // them at the container width is exact.
 Format :: struct {
 	sample_rate:   int,
 	channels:      int,
-	bits:          int, // per sample in the file: 8, 16, 24 or 32 (integer); 32 or 64 (float)
+	bits:          int, // per sample in the file: 8 (also G.711), 16, 24 or 32 (integer); 32 or 64 (float)
 	valid_bits:    int, // significant bits, at most `bits`
 	float:         bool,
 	big_endian:    bool, // RIFX
 	unsigned:      bool, // 8-bit integer PCM is unsigned
-	companding:    Companding, // G.711 bytes rather than linear PCM
+	sample:        common.Sample_Format, // how each sample is stored
 	channel_mask:  u32, // WAVE_FORMAT_EXTENSIBLE speaker positions; 0 when unstated
 	block_align:   int, // bytes per frame
 }
 
+// A loop from the smpl chunk, in frames; `end` is the last frame played.
+Loop :: struct {
+	start, end: i64,
+}
+
 Reader :: struct {
 	stream:      io.Stream,
+	bytes:       []u8, // the whole file, borrowed, when opened from memory
 	file:        ^os.File, // owned when opened from a path
 	size:        i64,
 	format:      Format,
 	data_offset: i64,
 	frames:      i64, // complete frames in the data chunk (as far as the file holds)
+	loop:        Maybe(Loop), // the smpl chunk's first loop
 	buffer:      [dynamic]u8, // read_frames storage
 }
 
@@ -81,6 +83,19 @@ open_stream :: proc(r: ^Reader, stream: io.Stream) -> Error {
 	return .None
 }
 
+// Reads a whole file held in memory; the reader borrows it until close, and
+// read_frames returns slices of it.
+open_bytes :: proc(r: ^Reader, data: []u8) -> Error {
+	if r == nil do return .Invalid_Argument
+	if len(data) < 12 do return .Invalid_Data
+	r^ = {
+		bytes = data,
+		size  = i64(len(data)),
+	}
+	if e := parse(r); e != .None {close(r); return e}
+	return .None
+}
+
 close :: proc(r: ^Reader) {
 	if r == nil do return
 	delete(r.buffer)
@@ -91,23 +106,51 @@ close :: proc(r: ^Reader) {
 // Reads `count` frames from frame `first`, clamped to the data; the bytes
 // are borrowed until the next read on this reader.
 read_frames :: proc(r: ^Reader, first: i64, count: int) -> (data: []u8, err: Error) {
-	if r == nil || r.stream.procedure == nil do return nil, .Closed
+	if r == nil || (r.stream.procedure == nil && r.bytes == nil) do return nil, .Closed
 	if first < 0 || count < 0 do return nil, .Invalid_Argument
 	if first >= r.frames do return nil, .End_Of_Stream
 	n := int(min(i64(count), r.frames - first))
 	bytes := n * r.format.block_align
+	at := r.data_offset + first * i64(r.format.block_align)
+	if r.bytes != nil do return r.bytes[at:][:bytes], .None
 	if bytes > len(r.buffer) {
 		if resize(&r.buffer, bytes) != nil do return nil, .Out_Of_Memory
 	}
 	data = r.buffer[:bytes]
-	read_all_at(r.stream, data, r.data_offset + first * i64(r.format.block_align)) or_return
+	read_at(r, data, at) or_return
 	return data, .None
 }
 
+// Reads frames from frame `first` into `out` as interleaved i16 or f32
+// (common.to_i16, common.to_f32), keeping the first `channels` channels of
+// each frame, or all of them for 0. Returns the frames read: as many as out
+// holds, clamped to the data.
+read :: proc {
+	read_i16,
+	read_f32,
+}
+
+read_i16 :: proc(r: ^Reader, first: i64, out: []i16, channels := 0) -> (frames: int, err: Error) {
+	return read_converted(r, first, out, channels)
+}
+
+read_f32 :: proc(r: ^Reader, first: i64, out: []f32, channels := 0) -> (frames: int, err: Error) {
+	return read_converted(r, first, out, channels)
+}
+
+@(private)
+read_converted :: proc(r: ^Reader, first: i64, out: []$D, channels: int) -> (frames: int, err: Error) {
+	if r == nil || r.format.channels < 1 do return 0, .Closed
+	keep := common.kept_channels(r.format.channels, channels)
+	data := read_frames(r, first, len(out) / keep) or_return
+	return common.convert_pcm(data, r.format.sample, r.format.channels, out, keep), .None
+}
+
+// Walks the chunks: the header ones up to data, then any smpl after it.
 @(private)
 parse :: proc(r: ^Reader) -> Error {
 	head: [12]u8
-	read_all_at(r.stream, head[:], 0) or_return
+	read_at(r, head[:], 0) or_return
 	id := string(head[:4])
 	if string(head[8:12]) != "WAVE" do return .Invalid_Data
 	big := false
@@ -127,23 +170,28 @@ parse :: proc(r: ^Reader) -> Error {
 	at: i64 = 12
 	for at + 8 <= r.size {
 		chunk: [8]u8
-		read_all_at(r.stream, chunk[:], at) or_return
+		read_at(r, chunk[:], at) or_return
 		size := i64(u32_at(chunk[4:], big))
 		body := at + 8
 		switch string(chunk[:4]) {
+		case "smpl":
+			if r.loop == nil do r.loop = parse_loop(r, body, size, big)
 		case "ds64":
+			if r.data_offset != 0 do break
 			if !rf64 || size < 24 do return .Invalid_Data
 			b: [24]u8
-			read_all_at(r.stream, b[:], body) or_return
+			read_at(r, b[:], body) or_return
 			ds64_data = i64(u64_at(b[8:], big))
 			if ds64_data < 0 do return .Invalid_Data
 		case "fmt ":
+			if r.data_offset != 0 do break
 			if size < 16 || size > MAX_HEADER_CHUNK do return .Invalid_Data
 			b: [MAX_HEADER_CHUNK]u8
-			read_all_at(r.stream, b[:size], body) or_return
+			read_at(r, b[:size], body) or_return
 			parse_format(&r.format, b[:size], big) or_return
 			have_format = true
 		case "data":
+			if r.data_offset != 0 do break
 			if !have_format do return .Invalid_Data
 			if rf64 && size == 0xFFFFFFFF {
 				if ds64_data < 0 do return .Invalid_Data
@@ -155,12 +203,23 @@ parse :: proc(r: ^Reader) -> Error {
 			if size == 0 || size == 0xFFFFFFFF || size > r.size - body do size = r.size - body
 			r.data_offset = body
 			r.frames = size / i64(r.format.block_align)
-			return .None
 		}
 		at = body + size + (size & 1) // chunks are padded to even sizes
 	}
-	return .Invalid_Data
+	return r.data_offset != 0 ? .None : .Invalid_Data
 }
+
+// The first loop of a smpl chunk (36 bytes, then 24 per loop); none when
+// the chunk states none, is cut off, or the loop runs backwards.
+@(private)
+parse_loop :: proc(r: ^Reader, body, size: i64, big: bool) -> Maybe(Loop) {
+	b: [60]u8
+	if size < 60 || read_at(r, b[:], body) != .None || u32_at(b[28:], big) == 0 do return nil
+	start, end := i64(u32_at(b[44:], big)), i64(u32_at(b[48:], big))
+	if start > end do return nil
+	return Loop{start, end}
+}
+
 
 @(private)
 FORMAT_PCM :: 1
@@ -194,41 +253,20 @@ parse_format :: proc(f: ^Format, b: []u8, big: bool) -> Error {
 		if f.valid_bits == 0 || f.valid_bits > f.bits do f.valid_bits = f.bits
 	}
 	switch tag {
-	case FORMAT_PCM:
-		if f.bits != 8 && f.bits != 16 && f.bits != 24 && f.bits != 32 do return .Unsupported
-		f.unsigned = f.bits == 8
-	case FORMAT_IEEE_FLOAT:
-		if f.bits != 32 && f.bits != 64 do return .Unsupported
-		f.float = true
+	case FORMAT_PCM, FORMAT_IEEE_FLOAT:
+		f.float = tag == FORMAT_IEEE_FLOAT
+		f.unsigned = !f.float && f.bits == 8
+		ok: bool
+		if f.sample, ok = common.sample_format(f.bits, f.float, f.unsigned, big); !ok do return .Unsupported
 	case FORMAT_ALAW, FORMAT_MULAW:
 		if f.bits != 8 do return .Unsupported
-		f.companding = tag == FORMAT_ALAW ? .A_Law : .Mu_Law
+		f.sample = tag == FORMAT_ALAW ? .A_Law : .Mu_Law
 	case:
 		return .Unsupported // ADPCM and other codecs
 	}
 	if f.channels < 1 || f.channels > 64 || f.sample_rate < 1 || f.sample_rate > 1 << 22 do return .Invalid_Data
 	if f.block_align != f.channels * f.bits / 8 do return .Invalid_Data
 	return .None
-}
-
-// Expands G.711 bytes to f32 in [-1, 1) through the 16-bit linear values
-// of ITU-T G.711 (A-law tables 1a/1b, mu-law tables 2a/2b).
-expand_g711 :: proc(law: Companding, src: []u8, dst: []f32) {
-	for b, i in src[:min(len(src), len(dst))] {
-		v: i32
-		if law == .A_Law {
-			a := i32(b ~ 0x55)
-			seg := (a >> 4) & 7
-			m := (a & 15) << 1 | 1
-			v = seg == 0 ? m << 3 : (m + 32) << uint(seg + 2)
-			if a & 0x80 == 0 do v = -v
-		} else {
-			u := i32(~b)
-			t := ((u & 15) << 3 + 0x84) << uint((u >> 4) & 7)
-			v = u & 0x80 != 0 ? 0x84 - t : t - 0x84
-		}
-		dst[i] = f32(v) / 32768
-	}
 }
 
 @(private)
@@ -251,10 +289,15 @@ u64_at :: proc(b: []u8, big: bool) -> u64 {
 }
 
 @(private)
-read_all_at :: proc(s: io.Stream, data: []u8, offset: i64) -> Error {
+read_at :: proc(r: ^Reader, data: []u8, offset: i64) -> Error {
+	if r.bytes != nil {
+		if offset > r.size - i64(len(data)) do return .Invalid_Data
+		copy(data, r.bytes[offset:])
+		return .None
+	}
 	done := 0
 	for done < len(data) {
-		n, err := io.read_at(s, data[done:], offset + i64(done))
+		n, err := io.read_at(r.stream, data[done:], offset + i64(done))
 		if n <= 0 do return err == .EOF ? .Invalid_Data : .IO_Error
 		done += n
 	}

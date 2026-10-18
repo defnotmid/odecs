@@ -1,14 +1,19 @@
 # WAV
 
-Native WAV reading. `open` finds the format and data chunks; `read_frames`
-then reads interleaved frames straight from the file, so opening costs a
-few small reads whatever the length. The package imports only Odin `core`.
+Native WAV reading. `open` finds the format and data chunks and the first
+`smpl` loop; `read_frames` then reads interleaved frames straight from the
+file, so opening costs a few small reads whatever the length, and `read`
+converts them into a caller's `i16` or `f32` buffer. The package imports
+Odin `core` and `codec/common` (the sample conversions).
 
 ```odin
 r: wav.Reader
-err := wav.open(&r, "in.wav")             // or open_stream (Read_At + Size)
-f := r.format                              // sample_rate, channels, bits, float, big_endian, companding, ...
-bytes, e := wav.read_frames(&r, first, count) // borrowed until the next read
+err := wav.open(&r, "in.wav")             // or open_stream (Read_At + Size), open_bytes (borrowed)
+f := r.format                              // sample_rate, channels, bits, float, big_endian, sample, ...
+n := r.frames                              // from the header alone
+loop, has_loop := r.loop.?                 // smpl: start and end frames, end inclusive
+bytes, e := wav.read_frames(&r, first, count) // as stored, borrowed until the next read
+frames, re := wav.read(&r, first, pcm)     // pcm: []i16 or []f32, interleaved; optional leading-channel count
 wav.close(&r)
 ```
 
@@ -20,8 +25,15 @@ wav.close(&r)
   `WAVE_FORMAT_IEEE_FLOAT` (32/64-bit), `WAVE_FORMAT_EXTENSIBLE` with
   either subtype (valid bits and channel mask reported; narrower samples
   are left-justified, so reading at the container width is exact), and
-  G.711 A-law and mu-law, which `expand_g711` turns into `f32`. ADPCM and
-  other compressed formats return `Unsupported`.
+  G.711 A-law and mu-law. ADPCM and other compressed formats return
+  `Unsupported`.
+- **Conversion** (`read`, through `common.to_i16` and `common.to_f32`):
+  to `i16`, narrower integers scale up exactly, wider ones and floats
+  (×32768) round half away from zero and saturate; to `f32`, integers
+  divide by 2^(bits−1), which is exact, and floats clamp to [−1, 1]. NaN is
+  silence; G.711 expands to its 16-bit table values.
+- **Loops:** the first loop of a `smpl` chunk, before or after the data;
+  a loop that runs backwards is ignored.
 - **Unfinished files:** a data size of zero or `0xFFFFFFFF` (a writer that
   never came back to fill it in, such as one writing to a pipe), or one
   running past the end of the file (an interrupted recording), means the

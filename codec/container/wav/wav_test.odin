@@ -1,5 +1,6 @@
 package wav
 
+import common "../../common"
 import "core:io"
 import "core:testing"
 
@@ -34,16 +35,17 @@ chunk :: proc(out: ^[dynamic]u8, id: string, body: []u8, big: bool) {
 	if len(body) & 1 == 1 do append(out, 0)
 }
 
-// A file with a format chunk, an odd-sized chunk before the data (padded)
-// and the given sample bytes.
+// A file with a format chunk, an odd-sized chunk before the data (padded),
+// the given sample bytes and, when given, a smpl chunk after them.
 @(private = "file")
-build :: proc(riff: string, format: []u8, samples: []u8, big := false) -> [dynamic]u8 {
+build :: proc(riff: string, format: []u8, samples: []u8, big := false, smpl: []u8 = nil) -> [dynamic]u8 {
 	body: [dynamic]u8
 	defer delete(body)
 	append(&body, "WAVE")
 	chunk(&body, "fmt ", format, big)
 	chunk(&body, "junk", {1, 2, 3}, big)
 	chunk(&body, "data", samples, big)
+	if smpl != nil do chunk(&body, "smpl", smpl, big)
 	out: [dynamic]u8
 	append(&out, riff)
 	put(&out, u64(len(body)), 4, big)
@@ -115,19 +117,6 @@ extensible_float_and_refusals :: proc(t: ^testing.T) {
 	testing.expect_value(t, open_stream(&r, bytes_stream(&data)), Error.Invalid_Data)
 }
 
-@(test)
-g711_expansion :: proc(t: ^testing.T) {
-	// G.711 tables: mu-law 0x00 and 0x80 are the extremes, 0xFF and 0x7F
-	// zero; A-law 0xD5 and 0x55 are the smallest steps.
-	src := [?]u8{0x00, 0x80, 0xFF, 0x7F}
-	out: [4]f32
-	expand_g711(.Mu_Law, src[:], out[:])
-	testing.expect_value(t, out, [4]f32{-32124.0 / 32768, 32124.0 / 32768, 0, 0})
-	a := [?]u8{0xD5, 0x55, 0xAA, 0x2A}
-	expand_g711(.A_Law, a[:], out[:])
-	testing.expect_value(t, out, [4]f32{8.0 / 32768, -8.0 / 32768, 32256.0 / 32768, -32256.0 / 32768})
-}
-
 // Every prefix of a valid file opens (data clamped to what is there) or
 // fails with an error.
 @(test)
@@ -146,4 +135,81 @@ truncations_fail_cleanly :: proc(t: ^testing.T) {
 			close(&r)
 		}
 	}
+}
+
+// A smpl chunk with one loop.
+@(private = "file")
+smpl_chunk :: proc(start, end: u32, big := false) -> [dynamic]u8 {
+	b: [dynamic]u8
+	for v in ([9]u32{7 = 1}) do put(&b, u64(v), 4, big) // manufacturer .. sampler data; one loop
+	for v in ([6]u32{2 = start, 3 = end}) do put(&b, u64(v), 4, big) // cue, type, start, end, fraction, count
+	return b
+}
+
+@(test)
+loop_after_data_and_conversion :: proc(t: ^testing.T) {
+	f := pcm_format(1, 3, 44100, 24)
+	defer delete(f)
+	s := smpl_chunk(10, 99)
+	defer delete(s)
+	// Two frames of three 24-bit channels.
+	samples := [?]u8 {
+		0x00, 0x00, 0x80, 0xFF, 0xFF, 0x7F, 0x80, 0x00, 0x00, // -2^23, 2^23 - 1, 128
+		0x7F, 0x00, 0x00, 0x80, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, // 127, -128, -129
+	}
+	doc := build("RIFF", f[:], samples[:], smpl = s[:])
+	defer delete(doc)
+	r: Reader
+	testing.expect_value(t, open_bytes(&r, doc[:]), Error.None)
+	defer close(&r)
+	testing.expect_value(t, r.frames, 2)
+	testing.expect_value(t, r.loop, Maybe(Loop)(Loop{10, 99}))
+	// The first two channels: 24-bit rounds off its low byte half away
+	// from zero and saturates.
+	pcm: [4]i16
+	n, e := read(&r, 0, pcm[:], 2)
+	testing.expect_value(t, e, Error.None)
+	testing.expect_value(t, n, 2)
+	testing.expect_value(t, pcm, [4]i16{-32768, 32767, 0, -1})
+	all: [6]i16
+	n, _ = read(&r, 1, all[:])
+	testing.expect_value(t, n, 1)
+	testing.expect_value(t, all, [6]i16{0, -1, -1, 0, 0, 0})
+	x: [6]f32
+	n, _ = read(&r, 0, x[:])
+	testing.expect_value(t, n, 2)
+	testing.expect_value(t, x, [6]f32{-1, 8388607.0 / 8388608, 128.0 / 8388608, 127.0 / 8388608, -128.0 / 8388608, -129.0 / 8388608})
+	_, e = read(&r, 2, x[:])
+	testing.expect_value(t, e, Error.End_Of_Stream)
+}
+
+@(test)
+rifx_loop_and_g711 :: proc(t: ^testing.T) {
+	f := pcm_format(7, 1, 8000, 8, true) // mu-law
+	defer delete(f)
+	s := smpl_chunk(1, 2, true)
+	defer delete(s)
+	// An odd-sized data chunk, padded before the smpl chunk.
+	doc := build("RIFX", f[:], {0x00, 0x80, 0xFF}, true, s[:])
+	defer delete(doc)
+	data := doc[:]
+	r: Reader
+	testing.expect_value(t, open_stream(&r, bytes_stream(&data)), Error.None)
+	defer close(&r)
+	testing.expect_value(t, r.format.sample, common.Sample_Format.Mu_Law)
+	testing.expect_value(t, r.loop, Maybe(Loop)(Loop{1, 2}))
+	pcm: [3]i16
+	n, _ := read(&r, 0, pcm[:])
+	testing.expect_value(t, n, 3)
+	testing.expect_value(t, pcm, [3]i16{-32124, 32124, 0})
+	// A loop running backwards is no loop.
+	back := smpl_chunk(5, 4)
+	defer delete(back)
+	le := pcm_format(7, 1, 8000, 8)
+	defer delete(le)
+	doc2 := build("RIFF", le[:], {0x00}, smpl = back[:])
+	defer delete(doc2)
+	close(&r)
+	testing.expect_value(t, open_bytes(&r, doc2[:]), Error.None)
+	testing.expect(t, r.loop == nil)
 }

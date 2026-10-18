@@ -170,3 +170,62 @@ test_pcm_s16le_first_nonfinite_preserves_prefix :: proc(t: ^testing.T) {
 		for byte in output do testing.expect_value(t, byte, GUARD)
 	}
 }
+
+@(test)
+test_to_i16_and_to_f32_per_stored_type :: proc(t: ^testing.T) {
+	testing.expect_value(t, [3]i16{to_i16(u8(0)), to_i16(u8(128)), to_i16(u8(255))}, [3]i16{-32768, 0, 32512})
+	testing.expect_value(t, [2]i16{to_i16(i8(-128)), to_i16(i8(127))}, [2]i16{-32768, 32512})
+	testing.expect_value(t, [2]i16{to_i16(i16be(-2)), to_i16(i16le(7))}, [2]i16{-2, 7})
+	// Wider integers round their dropped bits half away from zero and saturate.
+	testing.expect_value(t, [4]i16{to_i16(I24{0x80, 0, 0}), to_i16(I24{0x80, 0xFF, 0xFF}), to_i16(I24{0x7F, 0, 0}), to_i16(I24be{0x7F, 0xFF, 0xFF})}, [4]i16{1, -1, 0, 32767})
+	testing.expect_value(t, [3]i16{to_i16(i32be(min(i32))), to_i16(i32(0x7FFF_7FFF)), to_i16(i32(-0x8000))}, [3]i16{-32768, 32767, -1})
+	// Floats: exact ties, the value just below a tie (where adding a half
+	// rounds up in f64), saturation and NaN.
+	below := 0.49999999999999994 / 32768
+	testing.expect_value(t, [4]i16{to_i16(f32(0.5 / 32768)), to_i16(f64(-1.5 / 32768)), to_i16(below), to_i16(f64be(2))}, [4]i16{1, -2, 0, 32767})
+	nan := transmute(f32)u32(0x7FC00000)
+	testing.expect_value(t, [2]i16{to_i16(nan), to_i16(f32(-4))}, [2]i16{0, -32768})
+	testing.expect_value(t, [4]f32{to_f32(u8(0)), to_f32(i16be(-16384)), to_f32(I24be{0x80, 0, 0}), to_f32(i32(min(i32)))}, [4]f32{-1, -0.5, -1, -1})
+	testing.expect_value(t, [3]f32{to_f32(nan), to_f32(f64(3)), to_f32(f32be(-0.25))}, [3]f32{0, 1, -0.25})
+}
+
+@(test)
+test_g711_expansion :: proc(t: ^testing.T) {
+	// G.711 tables: mu-law 0x00 and 0x80 are the extremes, 0xFF and 0x7F
+	// zero; A-law 0xD5 and 0x55 are the smallest steps.
+	mu := [4]Mu_Law{0x00, 0x80, 0xFF, 0x7F}
+	a := [4]A_Law{0xD5, 0x55, 0xAA, 0x2A}
+	got_mu, got_a: [4]i16
+	for v, i in mu do got_mu[i] = to_i16(v)
+	for v, i in a do got_a[i] = to_i16(v)
+	testing.expect_value(t, got_mu, [4]i16{-32124, 32124, 0, 0})
+	testing.expect_value(t, got_a, [4]i16{8, -8, 32256, -32256})
+	testing.expect_value(t, to_f32(Mu_Law(0x80)), 32124.0 / 32768)
+}
+
+@(test)
+test_convert_pcm_keeps_leading_channels :: proc(t: ^testing.T) {
+	// Three big-endian 16-bit channels; keep two; the output holds two frames
+	// of the three in the data.
+	data := [?]u8{0, 1, 0, 2, 0, 3, 0xFF, 0xFF, 0xFF, 0xFE, 0, 9, 0, 4, 0, 5, 0, 6}
+	out: [4]i16
+	testing.expect_value(t, convert_pcm(data[:], .I16be, 3, out[:], 2), 2)
+	testing.expect_value(t, out, [4]i16{1, 2, -1, -2})
+	x: [9]f32
+	testing.expect_value(t, convert_pcm(data[:17], .I16be, 3, x[:], 3), 2) // the cut-off frame is left out
+	testing.expect_value(t, x[3], -1.0 / 32768)
+	testing.expect_value(t, convert_pcm(data[:], .I16, 3, out[:], 4), 0) // more channels than stored
+}
+
+@(test)
+test_interleave_i32_i16 :: proc(t: ^testing.T) {
+	l := []i32{-8388608, 128, 127}
+	r := []i32{8388607, -128, -129}
+	planes := [][]i32{l, r}
+	out: [6]i16
+	interleave_i32_i16(planes, 3, 24, out[:])
+	testing.expect_value(t, out, [6]i16{-32768, 32767, 1, -1, 0, -1})
+	narrow := []i32{-128, 127}
+	interleave_i32_i16({narrow}, 2, 8, out[:2])
+	testing.expect_value(t, [2]i16{out[0], out[1]}, [2]i16{-32768, 32512})
+}

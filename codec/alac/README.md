@@ -11,7 +11,7 @@ cfg, err := alac.parse_config(magic_cookie)
 d: alac.Decoder
 err = alac.init_decoder(&d, cfg)
 f, de := alac.decode_frame(&d, packet_bytes) // f.planes[c][:f.samples]
-alac.interleave_f32(f, pcm)                  // or use the i32 planes directly
+alac.interleave(f, pcm)                      // pcm: []f32 or []i16; optional leading-channel count; or the i32 planes
 alac.destroy_decoder(&d)
 ```
 
