@@ -103,7 +103,7 @@ movie.destroy(&w)
 r: movie.Reader
 err := movie.open_reader(&r, "in.mov", {preference = .Native}) // or open_reader_stream
 // r.video: codec, width, height, frame_count, fps_num/den, duration, rotation,
-//          color, has_alpha, bit_depth, chroma
+//          color, has_alpha, bit_depth, chroma, decodable
 // r.audio: codec, present, sample_rate, channels, samples
 for {
     f, e := movie.next_frame(&r)     // sequential playback
@@ -111,6 +111,7 @@ for {
     // f.rgba (borrowed until the next call), f.pts, f.time, f.index
 }
 f, e := movie.frame_at(&r, 12.34)   // frame on screen at 12.34 s
+keys := movie.keyframe_times(&r) // where decoding can restart, ascending
 n, e2 := movie.read_audio(&r, pcm)  // interleaved f32 from the audio position
 movie.seek_audio(&r, 12.34)
 movie.close_reader(&r)
@@ -194,6 +195,17 @@ movie.close_reader(&r)
     previous keyframe from the block index built at open. Leading pictures
     of an open GOP are skipped.
   - Requesting the current frame again returns it without work.
+- **`keyframe_times`** lists the presented times where decoding can
+  restart: the first presented frame, then each presented keyframe (every
+  frame for ProRes). `frame_at` one of them decodes no earlier frame, and
+  `next_frame` from there returns the span up to the next one, so a player
+  can go backwards a span at a time. The slice is built on the first call
+  and borrowed until `close_reader`.
+- **`Video_Info.decodable`** is probed at open (native first, the hardware
+  decoders only when native refuses) without opening a session. A file
+  whose video no decoder admits still opens, so its audio stays readable;
+  `error_detail` says why, and `next_frame`/`frame_at` return
+  `.Unsupported`.
 - **Timestamps:** pictures leave the decoder in presentation order, and each
   takes the smallest outstanding `pts`. A stream without composition offsets
   sets the decoder's `no_reordering`, so frames come out as soon as they are

@@ -66,6 +66,7 @@ Video_Info :: struct {
 	has_alpha:        bool, // ProRes 4444 with alpha, VP9 with an alpha stream, or HEVC with an alpha layer
 	bit_depth:        int, // coded sample depth; 0 until known (VP9: after the first frame)
 	chroma:           media.Chroma,
+	decodable:        bool, // a decoder admits the track (probed at open); else error_detail says why
 }
 
 Audio_Info :: struct {
@@ -131,6 +132,7 @@ Reader :: struct {
 	// presented frames; frames an edit list hides fall outside them.
 	first_rank:     int,
 	last_rank:      int,
+	keyframes:      [dynamic]f64, // keyframe_times, built on the first call
 	next_feed:      int, // next decode-order sample
 	skip_before:    i64, // leading pictures of the starting keyframe are not fed
 	pending:        [dynamic]i64, // pts of fed samples not yet output
@@ -251,6 +253,7 @@ open_input :: proc(r: ^Reader, config: Reader_Config, path: string, stream: io.S
 		}
 	}
 	if r.video_index >= 0 do if e := describe_video(r); e != .None {close_reader(r); return e}
+	if r.video_index >= 0 do check_video(r)
 	if r.audio_index >= 0 do describe_audio(r)
 	return .None
 }
@@ -637,8 +640,11 @@ mp4_color :: proc(c: mp4.Color) -> media.Color {
 	return {c.primaries, c.transfer, c.matrix_coeffs, c.full_range}
 }
 
-// The VUI colour description and bit depth of the first SPS, through the
-// native decoders' own SPS parsers.
+@(private, rodata)
+SPS_CHROMA := [4]media.Chroma{.Monochrome, .YUV420, .YUV422, .YUV444}
+
+// The VUI colour description, bit depth and chroma format of the first SPS,
+// through the native decoders' own SPS parsers.
 @(private)
 sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 	scratch: [dynamic]u8
@@ -649,6 +655,7 @@ sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 			sps, ok := avcd.parse_sequence_parameter_set(&reader)
 			if !ok do return
 			r.bit_depth = 8 + int(sps.luma_bit_depth_minus_8)
+			r.video.chroma = SPS_CHROMA[u32(sps.chroma_format)]
 			if sps.colour_primaries == 2 && sps.matrix_coefficients == 2 && !sps.video_full_range do return
 			return {sps.colour_primaries, sps.transfer_characteristics, sps.matrix_coefficients, sps.video_full_range}
 		}
@@ -677,6 +684,7 @@ sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 			if !ok do return
 			defer hevcd.destroy_sps(&sps)
 			r.bit_depth = int(sps.bit_depth_luma)
+			r.video.chroma = SPS_CHROMA[min(sps.chroma_format_idc, 3)]
 			if sps.colour_primaries == 2 && sps.matrix_coeffs == 2 && !sps.full_range do return
 			return {u8(sps.colour_primaries), u8(sps.transfer_char), u8(sps.matrix_coeffs), sps.full_range}
 		}
@@ -928,6 +936,7 @@ close_reader :: proc(r: ^Reader) {
 	delete(r.queue)
 	delete(r.pending)
 	delete(r.parameter_sets)
+	delete(r.keyframes)
 	delete(r.audio_starts)
 	free(r.conversion.tone)
 	delete(r.pcm)
@@ -944,10 +953,9 @@ VIDEO_CODECS := [Video_Codec]media.Codec {
 	.AV1    = .AV1,
 }
 
-// Restarts video decoding at decode-order sample k (a keyframe).
+// The video track's decoder configuration.
 @(private)
-reset_video :: proc(r: ^Reader, k: int) -> Error {
-	if r.session_open {media.close(&r.session); r.session_open = false}
+video_config :: proc(r: ^Reader) -> media.Config {
 	codec := VIDEO_CODECS[r.video.codec]
 	config := media.default_config(codec, .Decode)
 	config.preference = r.preference
@@ -955,7 +963,7 @@ reset_video :: proc(r: ^Reader, k: int) -> Error {
 	if codec == .H265 && r.video.has_alpha do config.preference = .Native
 	config.width, config.height = r.video.width, r.video.height
 	config.bit_depth = r.bit_depth
-	if codec == .AV1 do config.chroma = r.video.chroma // the provider admits 4:2:0 only
+	config.chroma = r.video.chroma
 	if codec == .H264 || codec == .H265 {
 		// Matroska does not say whether frames are reordered.
 		config.no_reordering = r.container == .MP4 && codec == .H264 && r.demux.tracks[r.video_index].no_reordering
@@ -972,11 +980,47 @@ reset_video :: proc(r: ^Reader, k: int) -> Error {
 	} else {
 		config.no_reordering = true
 	}
+	return config
+}
+
+// The video decoders in admission order. VideoToolbox reports itself
+// unavailable off Apple platforms, Vulkan Video on them.
+@(private)
+video_providers :: proc(r: ^Reader) -> [3]media.Provider {
 	shared := r.config.gpu_context != nil ? r.config.gpu_context : r.own_context
-	// VideoToolbox reports itself unavailable off Apple platforms, Vulkan Video on them.
-	providers := [3]media.Provider{native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared)}
+	return {native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared)}
+}
+
+@(private)
+undecodable_detail :: proc(r: ^Reader) -> string {
+	if r.video.codec == .AV1 do return "AV1 needs a GPU with Vulkan Video AV1 decoding (Main, 4:2:0, 8 or 10 bits)"
+	return "no decoder admits this video track"
+}
+
+// Whether a decoder admits the video track, from the providers' probes
+// without opening a session: native first, then the hardware probes (which
+// enumerate GPUs) only when native refuses.
+@(private)
+check_video :: proc(r: ^Reader) {
+	config := video_config(r)
+	for p in video_providers(r) {
+		hardware := p.backend != .Native
+		if hardware && config.preference == .Native || !hardware && config.preference == .Require_Hardware do continue
+		if p.probe != nil && p.probe(config, p.user) == .None {r.video.decodable = true; return}
+	}
+	r.error_detail = undecodable_detail(r)
+}
+
+// Restarts video decoding at decode-order sample k (a keyframe).
+@(private)
+reset_video :: proc(r: ^Reader, k: int) -> Error {
+	if r.session_open {media.close(&r.session); r.session_open = false}
+	config := video_config(r)
+	codec := config.codec
+	shared := r.config.gpu_context != nil ? r.config.gpu_context : r.own_context
+	providers := video_providers(r)
 	if e := media.open(&r.session, config, providers[:]); e != .None {
-		r.error_detail = codec == .AV1 ? "AV1 needs a GPU with Vulkan Video AV1 decoding (Main, 4:2:0, 8 or 10 bits)" : "no decoder admits this video track"
+		r.error_detail = undecodable_detail(r)
 		return media_error(e)
 	}
 	r.session_open = true
@@ -1340,6 +1384,26 @@ frame_at_pts :: proc(r: ^Reader, pts: i64) -> (frame: Frame, err: Error) {
 		if r.drained do return {}, .Invalid_Data
 		advance_video(r) or_return
 	}
+}
+
+// The presented times (Frame.time) at which decoding can restart, ascending:
+// the first presented frame, then each presented keyframe after it (every
+// frame for intra-only ProRes). frame_at one of these times decodes no
+// earlier frame, and next_frame from it returns the frames up to the next
+// time. The first frame is not a keyframe when an edit list starts mid-GOP;
+// its frame_at decodes from the hidden keyframe before it. Borrowed: valid
+// until close_reader.
+keyframe_times :: proc(r: ^Reader) -> []f64 {
+	if r == nil || r.video_index < 0 || r.video.frame_count == 0 do return nil
+	if len(r.keyframes) == 0 {
+		ix := &r.index
+		scale := f64(r.video.timescale)
+		for rank in r.first_rank ..= r.last_rank {
+			i := ix.presentation[rank]
+			if rank == r.first_rank || ix.sync[i] do append(&r.keyframes, f64(ix.pts[i]) / scale)
+		}
+	}
+	return r.keyframes[:]
 }
 
 // Fills out with interleaved f32 PCM from the current audio position and

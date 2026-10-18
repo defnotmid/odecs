@@ -344,6 +344,25 @@ test_edit_list_hidden_frames_are_not_presented :: proc(t: ^testing.T) {
 		after, _ := frame_at(&r, 100)
 		testing.expect_value(t, after.index, r.video.frame_count - 1)
 		testing.expect(t, psnr(frames[first + r.video.frame_count - 1], after.rgba, W, H) > 30)
+		// The first presented frame, then source keyframes 5, 10 and 15.
+		times := keyframe_times(&r)
+		testing.expect_value(t, len(times), 4)
+		for k, j in ([4]int{first, 5, 10, 15}) do testing.expectf(t, abs(times[j] - (f64(k) * 512 - f64(shift)) / 15360) < 1e-9, "shift %d keyframe %d: %v", shift, j, times[j])
+		// Each span decodes forward from its start, walked last span first.
+		for j := len(times) - 1; j >= 0; j -= 1 {
+			f, fe := frame_at(&r, times[j])
+			testing.expect_value(t, fe, Error.None)
+			testing.expect_value(t, f.time, times[j])
+			n := 1
+			for {
+				g, ge := next_frame(&r)
+				if ge == .End_Of_Stream || j + 1 < len(times) && g.time >= times[j + 1] do break
+				testing.expect_value(t, g.index, f.index + n)
+				n += 1
+			}
+			span_end := j + 1 < len(times) ? int(math.round(times[j + 1] * 30 + f64(shift) / 512)) - first : r.video.frame_count
+			testing.expect_value(t, f.index + n, span_end)
+		}
 	}
 }
 
