@@ -40,7 +40,7 @@ local function render(f, lb)
       group({ transform = { translate = { 0, (1 - s) * 500 }, scale = kick, origin = { c.x + 400, 520 } } }, function()
         group(glow(c.color), function()
           video_frame(f, { src = c.src, x = c.x, y = 250, w = 800, h = 450, looping = true,
-            start_from = beat.beat_time(c.at) })
+            start_from = beat.seconds(c.at) })
         end)
         ui.chip(c.x + 20, 230, c.label, c.color, ui.BG, 26)
       end)

@@ -51,7 +51,7 @@ local function band_bins(n)
 end
 
 function M.spectrum(f, n)
-  local bins = audio_spectrum(f.global_index / beat.FPS, { src = "track.wav", sample_size = 512, smooth = 2,
+  local bins = audio_spectrum(f.global_index / beat.FPS, { src = "score", sample_size = 512, smooth = 2,
     window = "hann" }) or {}
   local edges, out = band_bins(n), {}
   for i = 1, n do

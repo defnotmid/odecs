@@ -1,24 +1,22 @@
--- The musical clock (from onimite/examples/why_onimite/beat.lua). The
--- soundtrack (track.lua) is written on the same grid, so every cut and pop
--- lands on a beat by construction. Beat 0 is the first frame.
+-- The musical clock, read from the song (track.lua): every cut and pop
+-- lands on its beats by construction. Beat 0 is the first frame.
+
+local score = require("track")
 
 local M = {}
 
 local floor, exp, sqrt, sin, cos = math.floor, math.exp, math.sqrt, math.sin, math.cos
 
 M.FPS = 60
-M.BPM = 120
-M.BEAT = 60 / M.BPM -- seconds per beat
-
-local BEAT, FPS = M.BEAT, M.FPS
-
-function M.beat_time(beat) return beat * BEAT end
 
 -- The frame a beat starts on, rounded so scene boundaries never drift.
-function M.beat_frame(beat) return floor(beat * BEAT * FPS + 0.5) end
+function M.beat_frame(beat) return floor(score.time(beat) * M.FPS + 0.5) end
 
 -- Position on the beat grid of the whole video.
-function M.gbeat(f) return f.global_index / FPS / BEAT end
+function M.gbeat(f) return score.beat(f) end
+
+-- Seconds that `beats` last (where a clip starts playing).
+function M.seconds(beats) return score.seconds(beats) end
 
 -- ---- easing, all on 0..1 ----------------------------------------------------
 
@@ -54,10 +52,11 @@ local function spring(t, stiffness, damping)
   return 1 - (1 + w0 * t) * exp(-w0 * t)
 end
 
--- A snappy spring, `beats` since it was released on a beat.
-function M.snap(beats) return spring(beats * BEAT, 320, 22) end
+-- A snappy spring, `beats` since it was released on a beat, as long as the
+-- song says those beats last.
+function M.snap(beats) return spring(score.seconds(beats), 320, 22) end
 -- A softer spring with a visible overshoot.
-function M.soft(beats) return spring(beats * BEAT, 170, 13) end
+function M.soft(beats) return spring(score.seconds(beats), 170, 13) end
 
 -- Decaying pulse that fires on every beat: 1 on the beat, ~0 half a beat later.
 function M.pulse(beat, sharpness)

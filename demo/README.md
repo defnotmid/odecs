@@ -41,15 +41,14 @@ measured for this video:
 ## Files
 
 `video.lua` sets up the video, the beat-synced glitch cuts and the HUD;
-`scenes/` holds one file per scene; `timeline.lua` says on which beat
-everything happens; `beat.lua` is the clock and easing; `track.lua`
-synthesizes the soundtrack from the same timeline when the script loads
-(why_onimite's instruments, an E minor broken beat), once per render
-through `shared()`, registered with `audio_add("track.wav", ...)`.
+`scenes/` holds one file per scene; `track.lua` is the soundtrack, an
+odawg `song{}` (an E minor broken beat, its sections named after the
+scenes, its parts the pops and stutters the picture answers to);
+`timeline.lua` reads from it on which beat everything happens; `beat.lua`
+is the clock and easing on the song's beat.
 
-Mix (`onimite audio analyze`): -14.2 LUFS integrated, -1.5 dBTP true
-peak. Render with `build/onimite_speed`: 1560 frames in 3.9 s (5.2 s wall
-including the synthesis, 327 MB peak RSS).
+Mix (`onimite audio analyze`): -15.1 LUFS integrated, -1.5 dBTP true
+peak. Render: 1560 frames in 4.2 s wall, 309 MB peak RSS.
 
 ## Media
 
@@ -69,4 +68,4 @@ in the repository; the scenes expect them in `media/`. Neither is the render,
 - Fonts, SIL Open Font License 1.1 (`LICENSES/OFL-1.1.txt`, with each
   font's copyright), copied from onimite's examples: Bebas Neue, Space
   Grotesk, JetBrains Mono.
-- The soundtrack is synthesized.
+- The soundtrack is composed by odawg from `track.lua`.
