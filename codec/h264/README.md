@@ -1,6 +1,6 @@
 # H.264
 
-Native H.264 (AVC) encoding and decoding, progressive 8-bit 4:2:0.
+Native H.264 (AVC) encoding (progressive 8-bit 4:2:0) and decoding (progressive 4:2:0 and 4:2:2, 8 to 10 bits).
 
 - `codec/h264`: shared frame storage, syntax types, bitstream helpers, tables, transforms, prediction, macroblock neighbours and CPU deblocking.
 - `codec/h264/encoder`: Baseline-style I/P encoding with CAVLC, motion search, rate control, slices on workers, checkpoints for editing, and optional Vulkan compute deblocking.
@@ -22,7 +22,7 @@ defer h264d.destroy_decoder(&d)
 // at the end: h264d.flush_decoder(&d), then drain again
 ```
 
-- **Profiles:** Constrained Baseline, Main and High, progressive 8-bit 4:2:0. Interlaced coding (fields, MBAFF), lossless (transform bypass), other chroma formats and bit depths, slice groups, SP/SI slices and data partitioning are refused explicitly (`Unsupported_*` errors) rather than decoded wrongly.
+- **Profiles:** Constrained Baseline, Main, High, High 10 and High 4:2:2, progressive, 4:2:0 or 4:2:2 at 8 to 10 bits (luma and chroma at one depth). Pictures above 8 bits store u16 samples (`YUV_Buffer.high_depth`) and decode with i32 levels; 4:2:2 chroma planes are full height (`chroma_422`). Interlaced coding (fields, MBAFF), lossless (transform bypass), 4:0:0 and 4:4:4, slice groups, SP/SI slices and data partitioning are refused explicitly (`Unsupported_*` errors) rather than decoded wrongly. The hardware frontends take 8-bit 4:2:0 only (`sequence_parameter_set_error` without `high_formats`).
 - **Tools:** CABAC and CAVLC, all intra and inter partitions, B pictures with spatial and temporal direct, weighted prediction, multiple slices, long-term references, 8x8 transforms and scaling matrices.
 
 ## Encoder
@@ -68,7 +68,7 @@ device addresses (Linux and Windows loaders).
 
 - `odin run tests/test_kernels.odin -file -o:speed`, `tests/test_encoder_kernels.odin`, `tests/test_rd.odin`, `tests/test_state.odin`, `tests/test_checkpoint.odin`, `tests/test_parallel.odin`: scalar oracles for every intra direction, transform and quantizer QP, SAD/SSD, coefficient scans and quarter-sample positions; RD scoring; checkpoint, edit and cancel through 270 frames (frame-number wrap, IDRs, multiple references, rate control); exact parallel reconstruction.
 - `tests/test_compute.odin`: GPU boundary strengths and every filtered pixel against the CPU filter.
-- `bash tests/x264_matrix.sh`, `bash tests/encoder_matrix.sh`, `bash tests/vectors.sh`: x264 streams over the supported features (and the expected refusals), our encoder's streams, and reference vectors, decoded pixel-identically to FFmpeg.
+- `bash tests/x264_matrix.sh`, `bash tests/encoder_matrix.sh`, `bash tests/vectors.sh`: x264 streams over the supported features, including High 10 and High 4:2:2 at 8 and 10 bits (and the expected refusals), our encoder's streams, and reference vectors, decoded pixel-identically to FFmpeg.
 
 Encoder speed, 1080p, 16 slices on 16 workers (Ryzen 9 9900X3D, 2026-09-10):
 144 fps at QP 26, against 221 fps for x264 `medium` with the same tools. x264

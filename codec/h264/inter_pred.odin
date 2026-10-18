@@ -12,72 +12,32 @@ import "core:mem"
 
 PADDING_LENGTH :: 32
 
-expand_picture_luma :: proc(dst: [^]u8, stride: int, pic_w: int, pic_h: int) #no_bounds_check {
-	pad :: PADDING_LENGTH // 32
-	last_line: [^]u8 = &dst[(pic_h - 1) * stride]
-
-	// 1. Pad left and right borders for all image rows using fast 64-bit stores
-	cur := dst
-	for _ in 0 ..< pic_h {
-		l_val := u64(cur[0]) * 0x0101010101010101
-		(cast(^u64)&cur[-32])^ = l_val
-		(cast(^u64)&cur[-24])^ = l_val
-		(cast(^u64)&cur[-16])^ = l_val
-		(cast(^u64)&cur[-8])^ = l_val
-
-		r_val := u64(cur[pic_w - 1]) * 0x0101010101010101
-		(cast(^u64)&cur[pic_w])^ = r_val
-		(cast(^u64)&cur[pic_w + 8])^ = r_val
-		(cast(^u64)&cur[pic_w + 16])^ = r_val
-		(cast(^u64)&cur[pic_w + 24])^ = r_val
-
-		cur = &cur[stride]
+// Replicate the edge samples of a plane into its PAD-sample border: each row
+// left and right, then the padded first and last rows up and down.
+expand_plane :: proc(dst: [^]$T, stride: int, pic_w: int, pic_h: int, $PAD: int) #no_bounds_check {
+	Border :: #simd[PAD]T
+	for y in 0 ..< pic_h {
+		row: [^]T = &dst[y * stride]
+		intrinsics.unaligned_store((^Border)(&row[-PAD]), Border(row[0]))
+		intrinsics.unaligned_store((^Border)(&row[pic_w]), Border(row[pic_w - 1]))
 	}
-
-	// 2. Pad top and bottom rows copying full span (including pre-padded borders)
-	span := pic_w + 2 * pad
-	src_top: [^]u8 = &dst[-pad]
-	src_bot: [^]u8 = &last_line[-pad]
-	for i in 1 ..= pad {
-		mem.copy(&dst[-i * stride - pad], src_top, span)
-		mem.copy(&last_line[i * stride - pad], src_bot, span)
-	}
-}
-
-expand_picture_chroma :: proc(dst: [^]u8, stride: int, pic_w: int, pic_h: int) #no_bounds_check {
-	pad :: PADDING_LENGTH / 2 // 16
-	last_line: [^]u8 = &dst[(pic_h - 1) * stride]
-
-	// 1. Pad left and right borders for all rows
-	cur := dst
-	for _ in 0 ..< pic_h {
-		l_val := u64(cur[0]) * 0x0101010101010101
-		(cast(^u64)&cur[-16])^ = l_val
-		(cast(^u64)&cur[-8])^ = l_val
-
-		r_val := u64(cur[pic_w - 1]) * 0x0101010101010101
-		(cast(^u64)&cur[pic_w])^ = r_val
-		(cast(^u64)&cur[pic_w + 8])^ = r_val
-
-		cur = &cur[stride]
-	}
-
-	// 2. Pad top and bottom rows copying full span
-	span := pic_w + 2 * pad
-	src_top: [^]u8 = &dst[-pad]
-	src_bot: [^]u8 = &last_line[-pad]
-	for i in 1 ..= pad {
-		mem.copy(&dst[-i * stride - pad], src_top, span)
-		mem.copy(&last_line[i * stride - pad], src_bot, span)
+	span := (pic_w + 2 * PAD) * size_of(T)
+	last_line: [^]T = &dst[(pic_h - 1) * stride]
+	for i in 1 ..= PAD {
+		mem.copy(&dst[-i * stride - PAD], &dst[-PAD], span)
+		mem.copy(&last_line[i * stride - PAD], &last_line[-PAD], span)
 	}
 }
 
 expand_picture :: proc(buf: ^YUV_Buffer) {
-	w := buf.coded_width
-	h := buf.coded_height
-	expand_picture_luma(buf.y, buf.y_stride, w, h)
-	expand_picture_chroma(buf.u, buf.uv_stride, w / 2, h / 2)
-	expand_picture_chroma(buf.v, buf.uv_stride, w / 2, h / 2)
+	expand :: proc($T: typeid, buf: ^YUV_Buffer) {
+		y, u, v := buffer_planes(T, buf)
+		w, h := buf.coded_width, buf.coded_height
+		expand_plane(y, buf.y_stride, w, h, PADDING_LENGTH)
+		expand_plane(u, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
+		expand_plane(v, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
+	}
+	if buf.high_depth {expand(u16, buf)} else {expand(u8, buf)}
 }
 
 // ---------------------------------------------------------------------------
@@ -236,14 +196,21 @@ predict_skip_motion_vector :: proc(grid: ^Macroblock_Grid, macroblock_index: int
 // Direct prediction (8.4.1.2) for the 8x8 blocks in `mask`
 // ---------------------------------------------------------------------------
 
-// Col-located 4x4 block of the current 4x4 block (8.4.1.2.1, frames only)
-tap6_lanes :: #force_inline proc($N: int, p: [^]u8, step: int) -> #simd[N]i16 #no_bounds_check {
-	a := load_lanes(N, &p[-2 * step])
-	b := load_lanes(N, &p[-step])
-	c := load_lanes(N, p)
-	d := load_lanes(N, &p[step])
-	e := load_lanes(N, &p[2 * step])
-	f := load_lanes(N, &p[3 * step])
+// Samples widened to the lanes of vector type V. Interpolation uses i16 lanes
+// for u8 samples and i32 lanes for u16 samples, whose 6-tap sums and
+// bilinear products exceed 16 bits.
+@(private = "file")
+widen_lanes :: #force_inline proc($V: typeid/#simd[$N]$E, p: [^]$T) -> V #no_bounds_check {
+	return V(intrinsics.unaligned_load((^#simd[N]T)(p)))
+}
+
+tap6_lanes :: #force_inline proc($V: typeid/#simd[$N]$E, p: [^]$T, step: int) -> V #no_bounds_check {
+	a := widen_lanes(V, &p[-2 * step])
+	b := widen_lanes(V, &p[-step])
+	c := widen_lanes(V, p)
+	d := widen_lanes(V, &p[step])
+	e := widen_lanes(V, &p[2 * step])
+	f := widen_lanes(V, &p[3 * step])
 	return simd.add(
 		simd.sub(simd.add(a, f), simd.mul(simd.add(b, e), 5)),
 		simd.mul(simd.add(c, d), 20),
@@ -251,43 +218,49 @@ tap6_lanes :: #force_inline proc($N: int, p: [^]u8, step: int) -> #simd[N]i16 #n
 }
 
 // Rounded and clipped half-sample: (v + 16) >> 5
-half_lanes :: #force_inline proc(v: #simd[$N]i16) -> #simd[N]i16 {
-	return clamp_lanes(shr_lanes(simd.add(v, 16), 5))
+half_lanes :: #force_inline proc(v: #simd[$N]$E, pixel_max: E) -> #simd[N]E {
+	return clamp_lanes(shr_lanes(simd.add(v, 16), 5), pixel_max)
 }
 
-// Luma interpolation (8.4.2.2.1) of an N-wide block, N = 8 or 16
+// Luma interpolation (8.4.2.2.1) of an N-wide block, N = 4, 8 or 16
 mc_luma_lanes :: proc(
 	$N: int,
-	src: [^]u8,
+	src: [^]$T,
 	src_stride: int,
-	dst: [^]u8,
+	dst: [^]T,
 	dst_stride: int,
 	x_frac, y_frac, height: int,
+	pixel_max: i32 = 255,
 ) #no_bounds_check {
-	L :: #simd[N]i16
+	when T == u8 {E :: i16} else {E :: i32}
+	top := E(pixel_max)
 	// Horizontal half-sample b of row y, and the vertical half-sample h of row y
 	b_row :: #force_inline proc(
 		$N: int,
-		src: [^]u8,
+		src: [^]$T,
 		src_stride, y: int,
-	) -> #simd[N]i16 {return half_lanes(tap6_lanes(N, &src[y * src_stride], 1))}
+		top: $E,
+	) -> #simd[N]E {return half_lanes(tap6_lanes(#simd[N]E, &src[y * src_stride], 1), top)}
 	h_row :: #force_inline proc(
 		$N: int,
-		src: [^]u8,
+		src: [^]$T,
 		src_stride, y: int,
 		dx: int,
-	) -> #simd[N]i16 {return half_lanes(tap6_lanes(N, &src[y * src_stride + dx], src_stride))}
+		top: $E,
+	) -> #simd[N]E {return half_lanes(tap6_lanes(#simd[N]E, &src[y * src_stride + dx], src_stride), top)}
 	// Adjacent output rows share five of six horizontal-filter rows.
 	// Keep these unrounded until the vertical pass; clipping between the
 	// passes would change the diagonal half-sample.
 	horizontal_rows: [21]#simd[N]i32
 	if x_frac != 0 && y_frac != 0 && (x_frac == 2 || y_frac == 2) {
-		for row in 0 ..< height + 5 do horizontal_rows[row] = (#simd[N]i32)(tap6_lanes(N, &src[(row - 2) * src_stride], 1))
+		for row in 0 ..< height + 5 do horizontal_rows[row] = (#simd[N]i32)(tap6_lanes(#simd[N]E, &src[(row - 2) * src_stride], 1))
 	}
 	diagonal_half_samples :: #force_inline proc(
 		rows: ^[21]#simd[$Lane_Count]i32,
 		y: int,
-	) -> #simd[Lane_Count]i16 {
+		pixel_max: i32,
+		$E: typeid,
+	) -> #simd[Lane_Count]E {
 		v := simd.add(
 			simd.sub(
 				simd.add(rows[y], rows[y + 5]),
@@ -295,48 +268,48 @@ mc_luma_lanes :: proc(
 			),
 			simd.mul(simd.add(rows[y + 2], rows[y + 3]), 20),
 		)
-		return (#simd[Lane_Count]i16)(
-			simd.clamp(simd.shr(simd.add(v, 512), (#simd[Lane_Count]u32)(10)), 0, 255),
+		return (#simd[Lane_Count]E)(
+			simd.clamp(simd.shr(simd.add(v, 512), (#simd[Lane_Count]u32)(10)), 0, (#simd[Lane_Count]i32)(pixel_max)),
 		)
 	}
-	put :: #force_inline proc(dst: [^]u8, dst_stride, y: int, out: #simd[$N]i16) {
-		intrinsics.unaligned_store((^#simd[N]u8)(&dst[y * dst_stride]), (#simd[N]u8)(out))
+	put :: #force_inline proc(dst: [^]$T, dst_stride, y: int, out: #simd[$N]$E) {
+		intrinsics.unaligned_store((^#simd[N]T)(&dst[y * dst_stride]), (#simd[N]T)(out))
 	}
 	// The fractional position is fixed for the block, so each case owns its
 	// row loop.
 	switch {
 	case x_frac == 0 && y_frac == 0:
-		for y in 0 ..< height do put(dst, dst_stride, y, load_lanes(N, &src[y * src_stride]))
+		for y in 0 ..< height do intrinsics.unaligned_store((^#simd[N]T)(&dst[y * dst_stride]), intrinsics.unaligned_load((^#simd[N]T)(&src[y * src_stride])))
 	case y_frac == 0 && x_frac == 2:
-		for y in 0 ..< height do put(dst, dst_stride, y, b_row(N, src, src_stride, y))
+		for y in 0 ..< height do put(dst, dst_stride, y, b_row(N, src, src_stride, y, top))
 	case x_frac == 0 && y_frac == 2:
-		for y in 0 ..< height do put(dst, dst_stride, y, h_row(N, src, src_stride, y, 0))
+		for y in 0 ..< height do put(dst, dst_stride, y, h_row(N, src, src_stride, y, 0, top))
 	case y_frac == 0:
 		for y in 0 ..< height {
-			g := load_lanes(N, &src[y * src_stride + x_frac >> 1])
-			put(dst, dst_stride, y, average_lanes(b_row(N, src, src_stride, y), g))
+			g := widen_lanes(#simd[N]E, &src[y * src_stride + x_frac >> 1])
+			put(dst, dst_stride, y, average_lanes(b_row(N, src, src_stride, y, top), g))
 		}
 	case x_frac == 0:
 		for y in 0 ..< height {
-			g := load_lanes(N, &src[(y + y_frac >> 1) * src_stride])
-			put(dst, dst_stride, y, average_lanes(h_row(N, src, src_stride, y, 0), g))
+			g := widen_lanes(#simd[N]E, &src[(y + y_frac >> 1) * src_stride])
+			put(dst, dst_stride, y, average_lanes(h_row(N, src, src_stride, y, 0, top), g))
 		}
 	case x_frac == 2 && y_frac == 2:
-		for y in 0 ..< height do put(dst, dst_stride, y, diagonal_half_samples(&horizontal_rows, y))
+		for y in 0 ..< height do put(dst, dst_stride, y, diagonal_half_samples(&horizontal_rows, y, pixel_max, E))
 	case x_frac == 2:
 		for y in 0 ..< height {
-			j := diagonal_half_samples(&horizontal_rows, y)
-			put(dst, dst_stride, y, average_lanes(j, b_row(N, src, src_stride, y + y_frac >> 1)))
+			j := diagonal_half_samples(&horizontal_rows, y, pixel_max, E)
+			put(dst, dst_stride, y, average_lanes(j, b_row(N, src, src_stride, y + y_frac >> 1, top)))
 		}
 	case y_frac == 2:
 		for y in 0 ..< height {
-			j := diagonal_half_samples(&horizontal_rows, y)
-			put(dst, dst_stride, y, average_lanes(j, h_row(N, src, src_stride, y, x_frac >> 1)))
+			j := diagonal_half_samples(&horizontal_rows, y, pixel_max, E)
+			put(dst, dst_stride, y, average_lanes(j, h_row(N, src, src_stride, y, x_frac >> 1, top)))
 		}
 	case:
 		for y in 0 ..< height {
-			b := b_row(N, src, src_stride, y + y_frac >> 1)
-			put(dst, dst_stride, y, average_lanes(b, h_row(N, src, src_stride, y, x_frac >> 1)))
+			b := b_row(N, src, src_stride, y + y_frac >> 1, top)
+			put(dst, dst_stride, y, average_lanes(b, h_row(N, src, src_stride, y, x_frac >> 1, top)))
 		}
 	}
 }
@@ -344,28 +317,26 @@ mc_luma_lanes :: proc(
 // Chroma bilinear interpolation (8.4.2.2.2) of an N-wide block
 mc_chroma_lanes :: proc(
 	$N: int,
-	src: [^]u8,
+	src: [^]$T,
 	src_stride: int,
-	dst: [^]u8,
+	dst: [^]T,
 	dst_stride: int,
 	x_frac, y_frac, height: int,
 ) #no_bounds_check {
-	C :: #simd[N]i16
-	a := C(i16((8 - x_frac) * (8 - y_frac)))
-	b := C(i16(x_frac * (8 - y_frac)))
-	c := C(i16((8 - x_frac) * y_frac))
-	d := C(i16(x_frac * y_frac))
+	when T == u8 {E :: i16} else {E :: i32}
+	C :: #simd[N]E
+	a := C(E((8 - x_frac) * (8 - y_frac)))
+	b := C(E(x_frac * (8 - y_frac)))
+	c := C(E((8 - x_frac) * y_frac))
+	d := C(E(x_frac * y_frac))
 	for y in 0 ..< height {
-		row: [^]u8 = &src[y * src_stride]
-		next: [^]u8 = &src[(y + 1) * src_stride]
+		row: [^]T = &src[y * src_stride]
+		next: [^]T = &src[(y + 1) * src_stride]
 		v := simd.add(
-			simd.add(simd.mul(load_lanes(N, row), a), simd.mul(load_lanes(N, &row[1]), b)),
-			simd.add(simd.mul(load_lanes(N, next), c), simd.mul(load_lanes(N, &next[1]), d)),
+			simd.add(simd.mul(widen_lanes(#simd[N]E, row), a), simd.mul(widen_lanes(#simd[N]E, &row[1]), b)),
+			simd.add(simd.mul(widen_lanes(#simd[N]E, next), c), simd.mul(widen_lanes(#simd[N]E, &next[1]), d)),
 		)
-		intrinsics.unaligned_store(
-			(^#simd[N]u8)(&dst[y * dst_stride]),
-			(#simd[N]u8)(shr_lanes(simd.add(v, 32), 6)),
-		)
+		intrinsics.unaligned_store((^#simd[N]T)(&dst[y * dst_stride]), (#simd[N]T)(shr_lanes(simd.add(v, 32), 6)))
 	}
 }
 
@@ -627,108 +598,64 @@ mc_chroma :: proc(
 
 // Where one block's prediction samples go: its position in a luma plane and
 // both chroma planes, with their strides.
-Prediction_Target :: struct {
-	luma:          [^]u8,
-	chroma:        [2][^]u8,
+Prediction_Target :: struct($T: typeid) {
+	luma:          [^]T,
+	chroma:        [2][^]T,
 	luma_stride:   int,
 	chroma_stride: int,
 }
 
-// The target at luma sample (x, y) of a picture buffer.
-prediction_target :: proc(buf: ^YUV_Buffer, x, y: int) -> Prediction_Target {
-	c := (y / 2) * buf.uv_stride + x / 2
-	return {&buf.y[y * buf.y_stride + x], {&buf.u[c], &buf.v[c]}, buf.y_stride, buf.uv_stride}
+// The target at luma sample (x, y) of a picture buffer of T samples.
+prediction_target :: proc($T: typeid, buf: ^YUV_Buffer, x, y: int) -> Prediction_Target(T) {
+	luma, cb, cr := buffer_planes(T, buf)
+	c := (buf.chroma_422 ? y : y / 2) * buf.uv_stride + x / 2
+	return {&luma[y * buf.y_stride + x], {&cb[c], &cr[c]}, buf.y_stride, buf.uv_stride}
 }
 
-// Prediction samples of one block of one list, written to `out`
+// Prediction samples of one block of one list, written to `out`. Chroma
+// vectors are in eighth samples horizontally, and vertically too in 4:2:0;
+// 4:2:2 chroma has full height, so its vertical vector is in quarter samples
+// (8.4.1.4, 8.4.2.2.2).
 motion_compensate :: proc(
 	buf: ^YUV_Buffer,
 	x_pos, y_pos, width, height: int,
 	mv: [2]i16,
-	out: ^Prediction_Target,
+	out: ^Prediction_Target($T),
+	pixel_max: i32 = 255,
 ) #no_bounds_check {
 	pic_w, pic_h := buf.coded_width, buf.coded_height
+	luma, cb, cr := buffer_planes(T, buf)
 	// Keep every read inside the padded frame; a block entirely outside sees only edge samples
 	lx := clamp(x_pos + int(mv[0] >> 2), 2 - PADDING_LENGTH, pic_w + PADDING_LENGTH - width - 3)
 	ly := clamp(y_pos + int(mv[1] >> 2), 2 - PADDING_LENGTH, pic_h + PADDING_LENGTH - height - 3)
-	luma_src: [^]u8 = &buf.y[ly * buf.y_stride + lx]
+	luma_src: [^]T = &luma[ly * buf.y_stride + lx]
+	luma_x, luma_y := int(mv[0] & 3), int(mv[1] & 3)
 	switch width {
 	case 16:
-		mc_luma_lanes(
-			16,
-			luma_src,
-			buf.y_stride,
-			out.luma,
-			out.luma_stride,
-			int(mv[0] & 3),
-			int(mv[1] & 3),
-			height,
-		)
+		mc_luma_lanes(16, luma_src, buf.y_stride, out.luma, out.luma_stride, luma_x, luma_y, height, pixel_max)
 	case 8:
-		mc_luma_lanes(
-			8,
-			luma_src,
-			buf.y_stride,
-			out.luma,
-			out.luma_stride,
-			int(mv[0] & 3),
-			int(mv[1] & 3),
-			height,
-		)
+		mc_luma_lanes(8, luma_src, buf.y_stride, out.luma, out.luma_stride, luma_x, luma_y, height, pixel_max)
 	case:
-		mc_luma_lanes(
-			4,
-			luma_src,
-			buf.y_stride,
-			out.luma,
-			out.luma_stride,
-			int(mv[0] & 3),
-			int(mv[1] & 3),
-			height,
-		)
+		mc_luma_lanes(4, luma_src, buf.y_stride, out.luma, out.luma_stride, luma_x, luma_y, height, pixel_max)
 	}
 
 	cpad :: PADDING_LENGTH / 2
-	cw, ch := width / 2, height / 2
+	cw := width / 2
+	ch, cy_pos, cy_int, cy_frac := height / 2, y_pos / 2, int(mv[1] >> 3), int(mv[1] & 7)
+	if buf.chroma_422 do ch, cy_pos, cy_int, cy_frac = height, y_pos, int(mv[1] >> 2), int(mv[1] & 3) << 1
 	cx := clamp(x_pos / 2 + int(mv[0] >> 3), -cpad, pic_w / 2 + cpad - cw - 1)
-	cy := clamp(y_pos / 2 + int(mv[1] >> 3), -cpad, pic_h / 2 + cpad - ch - 1)
-	planes := [2]([^]u8){buf.u, buf.v}
+	cy := clamp(cy_pos + cy_int, -cpad, chroma_rows(buf) + cpad - ch - 1)
+	cx_frac := int(mv[0] & 7)
+	planes := [2][^]T{cb, cr}
 	for p in 0 ..< 2 {
-		src: [^]u8 = &planes[p][cy * buf.uv_stride + cx]
+		src: [^]T = &planes[p][cy * buf.uv_stride + cx]
 		switch cw {
 		case 8:
-			mc_chroma_lanes(
-				8,
-				src,
-				buf.uv_stride,
-				out.chroma[p],
-				out.chroma_stride,
-				int(mv[0] & 7),
-				int(mv[1] & 7),
-				ch,
-			)
+			mc_chroma_lanes(8, src, buf.uv_stride, out.chroma[p], out.chroma_stride, cx_frac, cy_frac, ch)
 		case 4:
-			mc_chroma_lanes(
-				4,
-				src,
-				buf.uv_stride,
-				out.chroma[p],
-				out.chroma_stride,
-				int(mv[0] & 7),
-				int(mv[1] & 7),
-				ch,
-			)
+			mc_chroma_lanes(4, src, buf.uv_stride, out.chroma[p], out.chroma_stride, cx_frac, cy_frac, ch)
 		case:
-			mc_chroma_lanes(
-				2,
-				src,
-				buf.uv_stride,
-				out.chroma[p],
-				out.chroma_stride,
-				int(mv[0] & 7),
-				int(mv[1] & 7),
-				ch,
-			)
+			mc_chroma_lanes(2, src, buf.uv_stride, out.chroma[p], out.chroma_stride, cx_frac, cy_frac, ch)
 		}
 	}
 }

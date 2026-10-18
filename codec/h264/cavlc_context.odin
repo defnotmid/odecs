@@ -2,9 +2,10 @@ package h264
 
 // nC for a luma or chroma AC block from the neighbouring blocks' coefficient
 // counts (9.2.1). `block` is the 4x4 index in decoding order (luma) or
-// plane * 4 + raster index (chroma, with `chroma` set). A caller that has
-// already resolved the macroblock's left and top neighbours (-1 when
-// unavailable) passes them; otherwise they are resolved here.
+// plane * chroma_blocks + raster index (chroma, with `chroma` set; 4 blocks
+// per plane in 4:2:0, 8 in 4:2:2). A caller that has already resolved the
+// macroblock's left and top neighbours (-1 when unavailable) passes them;
+// otherwise they are resolved here.
 cavlc_neighbour_coefficient_count :: proc {
 	cavlc_neighbour_coefficient_count_resolving,
 	cavlc_neighbour_coefficient_count_resolved,
@@ -15,6 +16,7 @@ cavlc_neighbour_coefficient_count_resolving :: proc(
 	macroblock_index: int,
 	block: int,
 	chroma: bool,
+	chroma_blocks := 4,
 ) -> i8 {
 	return cavlc_neighbour_coefficient_count_resolved(
 		grid,
@@ -23,6 +25,7 @@ cavlc_neighbour_coefficient_count_resolving :: proc(
 		top_macroblock(grid, macroblock_index),
 		block,
 		chroma,
+		chroma_blocks,
 	)
 }
 
@@ -31,6 +34,7 @@ cavlc_neighbour_coefficient_count_resolved :: proc(
 	macroblock_index, left, top: int,
 	block: int,
 	chroma: bool,
+	chroma_blocks := 4,
 ) -> i8 #no_bounds_check {
 	macroblock := &grid.macroblocks[macroblock_index]
 	// Coefficient count of a 4x4 block of a neighbouring macroblock, -1 if unusable
@@ -46,13 +50,13 @@ cavlc_neighbour_coefficient_count_resolved :: proc(
 	}
 	na, nb: int
 	if chroma {
-		plane, index := block / 4, block % 4
+		plane, index := block / chroma_blocks, block % chroma_blocks
 		bx, by := index & 1, index >> 1
-		base := 16 + plane * 4
+		last_row := chroma_blocks / 2 - 1
 		na =
-			bx > 0 ? int(macroblock.nonzero_coefficient_counts[base + by * 2]) : neighbour_count(grid, left, base + by * 2 + 1)
+			bx > 0 ? int(macroblock.nonzero_coefficient_counts[chroma_count_index(plane, by * 2)]) : neighbour_count(grid, left, chroma_count_index(plane, by * 2 + 1))
 		nb =
-			by > 0 ? int(macroblock.nonzero_coefficient_counts[base + bx]) : neighbour_count(grid, top, base + 2 + bx)
+			by > 0 ? int(macroblock.nonzero_coefficient_counts[chroma_count_index(plane, index - 2)]) : neighbour_count(grid, top, chroma_count_index(plane, last_row * 2 + bx))
 	} else {
 		bx, by := subblock_to_xy(block)
 		na =

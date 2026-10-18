@@ -300,7 +300,9 @@ Slice_Header :: struct {
 }
 
 
-// Contiguous Planar YUV420 Image Buffer
+// Contiguous planar YUV image buffer: 4:2:0, or 4:2:2 with full-height chroma.
+// With high_depth the planes hold u16 samples (y, u, v point at them; strides
+// count samples); otherwise u8.
 YUV_Buffer :: struct {
 	width:        int, // displayed (cropped) size
 	height:       int,
@@ -310,6 +312,8 @@ YUV_Buffer :: struct {
 	crop_y:       int,
 	y_stride:     int,
 	uv_stride:    int,
+	chroma_422:   bool,
+	high_depth:   bool,
 	y:            [^]u8,
 	u:            [^]u8,
 	v:            [^]u8,
@@ -379,7 +383,7 @@ Macroblock :: struct {
 	reference_picture_ids:      [2][4]i32, // pic_id of the referenced picture, -1 if none
 	motion_vectors:             [2][16][2]i16,
 	motion_differences:         [2][16][2]u8, // |mvd| clipped, CABAC context of neighbours
-	nonzero_coefficient_counts: [24]u8, // non-zero coefficients per 4x4: 16 luma, 4 cb, 4 cr
+	nonzero_coefficient_counts: [32]u8, // non-zero coefficients per 4x4: 16 luma, then chroma_count_index
 	has_8x8_coefficients:       [4]bool, // 8x8 transform block has coefficients (deblocking)
 	has_dc_coefficients:        [3]bool, // coded_block_flag of the luma DC, Cb DC and Cr DC blocks
 	slice_index:                u16,

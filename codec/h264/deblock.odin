@@ -193,8 +193,9 @@ expand_chroma_tc :: #force_inline proc(v: [4]i8) -> #simd[8]i16 {
 	return expand_chroma({u8(v[0]), u8(v[1]), u8(v[2]), u8(v[3])})
 }
 
-// Luma edge filtering (8.7.2.3, 8.7.2.4) of all lanes at once
-filter_luma_edge :: #force_inline proc(e: ^Luma_Edge, alpha, beta: i32, bs: [4]u8, tc0: [4]i8) {
+// Luma edge filtering (8.7.2.3, 8.7.2.4) of all lanes at once. Thresholds
+// arrive scaled to the bit depth; filtered samples clip to pixel_max.
+filter_luma_edge :: #force_inline proc(e: ^Luma_Edge, alpha, beta: i32, bs: [4]u8, tc0: [4]i8, pixel_max: i16) {
 	L :: #simd[16]i16
 	zero, one := L(0), L(1)
 	alpha_lanes, beta_lanes := L(i16(alpha)), L(i16(beta))
@@ -226,8 +227,8 @@ filter_luma_edge :: #force_inline proc(e: ^Luma_Edge, alpha, beta: i32, bs: [4]u
 		simd.neg(tc),
 		tc,
 	)
-	weak_p0 := clamp_lanes(simd.add(p0, delta))
-	weak_q0 := clamp_lanes(simd.sub(q0, delta))
+	weak_p0 := clamp_lanes(simd.add(p0, delta), pixel_max)
+	weak_q0 := clamp_lanes(simd.sub(q0, delta), pixel_max)
 	mid := shr_lanes(simd.add(simd.add(p0, q0), 1), 1)
 	weak_p1 := simd.add(
 		p1,
@@ -311,7 +312,7 @@ filter_luma_edge :: #force_inline proc(e: ^Luma_Edge, alpha, beta: i32, bs: [4]u
 }
 
 // Chroma edge filtering (8.7.2.3 with chromaEdgeFlag): p0/q0 only, tc already includes +1
-filter_chroma_edge :: proc(e: ^Chroma_Edge, alpha, beta: i32, bs: [4]u8, tc: [4]i8) {
+filter_chroma_edge :: proc(e: ^Chroma_Edge, alpha, beta: i32, bs: [4]u8, tc: [4]i8, pixel_max: i16) {
 	C :: #simd[8]i16
 	zero := C(0)
 	alpha_lanes, beta_lanes := C(i16(alpha)), C(i16(beta))
@@ -337,8 +338,8 @@ filter_chroma_edge :: proc(e: ^Chroma_Edge, alpha, beta: i32, bs: [4]u8, tc: [4]
 		simd.neg(tc_lanes),
 		tc_lanes,
 	)
-	weak_p0 := clamp_lanes(simd.add(p0, delta))
-	weak_q0 := clamp_lanes(simd.sub(q0, delta))
+	weak_p0 := clamp_lanes(simd.add(p0, delta), pixel_max)
+	weak_q0 := clamp_lanes(simd.sub(q0, delta), pixel_max)
 	flat_p0 := shr_lanes(
 		simd.add(simd.add(simd.add(simd.shl(p1, (#simd[8]u16)(1)), p0), q1), 2),
 		2,
@@ -353,11 +354,12 @@ filter_chroma_edge :: proc(e: ^Chroma_Edge, alpha, beta: i32, bs: [4]u8, tc: [4]
 
 // Horizontal edge: the rows p3..q3 are contiguous samples
 deblock_luma_horizontal :: proc(
-	pix: [^]u8,
+	pix: [^]$T,
 	stride: int,
 	alpha, beta: i32,
 	bs: [4]u8,
 	tc0: [4]i8,
+	pixel_max: i16 = 255,
 ) #no_bounds_check {
 	e := Luma_Edge {
 		load_lanes(16, &pix[-4 * stride]),
@@ -369,13 +371,13 @@ deblock_luma_horizontal :: proc(
 		load_lanes(16, &pix[2 * stride]),
 		load_lanes(16, &pix[3 * stride]),
 	}
-	filter_luma_edge(&e, alpha, beta, bs, tc0)
-	intrinsics.unaligned_store((^#simd[16]u8)(&pix[-3 * stride]), (#simd[16]u8)(e.p2))
-	intrinsics.unaligned_store((^#simd[16]u8)(&pix[-2 * stride]), (#simd[16]u8)(e.p1))
-	intrinsics.unaligned_store((^#simd[16]u8)(&pix[-stride]), (#simd[16]u8)(e.p0))
-	intrinsics.unaligned_store((^#simd[16]u8)(pix), (#simd[16]u8)(e.q0))
-	intrinsics.unaligned_store((^#simd[16]u8)(&pix[stride]), (#simd[16]u8)(e.q1))
-	intrinsics.unaligned_store((^#simd[16]u8)(&pix[2 * stride]), (#simd[16]u8)(e.q2))
+	filter_luma_edge(&e, alpha, beta, bs, tc0, pixel_max)
+	store_lanes(&pix[-3 * stride], e.p2)
+	store_lanes(&pix[-2 * stride], e.p1)
+	store_lanes(&pix[-stride], e.p0)
+	store_lanes(pix, e.q0)
+	store_lanes(&pix[stride], e.q1)
+	store_lanes(&pix[2 * stride], e.q2)
 }
 
 // 8x8 transpose of 16-bit lanes
@@ -403,11 +405,12 @@ transpose_8x8_i16 :: #force_inline proc(r: [8]#simd[8]i16) -> (t: [8]#simd[8]i16
 // Vertical edge: the 8 samples around the edge of each of the 16 rows are
 // transposed into the p3..q3 lane vectors and back after filtering.
 deblock_luma_vertical :: proc(
-	pix: [^]u8,
+	pix: [^]$T,
 	stride: int,
 	alpha, beta: i32,
 	bs: [4]u8,
 	tc0: [4]i8,
+	pixel_max: i16 = 255,
 ) #no_bounds_check {
 	H :: #simd[8]i16
 	upper, lower: [8]H
@@ -420,7 +423,7 @@ deblock_luma_vertical :: proc(
 	e: Luma_Edge
 	columns := [8]^#simd[16]i16{&e.p3, &e.p2, &e.p1, &e.p0, &e.q0, &e.q1, &e.q2, &e.q3}
 	#unroll for k in 0 ..< 8 do columns[k]^ = simd.shuffle(cu[k], cl[k], 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
-	filter_luma_edge(&e, alpha, beta, bs, tc0)
+	filter_luma_edge(&e, alpha, beta, bs, tc0, pixel_max)
 	#unroll for k in 0 ..< 8 {
 		cu[k] = simd.swizzle(columns[k]^, 0, 1, 2, 3, 4, 5, 6, 7)
 		cl[k] = simd.swizzle(columns[k]^, 8, 9, 10, 11, 12, 13, 14, 15)
@@ -428,20 +431,18 @@ deblock_luma_vertical :: proc(
 	upper = transpose_8x8_i16(cu)
 	lower = transpose_8x8_i16(cl)
 	for i in 0 ..< 8 {
-		intrinsics.unaligned_store((^#simd[8]u8)(&pix[i * stride - 4]), (#simd[8]u8)(upper[i]))
-		intrinsics.unaligned_store(
-			(^#simd[8]u8)(&pix[(i + 8) * stride - 4]),
-			(#simd[8]u8)(lower[i]),
-		)
+		store_lanes(&pix[i * stride - 4], upper[i])
+		store_lanes(&pix[(i + 8) * stride - 4], lower[i])
 	}
 }
 
 deblock_chroma_horizontal :: proc(
-	pix: [^]u8,
+	pix: [^]$T,
 	stride: int,
 	alpha, beta: i32,
 	bs: [4]u8,
 	tc: [4]i8,
+	pixel_max: i16 = 255,
 ) #no_bounds_check {
 	e := Chroma_Edge {
 		load_lanes(8, &pix[-2 * stride]),
@@ -449,18 +450,19 @@ deblock_chroma_horizontal :: proc(
 		load_lanes(8, pix),
 		load_lanes(8, &pix[stride]),
 	}
-	filter_chroma_edge(&e, alpha, beta, bs, tc)
-	intrinsics.unaligned_store((^#simd[8]u8)(&pix[-stride]), (#simd[8]u8)(e.p0))
-	intrinsics.unaligned_store((^#simd[8]u8)(pix), (#simd[8]u8)(e.q0))
+	filter_chroma_edge(&e, alpha, beta, bs, tc, pixel_max)
+	store_lanes(&pix[-stride], e.p0)
+	store_lanes(pix, e.q0)
 }
 
 // Vertical chroma edge: 8 rows of the 4 samples around the edge, transposed into the p1..q1 lanes
 deblock_chroma_vertical :: proc(
-	pix: [^]u8,
+	pix: [^]$T,
 	stride: int,
 	alpha, beta: i32,
 	bs: [4]u8,
 	tc: [4]i8,
+	pixel_max: i16 = 255,
 ) #no_bounds_check {
 	Q :: #simd[4]i16
 	rows: [8]Q
@@ -477,33 +479,27 @@ deblock_chroma_vertical :: proc(
 		simd.shuffle(quad23, quad67, 0, 1, 2, 3, 8, 9, 10, 11),
 		simd.shuffle(quad23, quad67, 4, 5, 6, 7, 12, 13, 14, 15),
 	}
-	filter_chroma_edge(&e, alpha, beta, bs, tc)
+	filter_chroma_edge(&e, alpha, beta, bs, tc, pixel_max)
 	for i in 0 ..< 8 {
-		row: [^]u8 = &pix[i * stride]
-		row[-1] = u8(simd.extract(e.p0, i))
-		row[0] = u8(simd.extract(e.q0, i))
+		row: [^]T = &pix[i * stride]
+		row[-1] = T(simd.extract(e.p0, i))
+		row[0] = T(simd.extract(e.q0, i))
 	}
 }
 
-// Chroma edges use thresholds from the chroma QPs of both sides and tC0 + 1 (8.7.2.2).
-chroma_edge_params :: proc(
-	qp_p, qp_q, chroma_offset, alpha_offset, beta_offset: i32,
-	bs: [4]u8,
-) -> (
-	alpha, beta: i32,
-	tc: [4]i8,
-) {
-	qpc_p := i32(chroma_qp_table[clamp(qp_p + chroma_offset, 0, 51)])
-	qpc_q := i32(chroma_qp_table[clamp(qp_q + chroma_offset, 0, 51)])
-	qp_avg := (qpc_p + qpc_q + 1) >> 1
-	idx_a := clamp(qp_avg + alpha_offset, 0, 51)
-	idx_b := clamp(qp_avg + beta_offset, 0, 51)
-	alpha = i32(deblock_alpha_table[idx_a + 12])
-	beta = i32(deblock_beta_table[idx_b + 12])
-	for k in 0 ..< 4 {
-		if bs[k] > 0 && bs[k] < 4 do tc[k] = deblock_tc0_table[idx_a + 12][bs[k]] + 1
-	}
-	return
+// QPC of a macroblock with QPY qp_y (8.5.8): qPI clipped to
+// [-QpBdOffsetC, 51] maps through Table 8-15, which is the identity below 30.
+chroma_qp :: #force_inline proc "contextless" (qp_y, offset, qp_bd_offset: i32) -> i32 {
+	qpi := clamp(qp_y + offset, -qp_bd_offset, 51)
+	return qpi < 0 ? qpi : i32(chroma_qp_table[qpi])
+}
+
+// What the filter depends on besides the macroblocks: the sample bit depth
+// (thresholds scale by 1 << (bit_depth - 8), 8.7.2.2) and 4:2:2 chroma, whose
+// full-height planes have four horizontal chroma edges per macroblock.
+Deblock_Format :: struct {
+	bit_depth:  int, // 0 means 8
+	chroma_422: bool,
 }
 
 @(private)
@@ -517,22 +513,27 @@ Deblock_MB_Data :: struct {
 	strengths:  [2][4][4]u8,
 	// Internal edges, left boundary, top boundary; Y, Cb, Cr in each domain.
 	thresholds: [3][3]Deblock_Threshold,
+	// 8x8 transform: the odd internal luma edges are not filtered, though
+	// 4:2:2 chroma filters the horizontal ones (their strengths are kept).
+	transform8: bool,
 }
 
 @(private)
 deblock_threshold :: #force_inline proc(
 	qp, alpha_offset, beta_offset: i32,
 	chroma: bool,
+	depth_shift: uint,
 ) -> Deblock_Threshold {
 	a, b := clamp(qp + alpha_offset, 0, 51), clamp(qp + beta_offset, 0, 51)
+	tc :: #force_inline proc(t: i8, shift: uint, chroma: bool) -> i8 {return t << shift + (chroma ? 1 : 0)}
 	return {
-		i32(deblock_alpha_table[a + 12]),
-		i32(deblock_beta_table[b + 12]),
+		i32(deblock_alpha_table[a + 12]) << depth_shift,
+		i32(deblock_beta_table[b + 12]) << depth_shift,
 		{
 			0,
-			deblock_tc0_table[a + 12][1] + (chroma ? 1 : 0),
-			deblock_tc0_table[a + 12][2] + (chroma ? 1 : 0),
-			deblock_tc0_table[a + 12][3] + (chroma ? 1 : 0),
+			tc(deblock_tc0_table[a + 12][1], depth_shift, chroma),
+			tc(deblock_tc0_table[a + 12][2], depth_shift, chroma),
+			tc(deblock_tc0_table[a + 12][3], depth_shift, chroma),
 		},
 	}
 }
@@ -558,7 +559,7 @@ deblock_internal_orientation :: #force_inline proc(
 	dir, coded: #simd[16]i32,
 	pics: [2]#simd[16]i32,
 	mv: [2][2]#simd[16]i32,
-	transform8: bool,
+	odd_edges: bool,
 	$Vertical: bool,
 ) {
 	V :: #simd[16]i32
@@ -577,7 +578,7 @@ deblock_internal_orientation :: #force_inline proc(
 	B :: #simd[16]u8
 	bytes := transmute([16]u8)B(strength)
 	for edge in 1 ..< 4 {
-		if transform8 && edge & 1 != 0 do continue
+		if !odd_edges && edge & 1 != 0 do continue
 		#unroll for k in 0 ..< 4 do out[edge][k] = bytes[edge_blocks[Vertical ? 0 : 1][edge][k][1]]
 	}
 }
@@ -590,11 +591,16 @@ prepare_deblock_mb :: proc(
 	macroblocks: #soa[]Macroblock,
 	chroma_offsets: [2]i32,
 	columns, mb_x, mb_y: int,
+	format := Deblock_Format{},
 ) #no_bounds_check {
 	out.strengths = {}
 	index := mb_y * columns + mb_x
 	cur := &macroblocks[index]
+	out.transform8 = cur.uses_8x8_transform
 	if cur.deblocking_mode == .Disabled do return
+	// Odd internal edges of each orientation: all of them without the 8x8
+	// transform, and the horizontal ones for 4:2:2 chroma regardless.
+	odd_edges := [2]bool{!cur.uses_8x8_transform, !cur.uses_8x8_transform || format.chroma_422}
 	uncoded :=
 		!cur.is_intra &&
 		cur.luma_coded_block_mask == 0 &&
@@ -611,7 +617,7 @@ prepare_deblock_mb :: proc(
 	if !uncoded {
 		if cur.is_intra {
 			for orientation in 0 ..< 2 do for edge in 1 ..< 4 {
-				if !cur.uses_8x8_transform || edge & 1 == 0 do out.strengths[orientation][edge] = {3, 3, 3, 3}
+				if odd_edges[orientation] || edge & 1 == 0 do out.strengths[orientation][edge] = {3, 3, 3, 3}
 			}
 		} else {
 			V :: #simd[16]i32
@@ -675,28 +681,14 @@ prepare_deblock_mb :: proc(
 					),
 				)
 			}
-			deblock_internal_orientation(
-				&out.strengths[0],
-				dir,
-				coded,
-				pics,
-				mv,
-				cur.uses_8x8_transform,
-				true,
-			)
-			deblock_internal_orientation(
-				&out.strengths[1],
-				dir,
-				coded,
-				pics,
-				mv,
-				cur.uses_8x8_transform,
-				false,
-			)
+			deblock_internal_orientation(&out.strengths[0], dir, coded, pics, mv, odd_edges[0], true)
+			deblock_internal_orientation(&out.strengths[1], dir, coded, pics, mv, odd_edges[1], false)
 		}
 	}
 	qp_q := cur.type == .I_PCM ? 0 : i32(cur.quantizer)
 	alpha_offset, beta_offset := i32(cur.alpha_offset) << 1, i32(cur.beta_offset) << 1
+	depth_shift := uint(max(format.bit_depth, 8) - 8)
+	qp_bd_offset := 6 * i32(depth_shift)
 	for domain in 0 ..< 3 {
 		active := false
 		if domain == 0 {
@@ -715,15 +707,17 @@ prepare_deblock_mb :: proc(
 			alpha_offset,
 			beta_offset,
 			false,
+			depth_shift,
 		)
 		for plane in 0 ..< 2 {
-			qpc_p := i32(chroma_qp_table[clamp(qp_p + chroma_offsets[plane], 0, 51)])
-			qpc_q := i32(chroma_qp_table[clamp(qp_q + chroma_offsets[plane], 0, 51)])
+			qpc_p := chroma_qp(qp_p, chroma_offsets[plane], qp_bd_offset)
+			qpc_q := chroma_qp(qp_q, chroma_offsets[plane], qp_bd_offset)
 			out.thresholds[domain][plane + 1] = deblock_threshold(
 				(qpc_p + qpc_q + 1) >> 1,
 				alpha_offset,
 				beta_offset,
 				true,
+				depth_shift,
 			)
 		}
 	}
@@ -731,77 +725,62 @@ prepare_deblock_mb :: proc(
 
 // Filter the vertical or horizontal edges of a macroblock: the macroblock edge
 // and the internal 4x4 edges (only the 8x8 edge for 8x8 transforms), plus the
-// two chroma edges that coincide with them.
+// chroma edges that coincide with them: those of the even luma edges, and in
+// 4:2:2 every horizontal one (chroma rows match luma rows).
 @(private)
 filter_deblock_mb_edges :: proc(
 	data: ^Deblock_MB_Data,
 	buf: ^YUV_Buffer,
 	mb_x, mb_y: int,
 	vertical: bool,
+	$T: typeid,
+	bit_depth: int,
 ) #no_bounds_check {
+	// A constant clip for 8-bit samples keeps the filters' clamps immediate.
+	when T == u8 {pixel_max :: i16(255)} else {pixel_max := i16(1) << uint(bit_depth) - 1}
 	orientation := vertical ? 0 : 1
 	active := false
 	for edge in 0 ..< 4 do active ||= transmute(u32)data.strengths[orientation][edge] != 0
 	if !active do return
-	mb_pix_y: [^]u8 = &buf.y[(mb_y * 16) * buf.y_stride + mb_x * 16]
-	chroma_pix := [2]([^]u8) {
-		&buf.u[(mb_y * 8) * buf.uv_stride + mb_x * 8],
-		&buf.v[(mb_y * 8) * buf.uv_stride + mb_x * 8],
+	luma_plane, cb, cr := buffer_planes(T, buf)
+	mb_pix_y: [^]T = &luma_plane[(mb_y * 16) * buf.y_stride + mb_x * 16]
+	chroma_height := buf.chroma_422 ? 16 : 8
+	chroma_pix := [2][^]T {
+		&cb[(mb_y * chroma_height) * buf.uv_stride + mb_x * 8],
+		&cr[(mb_y * chroma_height) * buf.uv_stride + mb_x * 8],
 	}
 
 	for edge in 0 ..< 4 {
+		// Test the strengths in place: a copy assembled bytewise and reread as
+		// a word stalls store forwarding.
+		if transmute(u32)data.strengths[orientation][edge] == 0 do continue
 		bs := data.strengths[orientation][edge]
-		if transmute(u32)bs == 0 do continue
 		domain := edge == 0 ? orientation + 1 : 0
 		luma := &data.thresholds[domain][0]
-		if luma.alpha != 0 && luma.beta != 0 {
+		if luma.alpha != 0 && luma.beta != 0 && !(data.transform8 && edge & 1 != 0) {
 			tc0: [4]i8
 			for k in 0 ..< 4 do if bs[k] > 0 && bs[k] < 4 do tc0[k] = luma.tc[bs[k]]
 			if vertical {
-				deblock_luma_vertical(
-					&mb_pix_y[edge * 4],
-					buf.y_stride,
-					luma.alpha,
-					luma.beta,
-					bs,
-					tc0,
-				)
+				deblock_luma_vertical(&mb_pix_y[edge * 4], buf.y_stride, luma.alpha, luma.beta, bs, tc0, pixel_max)
 			} else {
-				deblock_luma_horizontal(
-					&mb_pix_y[edge * 4 * buf.y_stride],
-					buf.y_stride,
-					luma.alpha,
-					luma.beta,
-					bs,
-					tc0,
-				)
+				deblock_luma_horizontal(&mb_pix_y[edge * 4 * buf.y_stride], buf.y_stride, luma.alpha, luma.beta, bs, tc0, pixel_max)
 			}
 		}
-		if edge & 1 == 0 {
-			for plane in 0 ..< 2 {
-				chroma := &data.thresholds[domain][plane + 1]
-				if chroma.alpha == 0 || chroma.beta == 0 do continue
-				c_tc: [4]i8
-				for k in 0 ..< 4 do if bs[k] > 0 && bs[k] < 4 do c_tc[k] = chroma.tc[bs[k]]
-				if vertical {
-					deblock_chroma_vertical(
-						&chroma_pix[plane][edge * 2],
-						buf.uv_stride,
-						chroma.alpha,
-						chroma.beta,
-						bs,
-						c_tc,
-					)
-				} else {
-					deblock_chroma_horizontal(
-						&chroma_pix[plane][edge * 2 * buf.uv_stride],
-						buf.uv_stride,
-						chroma.alpha,
-						chroma.beta,
-						bs,
-						c_tc,
-					)
-				}
+		chroma_row_edge := !vertical && buf.chroma_422
+		if edge & 1 != 0 && !chroma_row_edge do continue
+		for plane in 0 ..< 2 {
+			chroma := &data.thresholds[domain][plane + 1]
+			if chroma.alpha == 0 || chroma.beta == 0 do continue
+			c_tc: [4]i8
+			for k in 0 ..< 4 do if bs[k] > 0 && bs[k] < 4 do c_tc[k] = chroma.tc[bs[k]]
+			switch {
+			case vertical && buf.chroma_422:
+				deblock_chroma_vertical_422(&chroma_pix[plane][edge * 2], buf.uv_stride, chroma.alpha, chroma.beta, bs, c_tc, pixel_max)
+			case vertical:
+				deblock_chroma_vertical(&chroma_pix[plane][edge * 2], buf.uv_stride, chroma.alpha, chroma.beta, bs, c_tc, pixel_max)
+			case:
+				row := chroma_row_edge ? edge * 4 : edge * 2
+				deblock_chroma_horizontal(&chroma_pix[plane][row * buf.uv_stride], buf.uv_stride, chroma.alpha, chroma.beta, bs, c_tc, pixel_max)
 			}
 		}
 	}
@@ -816,21 +795,57 @@ deblock_mb_edges :: proc(
 ) {
 	data: Deblock_MB_Data
 	prepare_deblock_mb(&data, macroblocks, chroma_offsets, macroblock_columns, mb_x, mb_y)
-	filter_deblock_mb_edges(&data, buf, mb_x, mb_y, vertical)
+	filter_deblock_mb_edges(&data, buf, mb_x, mb_y, vertical, u8, 8)
 }
 
+// Deblock a picture whose samples have `bit_depth` bits (u16 storage when the
+// buffer is high_depth).
 deblock_picture :: proc(
 	macroblocks: #soa[]Macroblock,
 	buf: ^YUV_Buffer,
 	macroblock_columns, macroblock_rows: int,
 	chroma_offsets: [2]i32,
+	bit_depth := 8,
 ) {
-	data: Deblock_MB_Data
-	for mb_y in 0 ..< macroblock_rows do for mb_x in 0 ..< macroblock_columns {
-		// Disabled pictures/MBs require neither scratch publication nor filters.
-		if macroblocks[mb_y * macroblock_columns + mb_x].deblocking_mode == .Disabled do continue
-		prepare_deblock_mb(&data, macroblocks, chroma_offsets, macroblock_columns, mb_x, mb_y)
-		filter_deblock_mb_edges(&data, buf, mb_x, mb_y, true)
-		filter_deblock_mb_edges(&data, buf, mb_x, mb_y, false)
+	run :: proc(
+		macroblocks: #soa[]Macroblock,
+		buf: ^YUV_Buffer,
+		macroblock_columns, macroblock_rows: int,
+		chroma_offsets: [2]i32,
+		bit_depth: int,
+		$T: typeid,
+	) {
+		data: Deblock_MB_Data
+		format := Deblock_Format{bit_depth, buf != nil && buf.chroma_422}
+		for mb_y in 0 ..< macroblock_rows do for mb_x in 0 ..< macroblock_columns {
+			// Disabled pictures/MBs require neither scratch publication nor filters.
+			if macroblocks[mb_y * macroblock_columns + mb_x].deblocking_mode == .Disabled do continue
+			prepare_deblock_mb(&data, macroblocks, chroma_offsets, macroblock_columns, mb_x, mb_y, format)
+			filter_deblock_mb_edges(&data, buf, mb_x, mb_y, true, T, bit_depth)
+			filter_deblock_mb_edges(&data, buf, mb_x, mb_y, false, T, bit_depth)
+		}
+	}
+	if buf != nil && buf.high_depth {
+		run(macroblocks, buf, macroblock_columns, macroblock_rows, chroma_offsets, bit_depth, u16)
+	} else {
+		run(macroblocks, buf, macroblock_columns, macroblock_rows, chroma_offsets, bit_depth, u8)
+	}
+}
+
+// A vertical 4:2:2 chroma edge: 16 rows, four per luma block row, filtered
+// as two 8-row halves. Kept out of line, off the 4:2:0 path.
+@(private)
+deblock_chroma_vertical_422 :: #force_no_inline proc(
+	pix: [^]$T,
+	stride: int,
+	alpha, beta: i32,
+	bs: [4]u8,
+	tc: [4]i8,
+	pixel_max: i16,
+) {
+	for half in 0 ..< 2 {
+		h_bs := [4]u8{bs[2 * half], bs[2 * half], bs[2 * half + 1], bs[2 * half + 1]}
+		h_tc := [4]i8{tc[2 * half], tc[2 * half], tc[2 * half + 1], tc[2 * half + 1]}
+		deblock_chroma_vertical(&pix[half * 8 * stride], stride, alpha, beta, h_bs, h_tc, pixel_max)
 	}
 }

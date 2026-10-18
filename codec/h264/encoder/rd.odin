@@ -668,7 +668,7 @@ evaluate_chroma_candidate :: proc(
 			if (mode == .Horizontal || mode == .Plane) && !neighbours.left do continue
 			cost := motion_lambda * i32(mode == .DC ? 1 : 3)
 			for p in 0 ..< 2 {
-				h264.predict_intra_chroma_8x8(
+				h264.predict_intra_chroma(
 					reconstructed_planes[p],
 					reconstruction.uv_stride,
 					mode,
@@ -690,7 +690,7 @@ evaluate_chroma_candidate :: proc(
 			}
 		}
 		candidate.choice.chroma_prediction_mode = selected_mode
-		for p in 0 ..< 2 do h264.predict_intra_chroma_8x8(reconstructed_planes[p], reconstruction.uv_stride, candidate.choice.chroma_prediction_mode, neighbours.top, neighbours.left)
+		for p in 0 ..< 2 do h264.predict_intra_chroma(reconstructed_planes[p], reconstruction.uv_stride, candidate.choice.chroma_prediction_mode, neighbours.top, neighbours.left)
 	}
 	macroblock.chroma_prediction_mode = candidate.choice.chroma_prediction_mode
 	code_chroma_residual(task, macroblock, &candidate.choice, macroblock_index, intra)

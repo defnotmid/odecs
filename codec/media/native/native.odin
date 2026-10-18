@@ -103,7 +103,10 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 	depth := config.bit_depth == 0 ? 8 : config.bit_depth
 	switch config.codec {
 	case .H264:
-		if depth != 8 || config.chroma != .YUV420 do return .Unsupported
+		// Decoding: High 10 and High 4:2:2 too. Encoding: 8-bit 4:2:0.
+		high := config.operation == .Decode
+		if depth < 8 || depth > (high ? 10 : 8) do return .Unsupported
+		if config.chroma != .YUV420 && !(high && config.chroma == .YUV422) do return .Unsupported
 	case .H265:
 		if config.operation == .Encode && depth != 8 && depth != 10 do return .Unsupported
 	case .ProRes:
@@ -608,13 +611,12 @@ decode_alac :: proc(session: ^media.Session, s: ^State, packet: media.Packet, re
 emit_avc :: proc(p: ^avcd.Picture, receiver: media.Receiver) {
 	if receiver.video == nil do return
 	b := p.buf
-	y := b.y[b.crop_y * b.y_stride + b.crop_x:][:(b.height - 1) * b.y_stride + b.width]
-	u := b.u[(b.crop_y / 2) * b.uv_stride +
-	b.crop_x / 2:][:(b.height / 2 - 1) * b.uv_stride +
-	b.width / 2]
-	v := b.v[(b.crop_y / 2) * b.uv_stride +
-	b.crop_x / 2:][:(b.height / 2 - 1) * b.uv_stride +
-	b.width / 2]
+	size := b.high_depth ? 2 : 1
+	sub_y := b.chroma_422 ? 1 : 2
+	// The displayed samples of a plane, `size` bytes each.
+	cropped :: proc(p: [^]u8, stride, x, y, w, h, size: int) -> media.Plane {
+		return {p[(y * stride + x) * size:][:((h - 1) * stride + w) * size], stride * size}
+	}
 	receiver.video(
 		{
 			width = b.width,
@@ -623,11 +625,15 @@ emit_avc :: proc(p: ^avcd.Picture, receiver: media.Receiver) {
 			coded_height = b.coded_height,
 			crop_x = b.crop_x,
 			crop_y = b.crop_y,
-			bit_depth = 8,
-			storage_bits = 8,
-			chroma = .YUV420,
+			bit_depth = p.bit_depth,
+			storage_bits = 8 * size,
+			chroma = b.chroma_422 ? .YUV422 : .YUV420,
 			poc = int(p.poc),
-			planes = {{y, b.y_stride}, {u, b.uv_stride}, {v, b.uv_stride}},
+			planes = {
+				cropped(b.y, b.y_stride, b.crop_x, b.crop_y, b.width, b.height, size),
+				cropped(b.u, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size),
+				cropped(b.v, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size),
+			},
 		},
 		receiver.user,
 	)

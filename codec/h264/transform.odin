@@ -166,7 +166,7 @@ compute_level_scales :: proc(
 
 // Scan order -> raster order lane permutation of a 4x4 block
 @(private = "file")
-raster_from_scan_4x4 :: proc(v: #simd[16]i16) -> #simd[16]i16 {
+raster_from_scan_4x4 :: proc(v: #simd[16]$E) -> #simd[16]E {
 	return simd.swizzle(v, 0, 1, 5, 6, 2, 4, 7, 12, 3, 8, 11, 13, 9, 10, 14, 15)
 }
 
@@ -185,20 +185,22 @@ scale_16 :: #force_inline proc(levels: #simd[16]i32, scale: ^[16]i32, qp: i32) -
 // Dequantise a 4x4 block from its scan-order levels and add its inverse
 // transform to the prediction. `dc` replaces the DC coefficient when
 // `dc_separate` (Intra 16x16 luma and chroma, whose DC is transformed apart).
+// Samples are u8, or u16 up to `pixel_max`; levels i16, or i32 above 8 bits.
 reconstruct_4x4 :: proc(
 	scales: ^Level_Scales,
-	pixels: [^]u8,
+	pixels: [^]$T,
 	stride: int,
-	levels: ^[16]i16,
+	levels: ^[16]$L,
 	has_ac: bool,
 	qp: i32,
 	list: int,
 	dc_separate: bool,
 	dc: i32,
+	pixel_max: i32 = 255,
 ) #no_bounds_check {
 	coeffs: #simd[16]i32
 	if has_ac {
-		raster := raster_from_scan_4x4(intrinsics.unaligned_load((^#simd[16]i16)(levels)))
+		raster := raster_from_scan_4x4(intrinsics.unaligned_load((^#simd[16]L)(levels)))
 		coeffs = scale_16((#simd[16]i32)(raster), &scales.scale_4x4[list][qp % 6], qp)
 	}
 	if dc_separate do coeffs = simd.replace(coeffs, 0, dc)
@@ -209,19 +211,21 @@ reconstruct_4x4 :: proc(
 		simd.swizzle(coeffs, 4, 5, 6, 7),
 		simd.swizzle(coeffs, 8, 9, 10, 11),
 		simd.swizzle(coeffs, 12, 13, 14, 15),
+		pixel_max,
 	)
 }
 
 // Dequantise an 8x8 block from its scan-order levels (8.5.13.1) and add its inverse transform
 reconstruct_8x8 :: proc(
 	scales: ^Level_Scales,
-	pixels: [^]u8,
+	pixels: [^]$T,
 	stride: int,
-	levels: ^[64]i16,
+	levels: ^[64]$L,
 	qp: i32,
 	list: int,
+	pixel_max: i32 = 255,
 ) #no_bounds_check {
-	scan := intrinsics.unaligned_load((^#simd[64]i16)(levels))
+	scan := intrinsics.unaligned_load((^#simd[64]L)(levels))
 	raster := simd.shuffle(
 		scan,
 		scan,
@@ -312,7 +316,7 @@ reconstruct_8x8 :: proc(
 	rows[5] = simd.swizzle(coeffs, 40, 41, 42, 43, 44, 45, 46, 47)
 	rows[6] = simd.swizzle(coeffs, 48, 49, 50, 51, 52, 53, 54, 55)
 	rows[7] = simd.swizzle(coeffs, 56, 57, 58, 59, 60, 61, 62, 63)
-	idct_8x8_add_lanes(pixels, stride, rows)
+	idct_8x8_add_lanes(pixels, stride, rows, pixel_max)
 }
 
 // Levels in scan order to scaled coefficients in raster order (8.5.12.1).
@@ -359,8 +363,15 @@ dequant_8x8 :: proc(
 	}
 }
 
+// A scaled DC value stored back as a level: i16 levels saturate (8 bits),
+// i32 levels hold the spec's range.
+@(private = "file")
+store_dc :: #force_inline proc "contextless" (dc: ^$L, v: i32) {
+	when L == i16 {dc^ = i16(clamp(v, -32768, 32767))} else {dc^ = v}
+}
+
 // Intra 16x16 luma DC: levels in scan order -> inverse Hadamard -> scaled DC per 4x4 block in raster order (8.5.10)
-luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]i16, qp: i32) #no_bounds_check {
+luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]$L, qp: i32) #no_bounds_check {
 	c: [16]i32
 	for i in 0 ..< 16 do c[zigzag_scan_4x4[i]] = i32(dc[i])
 	rows: [16]i32
@@ -383,13 +394,13 @@ luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]i16, qp: i32) #no_b
 		for i in 0 ..< 4 {
 			v :=
 				qp >= 36 ? (f[i] * scale) << (qp_per - 6) : (f[i] * scale + (1 << (5 - qp_per))) >> (6 - qp_per)
-			dc[i * 4 + j] = i16(clamp(v, -32768, 32767))
+			store_dc(&dc[i * 4 + j], v)
 		}
 	}
 }
 
 // Chroma DC (4:2:0): 2x2 inverse Hadamard and scaling (8.5.11)
-chroma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[4]i16, qp: i32, list: int) {
+chroma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[4]$L, qp: i32, list: int) {
 	c := [4]i32{i32(dc[0]), i32(dc[1]), i32(dc[2]), i32(dc[3])}
 	f := [4]i32 {
 		c[0] + c[1] + c[2] + c[3],
@@ -398,7 +409,39 @@ chroma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[4]i16, qp: i32, list
 		c[0] - c[1] - c[2] + c[3],
 	}
 	scale := scales.scale_4x4[list][qp % 6][0]
-	for i in 0 ..< 4 do dc[i] = i16(clamp(((f[i] * scale) << uint(qp / 6)) >> 5, -32768, 32767))
+	for i in 0 ..< 4 do store_dc(&dc[i], ((f[i] * scale) << uint(qp / 6)) >> 5)
+}
+
+// Chroma DC (4:2:2): levels in their 2x4 scan order (8-305), inverse
+// transform (8-325) and scaling at QP'C + 3 (8.5.11.2), returned per chroma
+// 4x4 block in raster order (two per row).
+chroma_dc_dequant_idct_422 :: proc(scales: ^Level_Scales, dc: ^[8]$L, qp: i32, list: int) {
+	// c[row][column] of the 4x2 array
+	c := [4][2]i32 {
+		{i32(dc[0]), i32(dc[2])},
+		{i32(dc[1]), i32(dc[5])},
+		{i32(dc[3]), i32(dc[6])},
+		{i32(dc[4]), i32(dc[7])},
+	}
+	qp_dc := qp + 3
+	scale := scales.scale_4x4[list][qp_dc % 6][0]
+	shift := uint(qp_dc / 6)
+	for j in 0 ..< 2 {
+		column := [4]i32 {
+			c[0][j] + c[1][j] + c[2][j] + c[3][j],
+			c[0][j] + c[1][j] - c[2][j] - c[3][j],
+			c[0][j] - c[1][j] - c[2][j] + c[3][j],
+			c[0][j] - c[1][j] + c[2][j] - c[3][j],
+		}
+		for i in 0 ..< 4 do c[i][j] = column[i]
+	}
+	for i in 0 ..< 4 {
+		f := [2]i32{c[i][0] + c[i][1], c[i][0] - c[i][1]}
+		for j in 0 ..< 2 {
+			v := qp_dc >= 36 ? (f[j] * scale) << (shift - 6) : (f[j] * scale + (1 << (5 - shift))) >> (6 - shift)
+			store_dc(&dc[i * 2 + j], v)
+		}
+	}
 }
 
 // 4x4 inverse transform of scaled coefficients added to the prediction
@@ -416,9 +459,10 @@ idct_4x4_add :: proc(pixels: [^]u8, stride: int, coeffs: ^[16]i32) #no_bounds_ch
 }
 
 idct_4x4_add_lanes :: proc(
-	pixels: [^]u8,
+	pixels: [^]$T,
 	stride: int,
 	r0, r1, r2, r3: #simd[4]i32,
+	pixel_max: i32 = 255,
 ) #no_bounds_check {
 	V :: #simd[4]i32
 	one := (#simd[4]u32)(1)
@@ -442,11 +486,11 @@ idct_4x4_add_lanes :: proc(
 	g3 := simd.add(f1, simd.shr(f3, one))
 	rows := [4]V{simd.add(g0, g3), simd.add(g1, g2), simd.sub(g1, g2), simd.sub(g0, g3)}
 	for y in 0 ..< 4 {
-		pred := (V)(intrinsics.unaligned_load((^#simd[4]u8)(&pixels[y * stride])))
+		pred := (V)(intrinsics.unaligned_load((^#simd[4]T)(&pixels[y * stride])))
 		v := simd.add(pred, simd.shr(simd.add(rows[y], 32), (#simd[4]u32)(6)))
 		intrinsics.unaligned_store(
-			(^#simd[4]u8)(&pixels[y * stride]),
-			(#simd[4]u8)(simd.clamp(v, 0, 255)),
+			(^#simd[4]T)(&pixels[y * stride]),
+			(#simd[4]T)(simd.clamp(v, 0, V(pixel_max))),
 		)
 	}
 }
@@ -482,7 +526,12 @@ idct_8x8_add :: proc(pixels: [^]u8, stride: int, coeffs: ^[64]i32) #no_bounds_ch
 	idct_8x8_add_lanes(pixels, stride, rows)
 }
 
-idct_8x8_add_lanes :: proc(pixels: [^]u8, stride: int, rows: [8]#simd[8]i32) #no_bounds_check {
+idct_8x8_add_lanes :: proc(
+	pixels: [^]$T,
+	stride: int,
+	rows: [8]#simd[8]i32,
+	pixel_max: i32 = 255,
+) #no_bounds_check {
 	V :: #simd[8]i32
 	pass :: #force_inline proc(d: [8]V) -> [8]V {
 		one, two := (#simd[8]u32)(1), (#simd[8]u32)(2)
@@ -516,11 +565,11 @@ idct_8x8_add_lanes :: proc(pixels: [^]u8, stride: int, rows: [8]#simd[8]i32) #no
 	columns := pass(transpose_8x8(rows)) // row pass: lanes are the rows
 	out := pass(transpose_8x8(columns)) // column pass: lanes are the columns
 	for y in 0 ..< 8 {
-		pred := (V)(intrinsics.unaligned_load((^#simd[8]u8)(&pixels[y * stride])))
+		pred := (V)(intrinsics.unaligned_load((^#simd[8]T)(&pixels[y * stride])))
 		v := simd.add(pred, simd.shr(simd.add(out[y], 32), (#simd[8]u32)(6)))
 		intrinsics.unaligned_store(
-			(^#simd[8]u8)(&pixels[y * stride]),
-			(#simd[8]u8)(simd.clamp(v, 0, 255)),
+			(^#simd[8]T)(&pixels[y * stride]),
+			(#simd[8]T)(simd.clamp(v, 0, V(pixel_max))),
 		)
 	}
 }

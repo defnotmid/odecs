@@ -186,6 +186,7 @@ test_typed_slice_failure_propagation :: proc(t: ^testing.T) {
 	reader := h264.init_bit_reader(data[:])
 	d := Slice_Decoder {
 		state = &state,
+		bit_depth = 8,
 		sequence_parameters = &sps,
 		picture_parameters = &pps,
 		header = &header,
@@ -193,7 +194,7 @@ test_typed_slice_failure_propagation :: proc(t: ^testing.T) {
 		grid = {macroblocks = macroblocks, macroblock_columns = 1, slice_index = 1},
 		macroblock_count = 1,
 	}
-	testing.expect_value(t, decode_macroblock(&d, 0), Error.Invalid_Macroblock_Type)
+	testing.expect_value(t, decode_macroblock(&d, 0, u8), Error.Invalid_Macroblock_Type)
 	testing.expect_value(t, state.mbs_decoded, 0)
 	macroblocks[0].slice_index = 1
 	reader = h264.init_bit_reader(data[:])
@@ -222,5 +223,5 @@ test_typed_slice_failure_propagation :: proc(t: ^testing.T) {
 	header.num_ref_idx_l0_active = 0
 	testing.expect_value(t, read_macroblock_prediction(&d, 0), Error.Invalid_Reference_Index)
 	reader = h264.init_bit_reader(nil)
-	testing.expect_value(t, decode_pcm(&d, 0), Error.Truncated_PCM)
+	testing.expect_value(t, decode_pcm(&d, 0, u8), Error.Truncated_PCM)
 }

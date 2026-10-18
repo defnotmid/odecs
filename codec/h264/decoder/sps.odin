@@ -260,12 +260,19 @@ parse_sequence_parameter_set :: proc(
 
 // Admission is separate from syntax parsing, so unsupported headers can still
 // be inspected without allocating native reconstruction storage.
-sequence_parameter_set_error :: proc(sequence_parameters: ^h264.Sequence_Parameter_Set) -> Error {
+// The hardware frontends take 8-bit 4:2:0; `high_formats` also admits 4:2:2
+// and 9 or 10 bits (High 10, High 4:2:2), with luma and chroma at one depth,
+// which the native decoder reconstructs.
+sequence_parameter_set_error :: proc(
+	sequence_parameters: ^h264.Sequence_Parameter_Set,
+	high_formats := false,
+) -> Error {
 	switch {
-	case sequence_parameters.chroma_format != .YUV_420:
+	case sequence_parameters.chroma_format != .YUV_420 &&
+	     !(high_formats && sequence_parameters.chroma_format == .YUV_422):
 		return .Unsupported_Chroma_Format
-	case sequence_parameters.luma_bit_depth_minus_8 != 0 ||
-	     sequence_parameters.chroma_bit_depth_minus_8 != 0:
+	case sequence_parameters.luma_bit_depth_minus_8 > (high_formats ? 2 : 0) ||
+	     sequence_parameters.chroma_bit_depth_minus_8 != sequence_parameters.luma_bit_depth_minus_8:
 		return .Unsupported_Bit_Depth
 	case sequence_parameters.bypass_transform_at_zero_quantizer:
 		return .Unsupported_Transform_Bypass

@@ -5,6 +5,12 @@ import "base:intrinsics"
 import "core:simd"
 
 // ---------------------------------------------------------------------------
+// Intra prediction (8.3) of u8 samples, or u16 samples of `bit_depth` bits:
+// the mid-level 1 << (bit_depth - 1) stands in for missing neighbours and
+// interpolated samples clip to (1 << bit_depth) - 1.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Intra 4x4 Prediction Modes
 // ---------------------------------------------------------------------------
 
@@ -19,9 +25,10 @@ Intra_4x4_Predictors :: struct {
 }
 
 load_intra_4x4_predictors :: proc(
-	pixels: [^]u8,
+	pixels: [^]$T,
 	stride: int,
 	have_top, have_left, have_top_right: bool,
+	bit_depth := 8,
 ) -> (
 	predictors: Intra_4x4_Predictors,
 ) #no_bounds_check {
@@ -78,7 +85,7 @@ load_intra_4x4_predictors :: proc(
 	case have_left:
 		predictors.dc_value = (left_sum + 2) >> 2
 	case:
-		predictors.dc_value = 128
+		predictors.dc_value = i16(1) << uint(bit_depth - 1)
 	}
 	return
 }
@@ -238,19 +245,25 @@ load_luma_block_4x4 :: #force_inline proc(
 }
 
 store_luma_block_4x4 :: #force_inline proc(
-	pixels: [^]u8,
+	pixels: [^]$T,
 	stride: int,
 	samples: #simd[16]i16,
 ) #no_bounds_check {
-	rows := transmute([4]u32)(#simd[16]u8)(samples)
-	for row in 0 ..< 4 do intrinsics.unaligned_store((^u32)(&pixels[row * stride]), rows[row])
+	when T == u8 {
+		rows := transmute([4]u32)(#simd[16]u8)(samples)
+		for row in 0 ..< 4 do intrinsics.unaligned_store((^u32)(&pixels[row * stride]), rows[row])
+	} else {
+		rows := transmute([4]#simd[4]T)(#simd[16]T)(samples)
+		for row in 0 ..< 4 do intrinsics.unaligned_store((^#simd[4]T)(&pixels[row * stride]), rows[row])
+	}
 }
 
 predict_intra_4x4 :: proc(
-	destination: [^]u8,
+	destination: [^]$T,
 	stride: int,
 	mode: Intra_4x4_Mode,
 	have_top, have_left, have_top_right: bool,
+	bit_depth := 8,
 ) {
 	predictors := load_intra_4x4_predictors(
 		destination,
@@ -258,59 +271,64 @@ predict_intra_4x4 :: proc(
 		have_top,
 		have_left,
 		have_top_right,
+		bit_depth,
 	)
 	store_luma_block_4x4(destination, stride, intra_4x4_prediction_samples(&predictors, mode))
 }
 
 // ---------------------------------------------------------------------------
-// Intra 16x16 and chroma 8x8 prediction (8.3.3, 8.3.4): whole rows as lanes
+// Intra 16x16 and chroma prediction (8.3.3, 8.3.4): whole rows as lanes
 // ---------------------------------------------------------------------------
 
-// Plane prediction rows: (a + b * (x - centre) + c * (y - centre) + 16) >> 5
-plane_rows :: #force_inline proc($N: int, dst: [^]u8, stride: int, a, b, c: i32) #no_bounds_check {
+// Plane prediction rows: (a + b * (x - centre_x) + c * (y - centre_y) + 16) >> 5
+// over N columns and `rows` rows.
+plane_rows :: #force_inline proc(
+	$N: int,
+	dst: [^]$T,
+	stride, rows: int,
+	a, b, c: i32,
+	pixel_max: i32,
+) #no_bounds_check {
 	W :: #simd[N]i32
 	xs: [N]i32
 	for x in 0 ..< N do xs[x] = i32(x) - i32(N / 2 - 1)
 	base := simd.add(simd.mul((W)(b), transmute(W)xs), (W)(a + 16))
-	for y in 0 ..< N {
-		v := simd.shr(simd.add(base, (W)(c * (i32(y) - i32(N / 2 - 1)))), (#simd[N]u32)(5))
-		intrinsics.unaligned_store(
-			(^#simd[N]u8)(&dst[y * stride]),
-			(#simd[N]u8)((#simd[N]i16)(simd.clamp(v, 0, 255))),
-		)
+	for y in 0 ..< rows {
+		v := simd.shr(simd.add(base, (W)(c * (i32(y) - i32(rows / 2 - 1)))), (#simd[N]u32)(5))
+		intrinsics.unaligned_store((^#simd[N]T)(&dst[y * stride]), (#simd[N]T)(simd.clamp(v, 0, W(pixel_max))))
 	}
 }
 
 // Copy the N samples above the block into every row
-fill_from_top :: #force_inline proc($N: int, dst: [^]u8, stride: int) #no_bounds_check {
-	top := intrinsics.unaligned_load((^#simd[N]u8)(&dst[-stride]))
-	for y in 0 ..< N do intrinsics.unaligned_store((^#simd[N]u8)(&dst[y * stride]), top)
+fill_from_top :: #force_inline proc($N: int, dst: [^]$T, stride, rows: int) #no_bounds_check {
+	top := intrinsics.unaligned_load((^#simd[N]T)(&dst[-stride]))
+	for y in 0 ..< rows do intrinsics.unaligned_store((^#simd[N]T)(&dst[y * stride]), top)
 }
 
-fill_value :: #force_inline proc($N: int, dst: [^]u8, stride: int, value: u8) #no_bounds_check {
-	v := (#simd[N]u8)(value)
-	for y in 0 ..< N do intrinsics.unaligned_store((^#simd[N]u8)(&dst[y * stride]), v)
+fill_value :: #force_inline proc($N: int, dst: [^]$T, stride, rows: int, value: T) #no_bounds_check {
+	v := (#simd[N]T)(value)
+	for y in 0 ..< rows do intrinsics.unaligned_store((^#simd[N]T)(&dst[y * stride]), v)
 }
 
-fill_from_left :: #force_inline proc($N: int, dst: [^]u8, stride: int) #no_bounds_check {
-	for y in 0 ..< N do intrinsics.unaligned_store((^#simd[N]u8)(&dst[y * stride]), (#simd[N]u8)(dst[y * stride - 1]))
+fill_from_left :: #force_inline proc($N: int, dst: [^]$T, stride, rows: int) #no_bounds_check {
+	for y in 0 ..< rows do intrinsics.unaligned_store((^#simd[N]T)(&dst[y * stride]), (#simd[N]T)(dst[y * stride - 1]))
 }
 
 predict_intra_16x16 :: proc(
-	dst: [^]u8,
+	dst: [^]$T,
 	stride: int,
 	mode: Intra_16x16_Mode,
 	top_avail, left_avail: bool,
+	bit_depth := 8,
 ) #no_bounds_check {
-	L :: #simd[16]i16
 	switch mode {
 	case .Vertical:
-		fill_from_top(16, dst, stride)
+		fill_from_top(16, dst, stride, 16)
 	case .Horizontal:
-		fill_from_left(16, dst, stride)
+		fill_from_left(16, dst, stride, 16)
 	case .DC:
 		sum: i32
-		v: i32 = 128
+		v := i32(1) << uint(bit_depth - 1)
 		switch {
 		case top_avail && left_avail:
 			for i in 0 ..< 16 do sum += i32(dst[-stride + i]) + i32(dst[i * stride - 1])
@@ -322,10 +340,10 @@ predict_intra_16x16 :: proc(
 			for i in 0 ..< 16 do sum += i32(dst[i * stride - 1])
 			v = (sum + 8) >> 4
 		}
-		fill_value(16, dst, stride, u8(v))
+		fill_value(16, dst, stride, 16, T(v))
 	case .Plane:
-		top: [^]u8 = &dst[-stride]
-		left: [^]u8 = &dst[-1]
+		top: [^]T = &dst[-stride]
+		left: [^]T = &dst[-1]
 		h, v: i32
 		for i in 0 ..< 8 {
 			h += i32(i + 1) * (i32(top[8 + i]) - i32(top[6 - i]))
@@ -335,111 +353,83 @@ predict_intra_16x16 :: proc(
 			16,
 			dst,
 			stride,
+			16,
 			(i32(left[15 * stride]) + i32(top[15])) << 4,
 			(5 * h + 32) >> 6,
 			(5 * v + 32) >> 6,
+			i32(1) << uint(bit_depth) - 1,
 		)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Intra 8x8 Chroma Prediction Modes
+// Intra chroma prediction (8.3.4): 8x8 blocks, or 8x16 for 4:2:2
 // ---------------------------------------------------------------------------
 
-predict_intra_chroma_8x8 :: proc(
-	dst: [^]u8,
+predict_intra_chroma :: proc(
+	dst: [^]$T,
 	stride: int,
 	mode: Intra_Chroma_Mode,
 	top_avail: bool,
 	left_avail: bool,
+	chroma_422 := false,
+	bit_depth := 8,
 ) #no_bounds_check {
+	rows := chroma_422 ? 16 : 8
 	switch mode {
 	case .DC:
-		{
-			// Chroma DC is per 4x4 quadrant: the top-right quadrant uses only
-			// the top edge and the bottom-left only the left edge (8.3.4.1-3).
-			m0, m1, m2, m3: u8 = 128, 128, 128, 128
-			if top_avail && left_avail {
-				top: [^]u8 = &dst[-stride]
-				s_top_0 := i32(top[0]) + i32(top[1]) + i32(top[2]) + i32(top[3])
-				s_top_1 := i32(top[4]) + i32(top[5]) + i32(top[6]) + i32(top[7])
-				s_left_0 :=
-					i32(dst[0 * stride - 1]) +
-					i32(dst[1 * stride - 1]) +
-					i32(dst[2 * stride - 1]) +
-					i32(dst[3 * stride - 1])
-				s_left_1 :=
-					i32(dst[4 * stride - 1]) +
-					i32(dst[5 * stride - 1]) +
-					i32(dst[6 * stride - 1]) +
-					i32(dst[7 * stride - 1])
-
-				m0 = u8((s_top_0 + s_left_0 + 4) >> 3)
-				m1 = u8((s_top_1 + 2) >> 2)
-				m2 = u8((s_left_1 + 2) >> 2)
-				m3 = u8((s_top_1 + s_left_1 + 4) >> 3)
-			} else if top_avail {
-				top: [^]u8 = &dst[-stride]
-				s_top_0 := i32(top[0]) + i32(top[1]) + i32(top[2]) + i32(top[3])
-				s_top_1 := i32(top[4]) + i32(top[5]) + i32(top[6]) + i32(top[7])
-				m0 = u8((s_top_0 + 2) >> 2)
-				m1 = u8((s_top_1 + 2) >> 2)
-				m2 = m0
-				m3 = m1
-			} else if left_avail {
-				s_left_0 :=
-					i32(dst[0 * stride - 1]) +
-					i32(dst[1 * stride - 1]) +
-					i32(dst[2 * stride - 1]) +
-					i32(dst[3 * stride - 1])
-				s_left_1 :=
-					i32(dst[4 * stride - 1]) +
-					i32(dst[5 * stride - 1]) +
-					i32(dst[6 * stride - 1]) +
-					i32(dst[7 * stride - 1])
-				m0 = u8((s_left_0 + 2) >> 2)
-				m1 = m0
-				m2 = u8((s_left_1 + 2) >> 2)
-				m3 = m2
-			}
-
-			// Quadrant 0 (top-left 4x4)
-			for y in 0 ..< 4 {
-				for x in 0 ..< 4 do dst[y * stride + x] = m0
-			}
-			// Quadrant 1 (top-right 4x4)
-			for y in 0 ..< 4 {
-				for x in 4 ..< 8 do dst[y * stride + x] = m1
-			}
-			// Quadrant 2 (bottom-left 4x4)
-			for y in 4 ..< 8 {
-				for x in 0 ..< 4 do dst[y * stride + x] = m2
-			}
-			// Quadrant 3 (bottom-right 4x4)
-			for y in 4 ..< 8 {
-				for x in 4 ..< 8 do dst[y * stride + x] = m3
+		// DC per 4x4 block from the macroblock's top row and left column
+		// (8.3.4.1-3): blocks on the top row away from the left edge prefer
+		// the top samples, blocks on the left column below the top prefer
+		// the left samples, the others use both.
+		sum_top :: #force_inline proc(dst: [^]$T, stride, x: int) -> i32 {
+			return i32(dst[-stride + x]) + i32(dst[-stride + x + 1]) + i32(dst[-stride + x + 2]) + i32(dst[-stride + x + 3])
+		}
+		sum_left :: #force_inline proc(dst: [^]$T, stride, y: int) -> i32 {
+			return i32(dst[y * stride - 1]) + i32(dst[(y + 1) * stride - 1]) + i32(dst[(y + 2) * stride - 1]) + i32(dst[(y + 3) * stride - 1])
+		}
+		for y := 0; y < rows; y += 4 {
+			for x := 0; x < 8; x += 4 {
+				v := i32(1) << uint(bit_depth - 1)
+				prefer_top := x > 0 && y == 0
+				prefer_left := x == 0 && y > 0
+				switch {
+				case prefer_top && top_avail, prefer_left && !left_avail && top_avail:
+					v = (sum_top(dst, stride, x) + 2) >> 2
+				case prefer_left && left_avail, prefer_top && !top_avail && left_avail:
+					v = (sum_left(dst, stride, y) + 2) >> 2
+				case top_avail && left_avail:
+					v = (sum_top(dst, stride, x) + sum_left(dst, stride, y) + 4) >> 3
+				case top_avail:
+					v = (sum_top(dst, stride, x) + 2) >> 2
+				case left_avail:
+					v = (sum_left(dst, stride, y) + 2) >> 2
+				}
+				fill_value(4, &dst[y * stride + x], stride, 4, T(v))
 			}
 		}
-
 	case .Horizontal:
-		fill_from_left(8, dst, stride)
+		fill_from_left(8, dst, stride, rows)
 	case .Vertical:
-		fill_from_top(8, dst, stride)
+		fill_from_top(8, dst, stride, rows)
 	case .Plane:
-		top: [^]u8 = &dst[-stride]
-		left: [^]u8 = &dst[-1]
+		top: [^]T = &dst[-stride]
+		left: [^]T = &dst[-1]
 		h, v: i32
-		for i in 0 ..< 4 {
-			h += i32(i + 1) * (i32(top[4 + i]) - i32(top[2 - i]))
-			v += i32(i + 1) * (i32(left[(4 + i) * stride]) - i32(left[(2 - i) * stride]))
-		}
+		for i in 0 ..< 4 do h += i32(i + 1) * (i32(top[4 + i]) - i32(top[2 - i]))
+		// The vertical gradient spans 4 rows each side of the centre, 8 for 4:2:2.
+		half := rows / 2
+		for i in 0 ..< half do v += i32(i + 1) * (i32(left[(half + i) * stride]) - i32(left[(half - 2 - i) * stride]))
+		c := chroma_422 ? (5 * v + 32) >> 6 : (17 * v + 16) >> 5
 		plane_rows(
 			8,
 			dst,
 			stride,
-			(i32(left[7 * stride]) + i32(top[7])) << 4,
+			rows,
+			(i32(left[(rows - 1) * stride]) + i32(top[7])) << 4,
 			(17 * h + 16) >> 5,
-			(17 * v + 16) >> 5,
+			c,
+			i32(1) << uint(bit_depth) - 1,
 		)
 	}
 }
@@ -449,10 +439,11 @@ predict_intra_chroma_8x8 :: proc(
 // ---------------------------------------------------------------------------
 
 predict_intra_8x8 :: proc(
-	dst: [^]u8,
+	dst: [^]$T,
 	stride: int,
 	mode: Intra_4x4_Mode,
 	top_avail, left_avail, top_right_avail, top_left_avail: bool,
+	bit_depth := 8,
 ) #no_bounds_check {
 	// Unfiltered neighbours: t[0..15] above, l[0..7] left, corner
 	t, ft: [16]i32
@@ -493,7 +484,7 @@ predict_intra_8x8 :: proc(
 	at :: #force_inline proc(samples: []i32, corner: i32, i: int) -> i32 {
 		return i < 0 ? corner : samples[i]
 	}
-	put :: #force_inline proc(dst: [^]u8, stride, x, y: int, v: i32) {dst[y * stride + x] = u8(v)}
+	put :: #force_inline proc(dst: [^]$T, stride, x, y: int, v: i32) {dst[y * stride + x] = T(v)}
 
 	switch mode {
 	case .Vertical:
@@ -502,7 +493,7 @@ predict_intra_8x8 :: proc(
 		for y in 0 ..< 8 do for x in 0 ..< 8 do put(dst, stride, x, y, fl[y])
 	case .DC:
 		sum: i32 = 0
-		v: i32 = 128
+		v := i32(1) << uint(bit_depth - 1)
 		switch {
 		case top_avail && left_avail:
 			for i in 0 ..< 8 do sum += ft[i] + fl[i]

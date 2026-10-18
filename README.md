@@ -10,7 +10,7 @@ native codecs as the software path. MIT licensed ([LICENSE](LICENSE)).
 ## Packages
 
 Video:
-- `codec/h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0, with encoder checkpoints for editing ([README](codec/h264/README.md)).
+- `codec/h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0 encoding and 4:2:0 or 4:2:2 decoding at 8 to 10 bits, with encoder checkpoints for editing ([README](codec/h264/README.md)).
 - `codec/h265/{encoder,decoder}`: H.265 Main, Main 10 and range extensions; HEVC with an alpha layer, encoded and decoded ([README](codec/h265/README.md)).
 - `codec/prores/decoder`: Apple ProRes 422 and 4444/XQ with alpha ([README](codec/prores/README.md)).
 - `codec/vp9/{encoder,decoder}`: VP9 decoding, profiles 0–3 with alpha streams; encoding, profile 0 with alpha ([README](codec/vp9/README.md)).

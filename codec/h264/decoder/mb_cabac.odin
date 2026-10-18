@@ -432,7 +432,7 @@ coded_block_cond :: proc(
 		)
 	} else when cat == .Chroma_AC {
 		return(
-			neighbour.chroma_residual_mode == .DC_And_AC && neighbour.nonzero_coefficient_counts[16 + plane * 4 + sub] > 0 ? 1 : 0 \
+			neighbour.chroma_residual_mode == .DC_And_AC && neighbour.nonzero_coefficient_counts[h264.chroma_count_index(plane, sub)] > 0 ? 1 : 0 \
 		)
 	} else {
 		if neighbour.luma_coded_block_mask >> uint(sub / 4) & 1 == 0 do return 0
@@ -447,7 +447,7 @@ cabac_read_residual_block :: proc(
 	macroblock_index: int,
 	$cat: Block_Cat,
 	block: int,
-	levels: []i16,
+	levels: []$L,
 	max_coeffs: int,
 ) -> int {
 	// coded_block_flag (not sent for 8x8 blocks in 4:2:0)
@@ -462,12 +462,15 @@ cabac_read_residual_block :: proc(
 				coded_block_cond(decoder, macroblock_index, left, cat, 0, plane) +
 				2 * coded_block_cond(decoder, macroblock_index, top, cat, 0, plane)
 		} else when cat == .Chroma_AC {
-			plane, index := block / 4, block % 4
+			// Blocks in raster order, two per row: 2 rows, 4 in 4:2:2.
+			blocks := decoder.chroma_422 ? 8 : 4
+			plane, index := block / blocks, block % blocks
 			bx, by := index & 1, index >> 1
+			counts := &macroblock.nonzero_coefficient_counts
 			a :=
-				bx > 0 ? (macroblock.nonzero_coefficient_counts[16 + plane * 4 + by * 2] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.left_index, cat, by * 2 + 1, plane)
+				bx > 0 ? (counts[h264.chroma_count_index(plane, by * 2)] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.left_index, cat, by * 2 + 1, plane)
 			b :=
-				by > 0 ? (macroblock.nonzero_coefficient_counts[16 + plane * 4 + bx] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.top_index, cat, 2 + bx, plane)
+				by > 0 ? (counts[h264.chroma_count_index(plane, index - 2)] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.top_index, cat, blocks - 2 + bx, plane)
 			inc = a + 2 * b
 		} else {
 			for left, i in ([2]bool{true, false}) {
@@ -495,7 +498,7 @@ cabac_read_residual_block :: proc(
 cabac_residual_levels :: proc(
 	engine: ^Cabac_Engine,
 	$cat: Block_Cat,
-	levels: []i16,
+	levels: []$L,
 	max_coeffs: int,
 ) -> int #no_bounds_check {
 	when cat == .Luma_8x8 {
@@ -514,6 +517,8 @@ cabac_residual_levels :: proc(
 	c := engine.cursor
 	ctx := &engine.ctx
 
+	// Chroma DC contexts step every NumC8x8 levels: 1, or 2 for 4:2:2's 8 levels (9.3.3.1.3).
+	when cat == .Chroma_DC {dc_step := uint(max_coeffs >> 3)}
 	positions: [64]u8
 	count := 0
 	final := true
@@ -521,7 +526,8 @@ cabac_residual_levels :: proc(
 		when cat == .Luma_8x8 {
 			sig_ctx, last_ctx := int(sig_coeff_ctx_8x8[i]), int(last_coeff_ctx_8x8[i])
 		} else when cat == .Chroma_DC {
-			sig_ctx, last_ctx := min(i, 2), min(i, 2)
+			sig_ctx := min(i >> dc_step, 2)
+			last_ctx := sig_ctx
 		} else {
 			sig_ctx, last_ctx := i, i
 		}
@@ -553,7 +559,7 @@ cabac_residual_levels :: proc(
 			num_eq1 += 1
 		}
 		if cabac_bypass(&c) == 1 do value = -value
-		levels[positions[k]] = i16(clamp(value, -32768, 32767))
+		when L == i16 {levels[positions[k]] = i16(clamp(value, -32768, 32767))} else {levels[positions[k]] = value}
 	}
 
 	engine.cursor = c

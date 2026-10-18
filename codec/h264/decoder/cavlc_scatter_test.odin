@@ -76,6 +76,7 @@ check_category :: proc(
 	h264.skip_bits(&new_reader, uint(offset))
 	old_reader := new_reader
 	decoder := Slice_Decoder {
+		bit_depth = 8,
 		reader = &new_reader,
 		grid = {macroblocks = macroblocks, macroblock_columns = 2, slice_index = 0},
 	}

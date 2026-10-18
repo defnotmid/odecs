@@ -132,6 +132,7 @@ test_native_gap_reference_backing_and_collocated_motion_consumers :: proc(t: ^te
 	pps: h264.Picture_Parameter_Set
 	d := Slice_Decoder {
 		state = &state,
+		bit_depth = 8,
 		picture = pic,
 		header = &header,
 		sequence_parameters = &sps,
@@ -139,7 +140,7 @@ test_native_gap_reference_backing_and_collocated_motion_consumers :: proc(t: ^te
 		grid = {macroblocks = state.macroblocks, macroblock_columns = 1},
 	}
 	mem.set(raw_data(pic.buf.memory), 173, len(pic.buf.memory))
-	predict_inter_block(&d, 0, 0, 4, 4)
+	predict_inter_block(&d, 0, 0, 4, 4, u8)
 	for y in 0 ..< 16 do for x in 0 ..< 16 do testing.expect_value(t, pic.buf.y[y * pic.buf.y_stride + x], u8(0))
 	// A backed reference retains every motion field consumed by temporal direct.
 	gap.non_existing = false

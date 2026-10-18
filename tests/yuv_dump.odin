@@ -10,10 +10,16 @@ emit :: proc(
 	out: ^[dynamic]u8,
 	frame_index: ^int,
 ) {
+	// Planar output in the stream's format: I420 or I422, 16-bit little-endian above 8 bits.
 	b := &pic.buf
-	for y in 0 ..< b.height do append(out, ..b.y[(b.crop_y + y) * b.y_stride + b.crop_x:][:b.width])
-	for y in 0 ..< b.height / 2 do append(out, ..b.u[(b.crop_y / 2 + y) * b.uv_stride + b.crop_x / 2:][:b.width / 2])
-	for y in 0 ..< b.height / 2 do append(out, ..b.v[(b.crop_y / 2 + y) * b.uv_stride + b.crop_x / 2:][:b.width / 2])
+	size := b.high_depth ? 2 : 1
+	sub_y := b.chroma_422 ? 1 : 2
+	plane :: proc(out: ^[dynamic]u8, p: [^]u8, stride, x, y, w, h, size: int) {
+		for row in 0 ..< h do append(out, ..p[((y + row) * stride + x) * size:][:w * size])
+	}
+	plane(out, b.y, b.y_stride, b.crop_x, b.crop_y, b.width, b.height, size)
+	plane(out, b.u, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size)
+	plane(out, b.v, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size)
 	if len(os.args) > 3 do fmt.printfln("out frame %d: poc %d frame_num %d", frame_index^, pic.poc, pic.frame_num)
 	if len(os.args) > 4 && frame_index^ == 0 {
 		mbw := st.sequence_parameters[st.active_sequence_parameter_set_id].macroblock_columns
@@ -39,7 +45,8 @@ emit :: proc(
 }
 
 // yuv_dump <stream.264> <out.yuv> [verbose] [mbs] [nal-limit]
-// Decodes an Annex B stream and writes the displayed frames as raw I420.
+// Decodes an Annex B stream and writes the displayed frames as raw planar YUV:
+// I420 or I422, 16-bit little-endian samples above 8 bits.
 main :: proc() {
 	if len(os.args) < 3 {
 		fmt.println("usage: yuv_dump <stream.264> <out.yuv> [verbose] [mbs] [nal-limit]")

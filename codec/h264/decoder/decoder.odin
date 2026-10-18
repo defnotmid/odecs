@@ -130,6 +130,7 @@ finish_picture :: proc(state: ^Decoder_State) {
 			picture_parameters.chroma_qp_index_offset,
 			picture_parameters.second_chroma_qp_index_offset,
 		},
+		8 + int(sequence_parameters.luma_bit_depth_minus_8),
 	)
 	h264.expand_picture(&state.curr.buf)
 	if header.nal_ref_idc != 0 do save_col_motion(state, sequence_parameters.macroblock_count)
@@ -173,7 +174,7 @@ decode_nal :: proc(state: ^Decoder_State, nal_bytes: []u8) -> (frame_ready: bool
 		if !header_ok do return false, .Malformed_Slice_Header
 		sequence_parameters := &state.sequence_parameters[state.active_sequence_parameter_set_id]
 		picture_parameters := &state.picture_parameters[state.active_picture_parameter_set_id]
-		if admission := sequence_parameter_set_error(sequence_parameters); admission != .None do return false, admission
+		if admission := sequence_parameter_set_error(sequence_parameters, high_formats = true); admission != .None do return false, admission
 		if admission := picture_parameter_set_error(picture_parameters); admission != .None do return false, admission
 		if header.slice_type == .SP || header.slice_type == .SI do return false, .Unsupported_Slice_Type
 		if header.redundant_pic_cnt > 0 do return false, .None // redundant slices are ignored
@@ -206,6 +207,9 @@ decode_nal :: proc(state: ^Decoder_State, nal_bytes: []u8) -> (frame_ready: bool
 			},
 			picture = state.curr,
 			macroblock_count = sequence_parameters.macroblock_count,
+			bit_depth = 8 + int(sequence_parameters.luma_bit_depth_minus_8),
+			qp_bd_offset = 6 * i32(sequence_parameters.luma_bit_depth_minus_8),
+			chroma_422 = sequence_parameters.chroma_format == .YUV_422,
 		}
 		slice_err := decode_slice_data(&slice_decoder)
 

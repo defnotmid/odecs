@@ -785,7 +785,7 @@ main :: proc() {
 		}
 		for dir in ([]h264.Prediction_Direction{.List_0, .List_1, .Bidirectional}) do for weighted in ([]bool{false, true}) do for width in ([]int{16, 8, 4, 2}) {
 			a = base; b = base
-			avc_dec.write_prediction(&a[STRIDE * 8 + 16], STRIDE, &base[0], &base[STRIDE * 20], STRIDE, width, width, dir, weight, weighted)
+			avc_dec.write_prediction(&a[STRIDE * 8 + 16], STRIDE, &base[0], &base[STRIDE * 20], STRIDE, width, width, dir, weight, weighted, 255)
 			reference_write_prediction(&b[STRIDE * 8 + 16], STRIDE, &base[0], &base[STRIDE * 20], STRIDE, width, width, dir, weight, weighted)
 			check("prediction combine", a[:], b[:], &fails)
 		}
@@ -797,7 +797,7 @@ main :: proc() {
 		check("intra 16x16", a[:], b[:], &fails)
 		modec := h264.Intra_Chroma_Mode(rand.int_max(4))
 		a = base; b = base
-		h264.predict_intra_chroma_8x8(&a[STRIDE * 8 + 16], STRIDE, modec, true, true)
+		h264.predict_intra_chroma(&a[STRIDE * 8 + 16], STRIDE, modec, true, true)
 		reference_predict_intra_chroma_8x8(&b[STRIDE * 8 + 16], STRIDE, modec, true, true)
 		check("intra chroma 8x8", a[:], b[:], &fails)
 

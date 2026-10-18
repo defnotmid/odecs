@@ -633,7 +633,7 @@ predict_inter_macroblock_encoder :: proc(
 		pixel_column, pixel_row, partition_block, partition_width, partition_height: int,
 	) {
 		reference := state.refs[macroblock.reference_indices[0][partition_block / 4]]
-		target := h264.prediction_target(reconstruction, pixel_column, pixel_row)
+		target := h264.prediction_target(u8, reconstruction, pixel_column, pixel_row)
 		h264.motion_compensate(
 			&reference.buf,
 			pixel_column,

@@ -141,7 +141,8 @@ parse_slice_header :: proc(
 	}
 	header.slice_qp_delta = h264.read_se(reader)
 	header.slice_qp = picture_parameters.pic_init_qp + header.slice_qp_delta
-	if header.slice_qp < 0 || header.slice_qp > 51 do return header, false
+	// SliceQPY is in -QpBdOffsetY..51 (7.4.3).
+	if header.slice_qp < -6 * i32(sequence_parameters.luma_bit_depth_minus_8) || header.slice_qp > 51 do return header, false
 	if header.slice_type == .SP || header.slice_type == .SI {
 		if header.slice_type == .SP do _ = h264.read_bit(reader) // sp_for_switch_flag
 		_ = h264.read_se(reader) // slice_qs_delta

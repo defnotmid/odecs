@@ -46,10 +46,12 @@ activate_sequence_parameter_set :: proc(
 	context.allocator = state.allocator.procedure != nil ? state.allocator : context.allocator
 	coded_w := sequence_parameters.macroblock_columns * 16
 	coded_h := sequence_parameters.macroblock_rows * 16
+	format := sequence_buffer_format(sequence_parameters)
 	resize :=
 		state.macroblocks == nil ||
 		state.storage_width != coded_w ||
-		state.storage_height != coded_h
+		state.storage_height != coded_h ||
+		state.storage_format != format
 	if resize {
 		macroblocks := make(#soa[]h264.Macroblock, sequence_parameters.macroblock_count)
 		if macroblocks.type == nil || len(macroblocks) != sequence_parameters.macroblock_count {
@@ -59,6 +61,7 @@ activate_sequence_parameter_set :: proc(
 		release_pictures(state)
 		state.macroblocks = macroblocks
 		state.storage_width, state.storage_height = coded_w, coded_h
+		state.storage_format = format
 		state.curr = nil
 		state.output_count = 0
 		state.output = nil
@@ -68,6 +71,14 @@ activate_sequence_parameter_set :: proc(
 	}
 	activate_sequence_parameter_set_metadata(state, sequence_parameters)
 	return .None
+}
+
+// Picture sample layout of a sequence: u16 above 8 bits, full-height chroma for 4:2:2.
+sequence_buffer_format :: proc(sequence_parameters: ^h264.Sequence_Parameter_Set) -> h264.Buffer_Format {
+	return {
+		chroma_422 = sequence_parameters.chroma_format == .YUV_422,
+		high_depth = sequence_parameters.luma_bit_depth_minus_8 != 0,
+	}
 }
 
 // The native caller runs this after shared descriptor selection. Include gap
@@ -83,7 +94,7 @@ prepare_picture_storage :: proc(
 		if !pic.in_use || raw_data(pic.buf.memory) != nil do continue
 		memory, memory_error := make(
 			[]u8,
-			h264.yuv_buffer_size(state.storage_width, state.storage_height),
+			h264.yuv_buffer_size(state.storage_width, state.storage_height, state.storage_format),
 		)
 		if memory_error != nil || raw_data(memory) == nil {
 			if raw_data(memory) != nil do delete(memory)
@@ -95,7 +106,7 @@ prepare_picture_storage :: proc(
 			if raw_data(motion) != nil do delete(motion)
 			return .Allocation_Failed
 		}
-		pic.buf = h264.yuv_buffer_view(state.storage_width, state.storage_height, raw_data(memory))
+		pic.buf = h264.yuv_buffer_view(state.storage_width, state.storage_height, raw_data(memory), state.storage_format)
 		pic.buf.memory, pic.motion = memory, motion
 		set_picture_display(&pic, sequence_parameters)
 	}
@@ -135,10 +146,13 @@ activate_sequence_parameter_set_metadata :: proc(
 }
 
 set_picture_display :: proc(pic: ^Picture, sequence_parameters: ^h264.Sequence_Parameter_Set) {
+	pic.bit_depth = 8 + int(sequence_parameters.luma_bit_depth_minus_8)
 	pic.buf.width = sequence_parameters.width
 	pic.buf.height = sequence_parameters.height
+	// CropUnitY is SubHeightC, doubled for field coding (7-19, 7-20).
+	sub_height := sequence_parameters.chroma_format == .YUV_422 ? 1 : 2
 	pic.buf.crop_x = int(sequence_parameters.crop_left) * 2
-	pic.buf.crop_y = int(sequence_parameters.crop_top) * (sequence_parameters.frames_only ? 2 : 4)
+	pic.buf.crop_y = int(sequence_parameters.crop_top) * (sequence_parameters.frames_only ? sub_height : 2 * sub_height)
 }
 
 release_pictures :: proc(state: ^Decoder_State) {
@@ -153,6 +167,7 @@ release_pictures :: proc(state: ^Decoder_State) {
 		state.macroblocks = nil
 	}
 	state.storage_width, state.storage_height = 0, 0
+	state.storage_format = {}
 }
 
 // Release pictures that are neither referenced nor waiting for output. Output

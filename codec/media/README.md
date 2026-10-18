@@ -11,7 +11,7 @@ platforms, so it can be listed everywhere.
 | Operation | Native provider | Vulkan provider | VideoToolbox provider |
 | --- | --- | --- | --- |
 | H.264 encode | Progressive 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
-| H.264 decode | Supported progressive 8-bit 4:2:0 tools | Baseline/Main/High, progressive 8-bit 4:2:0 | Baseline/Main/High, progressive 8-bit 4:2:0, host output |
+| H.264 decode | Supported progressive tools; 4:2:0 or 4:2:2, 8 to 10 bits (High 10, High 4:2:2) | Baseline/Main/High, progressive 8-bit 4:2:0 | Baseline/Main/High, progressive 8-bit 4:2:0, host output |
 | HEVC encode | 8/10-bit, 4:2:0/4:2:2/4:4:4/mono, periodic IDR/P | Main/Main10, 8/10-bit 4:2:0, periodic IDR/P | Main, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
 | HEVC decode | Implemented Main/Main10 and RExt tools | Main/Main10 4:2:0, 8/10-bit | Main/Main10 4:2:0, 8/10-bit, host output |
 | AAC encode/decode | AAC-LC, 1..8 channels, 960/1024 samples, standard 7350..96000-Hz rates | Unsupported; selects native in Automatic mode | Unsupported |

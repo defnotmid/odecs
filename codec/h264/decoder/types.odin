@@ -16,6 +16,7 @@ Reference_Motion :: struct {
 // A decoded picture in the DPB
 Picture :: struct {
 	buf:                 h264.YUV_Buffer,
+	bit_depth:           int, // of the samples in buf
 	pic_id:              i32,
 	poc:                 i32,
 	field_order_counts:  [2]i32, // progressive top/bottom POC, shared with hardware descriptors
@@ -67,6 +68,7 @@ Decoder_State :: struct {
 	// Native allocation geometry is independent of the stable picture slots;
 	// a slot may have metadata before it first needs pixel/motion backing.
 	storage_width, storage_height:     int,
+	storage_format:                    h264.Buffer_Format,
 	mbs_decoded:                       int,
 
 	// Picture store: current picture, references and pictures waiting for output
