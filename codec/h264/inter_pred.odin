@@ -6,6 +6,10 @@ import "core:simd"
 
 import "core:mem"
 
+// simd is used only inside procedures generic over the sample type, which a
+// package check does not instantiate.
+_ :: simd
+
 // ---------------------------------------------------------------------------
 // Border padding for motion compensation
 // ---------------------------------------------------------------------------
