@@ -55,18 +55,23 @@ read_signed_bits :: #force_inline proc(r: ^Bit_Reader, n: int) -> i64 {
 	return v << uint(64 - n) >> uint(64 - n)
 }
 
-// A unary count of zero bits ended by a one bit.
+// A unary count of zero bits ended by a one bit. The one bit counts only
+// within the cache's valid bits: the cache can hold more of the stream than
+// `count` says (refill_bits' wide load), and a one bit past `count` is taken
+// on the next refill, not now (that would make `count` negative).
 read_unary :: #force_inline proc(r: ^Bit_Reader) -> (q: u64) {
 	refill_bits(r)
-	for r.cache == 0 {
+	for {
+		z := int(intrinsics.count_leading_zeros(r.cache))
+		if z < r.count {
+			skip_bits(r, z + 1)
+			return q + u64(z)
+		}
 		q += u64(r.count)
 		skip_bits(r, r.count)
 		if r.left < 0 do return
 		refill_bits(r)
 	}
-	z := int(intrinsics.count_leading_zeros(r.cache))
-	skip_bits(r, z + 1)
-	return q + u64(z)
 }
 
 advance_bits :: proc(r: ^Bit_Reader, n: int) {
