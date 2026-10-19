@@ -6,6 +6,10 @@
 #   shine_a  the light on the grooves (on)     shine_b, shine_c  the record turned
 #                                              a third and two thirds
 #   led      the power light lit (on)
+#   silhouette  every pixel visible by default as one outline (off): the shape
+#               to morph, extrude or collide
+#
+# Each group is one path per colour, its pixels traced into merged outlines.
 #
 #   python3 tools/logo/logo.py assets/logo.svg   (also prints the body)
 import math, sys
@@ -97,11 +101,57 @@ put(led, 27, 25, 'r'); put(led, 28, 25, 'r')
 LAYERS = [('body', body, True), ('shine_a', shine_a, True), ('shine_b', shine_b, False),
           ('shine_c', shine_c, False), ('led', led, True)]
 
+# Writes the outline of the mask's pixels as path data: one closed loop per
+# boundary, the pixels on its right (clockwise on screen), so holes wind the
+# other way and fill as holes under either fill rule. Straight runs are single
+# segments; pixels touching only at a corner stay apart. (ovg tools/mascot trace)
+def trace(mask):
+    def at(x, y):
+        return 0 <= x < W and 0 <= y < H and (x, y) in mask
+    out = {}   # boundary edges by start vertex (two where pixels touch at a corner)
+    for y in range(H):
+        for x in range(W):
+            if not at(x, y):
+                continue
+            if not at(x, y - 1): out.setdefault((x, y), []).append((x + 1, y))
+            if not at(x + 1, y): out.setdefault((x + 1, y), []).append((x + 1, y + 1))
+            if not at(x, y + 1): out.setdefault((x + 1, y + 1), []).append((x, y + 1))
+            if not at(x - 1, y): out.setdefault((x, y + 1), []).append((x, y))
+    d = ''
+    for start in [(x, y) for y in range(H + 1) for x in range(W + 1)]:
+        while out.get(start):
+            # Walk the loop, writing a point where the direction changes.
+            pts, v, dir = [], start, (0, 0)
+            while True:
+                k = 0
+                if len(out[v]) == 2 and pts:
+                    # At a corner touch, turn right: keep to the pixels on the right.
+                    right = (-dir[1], dir[0])
+                    k = next((j for j in range(2) if (out[v][j][0] - v[0], out[v][j][1] - v[1]) == right), 0)
+                nxt = out[v].pop(k)
+                step = (nxt[0] - v[0], nxt[1] - v[1])
+                if not pts or step != dir:
+                    pts.append(v)
+                dir, v = step, nxt
+                if v == start:
+                    break
+            d += f'M{pts[0][0]} {pts[0][1]}'
+            for prev, p in zip(pts, pts[1:]):
+                d += f'H{p[0]}' if p[1] == prev[1] else f'V{p[1]}'
+            d += 'Z'
+    return d
+
+# Each layer is one path per colour, its pixels traced into merged outlines;
+# `silhouette` (off) is every pixel visible by default as one outline, the
+# shape to morph, extrude or collide (onimite outline{svg, id = "silhouette"}).
 out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W * 8}" height="{H * 8}" shape-rendering="crispEdges">']
 for name, g, on in LAYERS:
-    rects = ''.join(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{PAL[g[y][x]]}"/>'
-                    for y in range(H) for x in range(W) if g[y][x] != '.')
-    out.append(f'<g id="{name}"{"" if on else " display=\"none\""}>{rects}</g>')
+    colours = list(dict.fromkeys(g[y][x] for y in range(H) for x in range(W) if g[y][x] != '.'))
+    paths = ''.join(f'<path fill="{PAL[c]}" d="{trace({(x, y) for y in range(H) for x in range(W) if g[y][x] == c})}"/>'
+                    for c in colours)
+    out.append(f'<g id="{name}"{"" if on else " display=\"none\""}>{paths}</g>')
+seen = {(x, y) for _, g, on in LAYERS if on for y in range(H) for x in range(W) if g[y][x] != '.'}
+out.append(f'<g id="silhouette" display="none"><path fill="{PAL["O"]}" d="{trace(seen)}"/></g>')
 out.append('</svg>\n')
 open(sys.argv[1], 'w').write('\n'.join(out))
 print('\n'.join(''.join(r) for r in body))
