@@ -72,3 +72,24 @@ build_scan :: proc "contextless" (entries: []Scan_Entry, scan: []u16, tx, kind: 
 		entries[c] = {u16(p), u16(a), u16(l), band, u8(i)}
 	}
 }
+
+// The probabilities below node 2 of the token tree for each third
+// coefficient probability (9.3.2, Pareto table): odd probabilities take their
+// table row, even ones the rounded-down mean of the two rows around them.
+// Built once, so the token loops index it instead of averaging per token.
+@(private)
+PARETO_ROWS: [256][8]u8
+
+pareto_row :: #force_inline proc "contextless" (prob: u8) -> ^[8]u8 {return &PARETO_ROWS[prob]}
+
+@(private, init)
+init_pareto_rows :: proc "contextless" () {
+	for prob in 1 ..< 256 {
+		x := (prob - 1) / 2
+		if prob & 1 != 0 {
+			PARETO_ROWS[prob] = PARETO_TABLE[x]
+		} else {
+			for k in 0 ..< 8 do PARETO_ROWS[prob][k] = u8((int(PARETO_TABLE[x][k]) + int(PARETO_TABLE[x + 1][k])) >> 1)
+		}
+	}
+}

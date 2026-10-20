@@ -1,6 +1,7 @@
 package vp9_decoder
 
 import "base:intrinsics"
+import "core:math/bits"
 
 // Boolean (arithmetic) decoder, section 9.2. `value` holds the decoder's
 // 8-bit window in its top byte followed by look-ahead bits; bytes past the
@@ -22,14 +23,22 @@ init_bool :: proc(b: ^Bool_Decoder, data: []u8) -> bool {
 	return read_bool(b, 128) == 0 // the marker bit
 }
 
+// Refills load 32 stream bits once fewer than 16 remain, as the H.264 CABAC
+// window does; a decision consumes at most 7, so the window never runs dry.
 @(private)
-fill :: #force_inline proc(b: ^Bool_Decoder) {
-	for b.bits <= 56 {
-		v := b.pos < len(b.data) ? b.data[b.pos] : 0
-		b.value |= u64(v) << uint(56 - b.bits)
-		b.pos += 1
-		b.bits += 8
+fill :: #force_inline proc(b: ^Bool_Decoder) #no_bounds_check {
+	word: u64
+	if b.pos + 4 <= len(b.data) {
+		word = u64(bits.from_be_u32(intrinsics.unaligned_load((^u32)(&b.data[b.pos]))))
+	} else {
+		for i in 0 ..< 4 {
+			word <<= 8
+			if b.pos + i < len(b.data) do word |= u64(b.data[b.pos + i])
+		}
 	}
+	b.value |= word << uint(32 - b.bits)
+	b.pos += 4
+	b.bits += 32
 }
 
 @(private)
@@ -37,14 +46,11 @@ read_bool :: #force_inline proc(b: ^Bool_Decoder, prob: u8) -> int {
 	if b.bits < 16 do fill(b)
 	split := 1 + (((b.range - 1) * u32(prob)) >> 8)
 	big := u64(split) << 56
-	bit := 0
-	if b.value >= big {
-		b.range -= split
-		b.value -= big
-		bit = 1
-	} else {
-		b.range = split
-	}
+	// The outcome is data dependent, so it selects values rather than branching.
+	one := b.value >= big
+	bit := int(one)
+	b.range = one ? b.range - split : split
+	b.value -= one ? big : 0
 	shift := uint(intrinsics.count_leading_zeros(b.range) - 24)
 	b.range <<= shift
 	b.value <<= shift

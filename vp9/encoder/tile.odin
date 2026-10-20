@@ -200,9 +200,7 @@ put_tokens :: proc(t: ^Tile, p, x, y, tx, tx_type: int, quant: []i32) -> bool {
 		if token != 0 {
 			put_bool(&t.b, int(token != 1), pr[2])
 			if token >= 2 {
-				index := int(pr[2] - 1) / 2
-				pareto := vp9.PARETO_TABLE[index]
-				if pr[2] & 1 == 0 do for k in 0 ..< 8 do pareto[k] = u8((int(pareto[k]) + int(vp9.PARETO_TABLE[index + 1][k])) >> 1)
+				pareto := vp9.pareto_row(pr[2])
 				put_tree(&t.b, vp9.TOKEN_TREE[:], pareto[:], token, 4, 2)
 			}
 			extra := vp9.EXTRA_BITS[token]

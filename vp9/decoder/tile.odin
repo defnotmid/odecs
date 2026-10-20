@@ -925,9 +925,11 @@ residual :: proc(t: ^Tile, $T: typeid) {
 
 // Reads one transform block's coefficients (section 6.4.24) into t.coefs,
 // dequantized, in raster order. Returns the end of block, the number of
-// leading rows holding coefficients, and the transform type.
+// leading rows holding coefficients, and the transform type. Every index is
+// bounded by construction: scan entries stay inside the block, bands and
+// contexts below six, tokens below eleven.
 @(private)
-tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) -> (eob, rows, tx_type: int) {
+tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) -> (eob, rows, tx_type: int) #no_bounds_check {
 	d := t.d
 	h := &d.h
 	b := &t.blk
@@ -1010,13 +1012,7 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 // probabilities from the band's third coefficient probability.
 @(private)
 read_large_token :: proc(b: ^Bool_Decoder, prob: u8) -> int {
-	x := int(prob - 1) / 2
-	pareto: [8]u8
-	if prob & 1 != 0 {
-		pareto = vp9.PARETO_TABLE[x]
-	} else {
-		for k in 0 ..< 8 do pareto[k] = u8((int(vp9.PARETO_TABLE[x][k]) + int(vp9.PARETO_TABLE[x + 1][k])) >> 1)
-	}
+	pareto := vp9.pareto_row(prob)
 	tree := vp9.TOKEN_TREE
 	n := 4 // node 2 of the token tree
 	for {
