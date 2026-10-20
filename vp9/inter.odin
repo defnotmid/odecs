@@ -1,6 +1,7 @@
 package vp9
 
 import "base:intrinsics"
+@(require) import "base:runtime"
 @(require) import "core:simd"
 
 // Inter prediction (section 8.5.2): reference sample positions in 1/16
@@ -51,9 +52,15 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 		src, src_stride, origin = raw_data(local[:]), MAX_SOURCE, 0
 	}
 	if b.step_x == 16 && b.step_y == 16 {
-		if w >= 8 {
+		// Native-width lanes, as HEVC's motion compensation; narrower blocks
+		// take their own width.
+		LANES :: max(8, runtime.NATIVE_SIMD_BIT_WIDTH / 32)
+		switch {
+		case w >= LANES:
+			predict_unscaled(b, src, src_stride, origin, kernels, max_value, LANES)
+		case w >= 8:
 			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 8)
-		} else {
+		case:
 			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 4)
 		}
 		return
@@ -83,51 +90,43 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 	}
 }
 
-// The unscaled case: one kernel per direction for the whole block, applied
-// to N columns at a time. A zero phase is the identity kernel, so that pass
-// is skipped (exactly: (128 * s + 64) >> 7 == s).
+// The unscaled case: one kernel per direction for the whole block. A zero
+// phase is the identity kernel, so that pass is skipped (exactly:
+// (128 * s + 64) >> 7 == s). Both passes of a two-axis filter are the same
+// filter_pass; the first stores its clipped samples as i16.
 @(private)
 predict_unscaled :: proc(b: ^Inter_Block($T), src: [^]T, stride, origin: int, kernels: ^[16][8]i16, max_value: i32, $N: int) #no_bounds_check {
-	V :: #simd[N]i32
-	U :: #simd[N]u32
-	load :: #force_inline proc(src: [^]$T, at: int) -> V {return V(intrinsics.unaligned_load((^#simd[N]T)(&src[at])))}
-	round :: #force_inline proc(acc: V, max_value: i32) -> V {return simd.clamp(simd.shr(acc + 64, U(7)), V(0), V(max_value))}
-	put :: #force_inline proc(dst: [^]$T, at: int, v: V) {intrinsics.unaligned_store((^#simd[N]T)(&dst[at]), (#simd[N]T)(v))}
 	fx, fy, w, h := b.x & 15, b.y & 15, b.w, b.h
 	dst, dst_stride := b.dst, b.dst_stride
-	kx, ky := &kernels[fx], &kernels[fy]
 	base := origin + 3 * stride + 3 // the block's own top-left sample
 	switch {
 	case fx == 0 && fy == 0:
 		for r in 0 ..< h do intrinsics.mem_copy_non_overlapping(&dst[r * dst_stride], &src[base + r * stride], w * size_of(T))
 	case fy == 0:
-		for r in 0 ..< h do for c := 0; c < w; c += N {
-			at := base + r * stride + c - 3
-			acc: V
-			for t in 0 ..< 8 do acc += V(i32(kx[t])) * load(src, at + t)
-			put(dst, r * dst_stride + c, round(acc, max_value))
-		}
+		filter_pass(dst, dst_stride, src[base - 3:], stride, 1, w, h, &kernels[fx], max_value, N)
 	case fx == 0:
-		for r in 0 ..< h do for c := 0; c < w; c += N {
-			at := base + (r - 3) * stride + c
-			acc: V
-			for t in 0 ..< 8 do acc += V(i32(ky[t])) * load(src, at + t * stride)
-			put(dst, r * dst_stride + c, round(acc, max_value))
-		}
+		filter_pass(dst, dst_stride, src[base - 3 * stride:], stride, stride, w, h, &kernels[fy], max_value, N)
 	case:
-		// Horizontal pass over the h + 7 rows the vertical taps need.
-		mid: [(64 + 7) * 64]i32 = ---
-		for r in 0 ..< h + 7 do for c := 0; c < w; c += N {
-			at := origin + r * stride + c
-			acc: V
-			for t in 0 ..< 8 do acc += V(i32(kx[t])) * load(src, at + t)
-			intrinsics.unaligned_store((^V)(&mid[r * 64 + c]), round(acc, max_value))
-		}
-		for r in 0 ..< h do for c := 0; c < w; c += N {
-			acc: V
-			for t in 0 ..< 8 do acc += V(i32(ky[t])) * intrinsics.unaligned_load((^V)(&mid[(r + t) * 64 + c]))
-			put(dst, r * dst_stride + c, round(acc, max_value))
-		}
+		// Horizontal over the h + 7 rows the vertical taps need.
+		mid: [(64 + 7) * 64]i16 = ---
+		filter_pass(raw_data(mid[:]), 64, src[origin:], stride, 1, w, h + 7, &kernels[fx], max_value, N)
+		filter_pass(dst, dst_stride, raw_data(mid[:]), 64, 64, w, h, &kernels[fy], max_value, N)
+	}
+}
+
+// One 8-tap pass over a w x h block, N columns at a time: each output is the
+// rounded, clipped sum of the eight samples `step` apart from the one at its
+// own position in src. Sums stay in i32 lanes: the sharp filters' partial
+// sums do not fit i16.
+@(private)
+filter_pass :: proc(dst: [^]$D, dst_stride: int, src: [^]$S, src_stride, step, w, h: int, k: ^[8]i16, max_value: i32, $N: int) #no_bounds_check {
+	V :: #simd[N]i32
+	for r in 0 ..< h do for c := 0; c < w; c += N {
+		at := r * src_stride + c
+		acc: V
+		#unroll for t in 0 ..< 8 do acc += V(i32(k[t])) * V(intrinsics.unaligned_load((^#simd[N]S)(&src[at + t * step])))
+		v := simd.clamp(simd.shr(acc + 64, (#simd[N]u32)(7)), V(0), V(max_value))
+		intrinsics.unaligned_store((^#simd[N]D)(&dst[r * dst_stride + c]), (#simd[N]D)(v))
 	}
 }
 
