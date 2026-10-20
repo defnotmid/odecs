@@ -1,5 +1,6 @@
 package h265_decoder
 
+import common "../../common"
 import "core:testing"
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ ref_renorm :: proc(e: ^Cabac_Ref_Encoder) {
 }
 
 ref_encode_bin :: proc(e: ^Cabac_Ref_Encoder, ctx: int, bin: u32) {
-	lps := u32(RANGE_TAB_LPS[e.p_state[ctx]][(e.rng >> 6) & 3])
+	lps := u32(common.RANGE_TAB_LPS[e.p_state[ctx]][(e.rng >> 6) & 3])
 	e.rng -= lps
 
 	if bin != u32(e.val_mps[ctx]) {
@@ -90,7 +91,7 @@ ref_encode_bin :: proc(e: ^Cabac_Ref_Encoder, ctx: int, bin: u32) {
 
 		if e.p_state[ctx] == 0 do e.val_mps[ctx] = 1 - e.val_mps[ctx]
 
-		e.p_state[ctx] = TRANS_IDX_LPS[e.p_state[ctx]]
+		e.p_state[ctx] = common.TRANS_IDX[e.p_state[ctx]][0]
 	} else {
 		mps := int(e.p_state[ctx])
 		if mps < 62 do mps += 1
@@ -142,20 +143,6 @@ ref_encoder_finish :: proc(e: ^Cabac_Ref_Encoder) -> []u8 {
 }
 
 // ---------------------------------------------------------------------------
-
-@(test)
-test_cabac_norm_shift :: proc(t: ^testing.T) {
-	for r in 1 ..< 512 {
-		n := cabac_norm_shift(u32(r))
-
-		v := u32(r) << n
-		testing.expectf(t, v >= 256 && v <= 511, "norm_shift(%d) = %d gives %d", r, n, v)
-
-		if n > 0 {
-			testing.expectf(t, u32(r) << (n - 1) < 256, "norm_shift(%d) = %d overshoots", r, n)
-		}
-	}
-}
 
 @(test)
 test_cabac_init_type :: proc(t: ^testing.T) {
@@ -232,7 +219,7 @@ test_cabac_init_bounds :: proc(t: ^testing.T) {
 	testing.expect(t, !cabac_init(&c, []u8{0x01, 0x02}, 1))
 	testing.expect(t, !cabac_init(&c, []u8{0x01, 0x02}, -1))
 	testing.expect(t, cabac_init(&c, []u8{0x01, 0x02}, 0))
-	testing.expect_value(t, c.rng, u32(0x1fe))
+	testing.expect_value(t, c.cursor.range, u32(0x1fe))
 }
 
 @(test)

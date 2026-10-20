@@ -240,17 +240,14 @@ test_substream_start_borrows_syntax_preserves_epb_boundaries_and_error_order :: 
 	}
 	ctu: Ctu_Decoder(u8)
 	ctu.c = Cabac {
-		low  = 1234,
-		rng  = 99,
-		data = rbsp[:],
-		pos  = 7,
+		cursor = {value = 1234, range = 99, data = rbsp[:], pos = 7},
 	}
 	ctu.c.state[0] = 51
 	ctu.qp_y_cur, ctu.qp_y_prev = 23, 19
 	testing.expect(t, !start_substream(&ctu, nal, &sh, len(entries) + 1, false))
-	testing.expect_value(t, ctu.c.low, u32(1234))
-	testing.expect_value(t, ctu.c.rng, u32(99))
-	testing.expect_value(t, ctu.c.pos, 7)
+	testing.expect_value(t, ctu.c.cursor.value, u64(1234))
+	testing.expect_value(t, ctu.c.cursor.range, u32(99))
+	testing.expect_value(t, ctu.c.cursor.pos, 7)
 	testing.expect_value(t, ctu.c.state[0], u8(51))
 	testing.expect_value(t, ctu.qp_y_cur, i32(23))
 	testing.expect_value(t, ctu.qp_y_prev, i32(19))

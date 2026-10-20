@@ -1133,7 +1133,7 @@ read_pcm_plane :: proc(
 // may still touch them unless pcm_loop_filter_disabled_flag is set.
 pcm_sample :: proc(d: ^Ctu_Decoder($Sample), x, y, log2_size: int) -> bool {
 	off := cabac_pcm_offset(&d.c)
-	if off < 0 || off >= len(d.c.data) do return false
+	if off < 0 || off >= len(d.c.cursor.data) do return false
 
 	size := 1 << uint(log2_size)
 
@@ -1144,7 +1144,7 @@ pcm_sample :: proc(d: ^Ctu_Decoder($Sample), x, y, log2_size: int) -> bool {
 	if d.s.pcm_loop_filter_disabled do ctu_fill(d, d.grids.no_filter, x, y, size, true)
 
 	g: Get_Bits
-	get_bits_init(&g, d.c.data[off:])
+	get_bits_init(&g, d.c.cursor.data[off:])
 
 	read_pcm_plane(
 		&g,
@@ -1177,7 +1177,7 @@ pcm_sample :: proc(d: ^Ctu_Decoder($Sample), x, y, log2_size: int) -> bool {
 
 	if g.err do return false
 
-	return cabac_init(&d.c, d.c.data, off + (get_bits_pos(&g) + 7) / 8)
+	return cabac_init(&d.c, d.c.cursor.data, off + (get_bits_pos(&g) + 7) / 8)
 }
 
 reconstruct :: proc(

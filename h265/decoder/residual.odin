@@ -127,7 +127,7 @@ last_sig_coeff_ctx :: proc(log2_size, c_idx, bin_idx: int) -> int {
 	return bin_idx >> uint(log2_size - 2) + 15
 }
 
-last_sig_coeff_prefix :: proc(c: ^Cabac, base, log2_size, c_idx: int) -> int {
+last_sig_coeff_prefix :: proc(c: ^Cabac_Bins, base, log2_size, c_idx: int) -> int {
 	c_max := log2_size << 1 - 1
 
 	v := 0
@@ -138,7 +138,7 @@ last_sig_coeff_prefix :: proc(c: ^Cabac, base, log2_size, c_idx: int) -> int {
 	return v
 }
 
-last_sig_coeff_suffix :: proc(c: ^Cabac, prefix: int) -> int {
+last_sig_coeff_suffix :: proc(c: ^Cabac_Bins, prefix: int) -> int {
 	if prefix <= 3 do return prefix
 
 	n := prefix >> 1 - 1
@@ -149,7 +149,7 @@ last_sig_coeff_suffix :: proc(c: ^Cabac, prefix: int) -> int {
 
 // coeff_abs_level_remaining is the binarization of 9.3.3.11. rng selects the
 // limited form of 9.3.3.4 and is zero otherwise.
-coeff_abs_level_remaining :: proc(c: ^Cabac, rice, rng: int) -> i32 {
+coeff_abs_level_remaining :: proc(c: ^Cabac_Bins, rice, rng: int) -> i32 {
 	limit := 32
 	if rng > 0 do limit = 32 - rng
 
@@ -294,7 +294,7 @@ Residual_Block :: struct {
 // decode_residual is the residual_coding syntax of 7.3.8.11. `coef` receives
 // the transform coefficient levels in raster order and must be zeroed first.
 decode_residual :: proc(
-	c: ^Cabac,
+	engine: ^Cabac,
 	s: ^SPS,
 	p: ^PPS,
 	sh: ^Slice_Header,
@@ -311,6 +311,9 @@ decode_residual :: proc(
 	// Scan positions are table-derived; last_x/last_y are checked before use.
 	if b.log2_size < 2 || b.log2_size > 5 || b.c_idx < 0 || b.c_idx > 2 do return
 	if len(coef) < 1 << uint(2 * b.log2_size) do return
+	bins := Cabac_Bins{engine.cursor, &engine.state}
+	defer engine.cursor = bins.cursor
+	c := &bins
 	n := 1 << uint(b.log2_size)
 
 	if p.transform_skip_enabled &&
@@ -460,7 +463,7 @@ Residual_State :: struct {
 }
 
 decode_sub_block_levels :: proc(
-	c: ^Cabac,
+	c: ^Cabac_Bins,
 	s: ^SPS,
 	p: ^PPS,
 	coef: []i32,

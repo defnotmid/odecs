@@ -1,5 +1,6 @@
 package h264_decoder
 
+import common "../../common"
 import h264 ".."
 import "core:testing"
 
@@ -33,7 +34,7 @@ spec_init :: proc(e: ^Spec_Engine, data: []u8, start: int) {
 @(private = "file")
 spec_decision :: proc(e: ^Spec_Engine, ctx_idx: int) -> u32 {
 	state, mps := e.ctx[ctx_idx] >> 1, u32(e.ctx[ctx_idx] & 1)
-	lps := u32(cabac_range_lps[state][(e.range >> 6) & 3])
+	lps := u32(common.RANGE_TAB_LPS[state][(e.range >> 6) & 3])
 	e.range -= lps
 	bin: u32
 	if e.offset >= e.range {
@@ -41,10 +42,10 @@ spec_decision :: proc(e: ^Spec_Engine, ctx_idx: int) -> u32 {
 		e.offset -= e.range
 		e.range = lps
 		if state == 0 do mps = 1 - mps
-		state = cabac_state_trans[state][0]
+		state = common.TRANS_IDX[state][0]
 	} else {
 		bin = mps
-		state = cabac_state_trans[state][1]
+		state = common.TRANS_IDX[state][1]
 	}
 	e.ctx[ctx_idx] = state << 1 | u8(mps)
 	for e.range < 256 {

@@ -1,6 +1,7 @@
 package h264_decoder
 
 import h264 ".."
+import common "../../common"
 import "core:mem"
 
 // Motion of a reference picture kept for temporal/spatial direct prediction
@@ -36,17 +37,9 @@ Picture :: struct {
 // The moving state of the CABAC arithmetic decoder (9.3.1.2, 9.3.3.2). It is
 // a small value: hot syntax loops copy it into a local, where range, window
 // and byte cursor stay in registers, and store it back once.
-Cabac_Cursor :: struct {
-	range:    u32, // codIRange, 9 bits
-	buffered: u32, // look-ahead stream bits held below codIOffset in value
-	value:    u64, // codIOffset in bits 48..56, then `buffered` look-ahead bits
-	data:     []u8, // the slice RBSP
-	pos:      int, // next byte of data to load; reads past the end are zero
-}
-
 // CABAC arithmetic decoding engine: the cursor and every context variable.
 Cabac_Engine :: struct {
-	cursor: Cabac_Cursor,
+	cursor: common.Cabac_Cursor,
 	ctx:    [CABAC_CONTEXT_COUNT]u8, // pStateIdx << 1 | valMPS
 }
 

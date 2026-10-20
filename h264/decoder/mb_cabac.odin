@@ -1,6 +1,7 @@
 package h264_decoder
 
 import h264 ".."
+import common "../../common"
 
 // ---------------------------------------------------------------------------
 // CABAC syntax elements (9.3.2, 9.3.3.1): binarization and context selection
@@ -177,16 +178,16 @@ cabac_read_mvd_pair :: proc(
 	for comp in 0 ..< 2 {
 		base := comp == 0 ? 40 : 47
 		inc := sum[comp] < 3 ? 0 : sum[comp] <= 32 ? 1 : 2
-		if cabac_decision(&c, &ctx[base + inc]) == 0 do continue
+		if common.cabac_decision(&c, &ctx[base + inc]) == 0 do continue
 		// UEG3 prefix: truncated unary with cMax 9, contexts 3, 4, 5, 6, 6, ...
 		value: u32 = 1
 		ctx_idx := base + 3
-		for value < 9 && cabac_decision(&c, &ctx[ctx_idx]) == 1 {
+		for value < 9 && common.cabac_decision(&c, &ctx[ctx_idx]) == 1 {
 			value += 1
 			if ctx_idx < base + 6 do ctx_idx += 1
 		}
 		if value == 9 do value += cabac_exp_golomb(&c, 3)
-		mvd[comp] = cabac_bypass(&c) == 1 ? -i32(value) : i32(value)
+		mvd[comp] = common.cabac_bypass(&c) == 1 ? -i32(value) : i32(value)
 	}
 	decoder.engine.cursor = c
 	return
@@ -531,10 +532,10 @@ cabac_residual_levels :: proc(
 		} else {
 			sig_ctx, last_ctx := i, i
 		}
-		if cabac_decision(&c, &ctx[SIG + sig_ctx]) == 0 do continue
+		if common.cabac_decision(&c, &ctx[SIG + sig_ctx]) == 0 do continue
 		positions[count] = u8(i)
 		count += 1
-		if cabac_decision(&c, &ctx[LAST + last_ctx]) == 1 {
+		if common.cabac_decision(&c, &ctx[LAST + last_ctx]) == 1 {
 			final = false
 			break
 		}
@@ -549,16 +550,16 @@ cabac_residual_levels :: proc(
 	for k := count - 1; k >= 0; k -= 1 {
 		inc := num_gt1 != 0 ? 0 : min(4, 1 + num_eq1)
 		value: i32 = 1
-		if cabac_decision(&c, &ctx[ABS + inc]) == 1 {
+		if common.cabac_decision(&c, &ctx[ABS + inc]) == 1 {
 			inc = 5 + min(GT1_MAX, num_gt1)
 			value = 2
-			for value < 15 && cabac_decision(&c, &ctx[ABS + inc]) == 1 do value += 1
+			for value < 15 && common.cabac_decision(&c, &ctx[ABS + inc]) == 1 do value += 1
 			if value == 15 do value += i32(cabac_exp_golomb(&c, 0))
 			num_gt1 += 1
 		} else {
 			num_eq1 += 1
 		}
-		if cabac_bypass(&c) == 1 do value = -value
+		if common.cabac_bypass(&c) == 1 do value = -value
 		when L == i16 {levels[positions[k]] = i16(clamp(value, -32768, 32767))} else {levels[positions[k]] = value}
 	}
 
