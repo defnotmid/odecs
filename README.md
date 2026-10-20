@@ -102,6 +102,7 @@ at 2–3, and a repeat run agreed within about 2%.
 | HEVC Main, 1080p | 1411 | 1113 | 1.27 | FFmpeg `hevc` |
 | WebP lossy, 11158×2156 (`demo/media/bryce.webp`) | 209 | 168 | 1.24 | libwebp |
 | H.264 High 4:2:2, 10-bit | 1670 | 1355 | 1.23 | FFmpeg `h264` |
+| H.264 High 10, 4:2:0 | 1448 | 1178 | 1.23 | FFmpeg `h264` |
 | HEVC Main 10 | 1534 | 1255 | 1.22 | FFmpeg `hevc` |
 | Opus, 128 kb/s stereo | 394 | 327 | 1.20 | FFmpeg `opus` (libopus: 408 ms, 0.96) |
 | ProRes 422 HQ, 1080p | 1784 | 1721 | 1.04 | FFmpeg `prores` |
@@ -111,10 +112,10 @@ at 2–3, and a repeat run agreed within about 2%.
 
 The video is OpenH264's 1080p fixture looped three times. The audio is the
 320 s of decoded RFC 8251 Opus test vectors. Both were encoded with x264,
-x265, libvpx, `prores_ks` and FFmpeg's audio encoders. H.264 High 10 4:2:0
-is missing: the native decoder fails on x264's B-pyramid with more than one
-reference frame. To rerun, use `tests/decode_benchmark.sh`. The VP9 rows were
-measured again after its decoder was restructured (3.40× and 2.99× before).
+x265, libvpx, `prores_ks` and FFmpeg's audio encoders. The H.264 High 10 row
+was added once a 10-bit mb_qp_delta decoding bug was fixed, and the VP9 rows
+were measured again after its decoder was restructured (3.40× and 2.99×
+before). To rerun, use `tests/decode_benchmark.sh`.
 
 ## Platforms
 

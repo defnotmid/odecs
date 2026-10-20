@@ -260,12 +260,16 @@ cabac_read_coded_block_pattern :: proc(decoder: ^Slice_Decoder, macroblock_index
 
 cabac_read_qp_delta :: proc(decoder: ^Slice_Decoder, prev_delta_nz: bool) -> i32 {
 	if decision(decoder, 60 + (prev_delta_nz ? 1 : 0)) == 0 do return 0
+	// mb_qp_delta lies in -(26 + QpBdOffsetY / 2) .. 25 + QpBdOffsetY / 2 (7.4.5),
+	// so its unary code is at most 52 + QpBdOffsetY bins; the bound only stops
+	// corrupt data.
+	longest := i32(52 + 6 * (decoder.bit_depth - 8))
 	value: i32 = 1
 	ctx_idx := 62
 	for decision(decoder, ctx_idx) == 1 {
 		value += 1
 		ctx_idx = 63
-		if value > 52 do break
+		if value > longest do break
 	}
 	return value & 1 == 1 ? (value + 1) >> 1 : -(value >> 1)
 }
