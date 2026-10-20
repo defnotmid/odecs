@@ -116,7 +116,8 @@ transpose_intra_source :: proc(
 			b := intrinsics.unaligned_load((^Row)(&source[(row + 1) * source_stride + col]))
 			c := intrinsics.unaligned_load((^Row)(&source[(row + 2) * source_stride + col]))
 			d := intrinsics.unaligned_load((^Row)(&source[(row + 3) * source_stride + col]))
-			a, b, c, d = intra_transpose_4x4(a, b, c, d)
+			t := common.transpose([4]Row{a, b, c, d})
+			a, b, c, d = t[0], t[1], t[2], t[3]
 			intrinsics.unaligned_store((^Row)(&dst[col * size + row]), a)
 			intrinsics.unaligned_store((^Row)(&dst[(col + 1) * size + row]), b)
 			intrinsics.unaligned_store((^Row)(&dst[(col + 2) * size + row]), c)

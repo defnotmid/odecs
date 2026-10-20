@@ -1,5 +1,6 @@
 package h265_decoder
 
+import common "../../common"
 import "base:intrinsics"
 
 import hevc ".."
@@ -524,7 +525,7 @@ edge_load :: proc(
 			intrinsics.unaligned_load((^#simd[EDGE_LINES]Sample)(&plane[at])),
 		)
 	}
-	if line != 1 do rows = transpose_8x8(rows)
+	if line != 1 do rows = common.transpose(rows)
 	return transmute(Edge_Lanes(T))rows
 }
 
@@ -534,7 +535,7 @@ edge_load :: proc(
 edge_store :: proc(plane: []$Sample, base, line, step: int, e: ^Edge_Lanes($T)) #no_bounds_check {
 	rows := transmute([8]#simd[EDGE_LINES]T)e^
 	first, end := 1, 7
-	if line != 1 do rows, first, end = transpose_8x8(rows), 0, 8
+	if line != 1 do rows, first, end = common.transpose(rows), 0, 8
 	for i in first ..< end {
 		at := line == 1 ? base + (i - 4) * step : base - 4 + i * line
 		intrinsics.unaligned_store(
@@ -542,50 +543,6 @@ edge_store :: proc(plane: []$Sample, base, line, step: int, e: ^Edge_Lanes($T)) 
 			(#simd[EDGE_LINES]Sample)(rows[i]),
 		)
 	}
-}
-
-// transpose_8x8 swaps rows and columns by interleaving lanes, then pairs of
-// lanes, then quads.
-@(private = "file")
-transpose_8x8 :: proc(r: [8]#simd[8]$T) -> (c: [8]#simd[8]T) {
-	a, b: [8]#simd[8]T
-	for i in 0 ..< 4 {
-		a[2 * i] = simd.shuffle(r[2 * i], r[2 * i + 1], 0, 8, 1, 9, 2, 10, 3, 11)
-		a[2 * i + 1] = simd.shuffle(r[2 * i], r[2 * i + 1], 4, 12, 5, 13, 6, 14, 7, 15)
-	}
-	for i in 0 ..< 2 {
-		for j in 0 ..< 2 {
-			b[4 * i + 2 * j] = simd.shuffle(
-				a[4 * i + j],
-				a[4 * i + j + 2],
-				0,
-				1,
-				8,
-				9,
-				2,
-				3,
-				10,
-				11,
-			)
-			b[4 * i + 2 * j + 1] = simd.shuffle(
-				a[4 * i + j],
-				a[4 * i + j + 2],
-				4,
-				5,
-				12,
-				13,
-				6,
-				7,
-				14,
-				15,
-			)
-		}
-	}
-	for i in 0 ..< 4 {
-		c[2 * i] = simd.shuffle(b[i], b[i + 4], 0, 1, 2, 3, 8, 9, 10, 11)
-		c[2 * i + 1] = simd.shuffle(b[i], b[i + 4], 4, 5, 6, 7, 12, 13, 14, 15)
-	}
-	return
 }
 
 // deblock_chroma_pair is 8.7.2.5.5 over both components at once.

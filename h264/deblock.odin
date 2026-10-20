@@ -1,5 +1,6 @@
 package h264
 
+import common "../common"
 import "base:intrinsics"
 
 import "core:simd"
@@ -380,28 +381,6 @@ deblock_luma_horizontal :: proc(
 	store_lanes(&pix[2 * stride], e.q2)
 }
 
-// 8x8 transpose of 16-bit lanes
-transpose_8x8_i16 :: #force_inline proc(r: [8]#simd[8]i16) -> (t: [8]#simd[8]i16) {
-	V :: #simd[8]i16
-	a: [8]V
-	#unroll for i in 0 ..< 4 {
-		a[2 * i] = simd.shuffle(r[2 * i], r[2 * i + 1], 0, 8, 1, 9, 2, 10, 3, 11)
-		a[2 * i + 1] = simd.shuffle(r[2 * i], r[2 * i + 1], 4, 12, 5, 13, 6, 14, 7, 15)
-	}
-	b: [8]V
-	#unroll for i in 0 ..< 2 {
-		b[4 * i + 0] = simd.shuffle(a[4 * i + 0], a[4 * i + 2], 0, 1, 8, 9, 2, 3, 10, 11)
-		b[4 * i + 1] = simd.shuffle(a[4 * i + 0], a[4 * i + 2], 4, 5, 12, 13, 6, 7, 14, 15)
-		b[4 * i + 2] = simd.shuffle(a[4 * i + 1], a[4 * i + 3], 0, 1, 8, 9, 2, 3, 10, 11)
-		b[4 * i + 3] = simd.shuffle(a[4 * i + 1], a[4 * i + 3], 4, 5, 12, 13, 6, 7, 14, 15)
-	}
-	#unroll for i in 0 ..< 4 {
-		t[2 * i] = simd.shuffle(b[i], b[i + 4], 0, 1, 2, 3, 8, 9, 10, 11)
-		t[2 * i + 1] = simd.shuffle(b[i], b[i + 4], 4, 5, 6, 7, 12, 13, 14, 15)
-	}
-	return
-}
-
 // Vertical edge: the 8 samples around the edge of each of the 16 rows are
 // transposed into the p3..q3 lane vectors and back after filtering.
 deblock_luma_vertical :: proc(
@@ -418,8 +397,8 @@ deblock_luma_vertical :: proc(
 		upper[i] = load_lanes(8, &pix[i * stride - 4])
 		lower[i] = load_lanes(8, &pix[(i + 8) * stride - 4])
 	}
-	cu := transpose_8x8_i16(upper) // cu[k] = column k of rows 0..7
-	cl := transpose_8x8_i16(lower)
+	cu := common.transpose(upper) // cu[k] = column k of rows 0..7
+	cl := common.transpose(lower)
 	e: Luma_Edge
 	columns := [8]^#simd[16]i16{&e.p3, &e.p2, &e.p1, &e.p0, &e.q0, &e.q1, &e.q2, &e.q3}
 	#unroll for k in 0 ..< 8 do columns[k]^ = simd.shuffle(cu[k], cl[k], 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
@@ -428,8 +407,8 @@ deblock_luma_vertical :: proc(
 		cu[k] = simd.swizzle(columns[k]^, 0, 1, 2, 3, 4, 5, 6, 7)
 		cl[k] = simd.swizzle(columns[k]^, 8, 9, 10, 11, 12, 13, 14, 15)
 	}
-	upper = transpose_8x8_i16(cu)
-	lower = transpose_8x8_i16(cl)
+	upper = common.transpose(cu)
+	lower = common.transpose(cl)
 	for i in 0 ..< 8 {
 		store_lanes(&pix[i * stride - 4], upper[i])
 		store_lanes(&pix[(i + 8) * stride - 4], lower[i])

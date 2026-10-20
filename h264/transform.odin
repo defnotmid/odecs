@@ -1,5 +1,6 @@
 package h264
 
+import common "../common"
 import "base:intrinsics"
 import "core:simd"
 
@@ -467,18 +468,15 @@ idct_4x4_add_lanes :: proc(
 	V :: #simd[4]i32
 	one := (#simd[4]u32)(1)
 	// Columns of the coefficient block as vectors over the row index
-	c0, c1, c2, c3 := transpose_4x4(r0, r1, r2, r3)
+	c := common.transpose([4]V{r0, r1, r2, r3})
+	c0, c1, c2, c3 := c[0], c[1], c[2], c[3]
 	// Row pass: each row's 1-D transform, lanes are the rows
 	e0 := simd.add(c0, c2)
 	e1 := simd.sub(c0, c2)
 	e2 := simd.sub(simd.shr(c1, one), c3)
 	e3 := simd.add(c1, simd.shr(c3, one))
-	f0, f1, f2, f3 := transpose_4x4(
-		simd.add(e0, e3),
-		simd.add(e1, e2),
-		simd.sub(e1, e2),
-		simd.sub(e0, e3),
-	)
+	f := common.transpose([4]V{simd.add(e0, e3), simd.add(e1, e2), simd.sub(e1, e2), simd.sub(e0, e3)})
+	f0, f1, f2, f3 := f[0], f[1], f[2], f[3]
 	// Column pass on the rows of f
 	g0 := simd.add(f0, f2)
 	g1 := simd.sub(f0, f2)
@@ -493,28 +491,6 @@ idct_4x4_add_lanes :: proc(
 			(#simd[4]T)(simd.clamp(v, 0, V(pixel_max))),
 		)
 	}
-}
-
-transpose_4x4 :: #force_inline proc(
-	a, b, c, d: #simd[4]i32,
-) -> (
-	#simd[4]i32,
-	#simd[4]i32,
-	#simd[4]i32,
-	#simd[4]i32,
-) {
-	ab_lo := simd.shuffle(a, b, 0, 4, 1, 5)
-	ab_hi := simd.shuffle(a, b, 2, 6, 3, 7)
-	cd_lo := simd.shuffle(c, d, 0, 4, 1, 5)
-	cd_hi := simd.shuffle(c, d, 2, 6, 3, 7)
-	return simd.shuffle(
-		ab_lo,
-		cd_lo,
-		0,
-		1,
-		4,
-		5,
-	), simd.shuffle(ab_lo, cd_lo, 2, 3, 6, 7), simd.shuffle(ab_hi, cd_hi, 0, 1, 4, 5), simd.shuffle(ab_hi, cd_hi, 2, 3, 6, 7)
 }
 
 // 8x8 inverse transform (8.5.13.2) added to the prediction: rows first,
@@ -562,8 +538,8 @@ idct_8x8_add_lanes :: proc(
 			simd.sub(b0, b7),
 		}
 	}
-	columns := pass(transpose_8x8(rows)) // row pass: lanes are the rows
-	out := pass(transpose_8x8(columns)) // column pass: lanes are the columns
+	columns := pass(common.transpose(rows)) // row pass: lanes are the rows
+	out := pass(common.transpose(columns)) // column pass: lanes are the columns
 	for y in 0 ..< 8 {
 		pred := (V)(intrinsics.unaligned_load((^#simd[8]T)(&pixels[y * stride])))
 		v := simd.add(pred, simd.shr(simd.add(out[y], 32), (#simd[8]u32)(6)))
@@ -572,28 +548,6 @@ idct_8x8_add_lanes :: proc(
 			(#simd[8]T)(simd.clamp(v, 0, V(pixel_max))),
 		)
 	}
-}
-
-transpose_8x8 :: #force_inline proc(r: [8]#simd[8]i32) -> (t: [8]#simd[8]i32) {
-	V :: #simd[8]i32
-	// interleave 32-bit lanes, then 64-bit pairs, then 128-bit halves
-	a: [8]V
-	#unroll for i in 0 ..< 4 {
-		a[2 * i] = simd.shuffle(r[2 * i], r[2 * i + 1], 0, 8, 1, 9, 2, 10, 3, 11)
-		a[2 * i + 1] = simd.shuffle(r[2 * i], r[2 * i + 1], 4, 12, 5, 13, 6, 14, 7, 15)
-	}
-	b: [8]V
-	#unroll for i in 0 ..< 2 {
-		b[4 * i + 0] = simd.shuffle(a[4 * i + 0], a[4 * i + 2], 0, 1, 8, 9, 2, 3, 10, 11)
-		b[4 * i + 1] = simd.shuffle(a[4 * i + 0], a[4 * i + 2], 4, 5, 12, 13, 6, 7, 14, 15)
-		b[4 * i + 2] = simd.shuffle(a[4 * i + 1], a[4 * i + 3], 0, 1, 8, 9, 2, 3, 10, 11)
-		b[4 * i + 3] = simd.shuffle(a[4 * i + 1], a[4 * i + 3], 4, 5, 12, 13, 6, 7, 14, 15)
-	}
-	#unroll for i in 0 ..< 4 {
-		t[2 * i] = simd.shuffle(b[i], b[i + 4], 0, 1, 2, 3, 8, 9, 10, 11)
-		t[2 * i + 1] = simd.shuffle(b[i], b[i + 4], 4, 5, 6, 7, 12, 13, 14, 15)
-	}
-	return
 }
 
 // Clamps integer to [0, 255]

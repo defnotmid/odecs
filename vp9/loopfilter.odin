@@ -1,11 +1,13 @@
 package vp9
 
+import common "../common"
 import "base:intrinsics"
 import "core:simd"
 
-// simd is used only inside procedures generic over the sample type, which a
-// package check does not instantiate.
+// simd and common are used only inside procedures generic over the sample
+// type, which a package check does not instantiate.
 _ :: simd
+_ :: common
 
 // Loop filter (section 8.8): superblocks in raster order, each plane's
 // vertical then horizontal edges. Edge decisions come from the filter record of
@@ -216,7 +218,6 @@ filter_lanes :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bi
 		return simd.select(simd.lanes_lt(simd.indices(V), V(8)), V(E(a)), V(E(b)))
 	}
 	shr :: #force_inline proc "contextless" (v: V, $n: uint) -> V {return simd.shr(v, M(n))}
-	ad :: #force_inline proc "contextless" (a, b: V) -> V {return simd.abs(a - b)}
 	le :: #force_inline proc "contextless" (a, b: V) -> M {return simd.lanes_le(a, b)}
 	both :: #force_inline proc "contextless" (a, b: M) -> M {return simd.bit_and(a, b)}
 	c :: #force_inline proc "contextless" (v, lo, hi: V) -> V {return simd.clamp(v, lo, hi)}
@@ -232,18 +233,18 @@ filter_lanes :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bi
 	lane := simd.indices(V)
 	active := simd.lanes_lt(lane, halves(i32(pair.lines[0]), 8 + i32(pair.lines[1])))
 	p, q := &e.p, &e.q
-	mask := both(both(both(le(ad(p[3], p[2]), limit), le(ad(p[2], p[1]), limit)), both(le(ad(p[1], p[0]), limit), le(ad(q[1], q[0]), limit))), both(both(le(ad(q[2], q[1]), limit), le(ad(q[3], q[2]), limit)), le(ad(p[0], q[0]) * 2 + shr(ad(p[1], q[1]), 1), blimit)))
+	mask := both(both(both(le(simd.abs_diff(p[3], p[2]), limit), le(simd.abs_diff(p[2], p[1]), limit)), both(le(simd.abs_diff(p[1], p[0]), limit), le(simd.abs_diff(q[1], q[0]), limit))), both(both(le(simd.abs_diff(q[2], q[1]), limit), le(simd.abs_diff(q[3], q[2]), limit)), le(simd.abs_diff(p[0], q[0]) * 2 + shr(simd.abs_diff(p[1], q[1]), 1), blimit)))
 	mask = both(mask, active)
 	if simd.reduce_or(mask) == 0 do return
-	hev := simd.bit_or(simd.lanes_gt(ad(p[1], p[0]), thresh), simd.lanes_gt(ad(q[1], q[0]), thresh))
+	hev := simd.bit_or(simd.lanes_gt(simd.abs_diff(p[1], p[0]), thresh), simd.lanes_gt(simd.abs_diff(q[1], q[0]), thresh))
 	one := V(E(1) << shift)
 	sizes := halves(i32(size0), i32(size1))
-	flat := both(both(both(le(ad(p[1], p[0]), one), le(ad(q[1], q[0]), one)), both(le(ad(p[2], p[0]), one), le(ad(q[2], q[0]), one))), both(le(ad(p[3], p[0]), one), le(ad(q[3], q[0]), one)))
+	flat := both(both(both(le(simd.abs_diff(p[1], p[0]), one), le(simd.abs_diff(q[1], q[0]), one)), both(le(simd.abs_diff(p[2], p[0]), one), le(simd.abs_diff(q[2], q[0]), one))), both(le(simd.abs_diff(p[3], p[0]), one), le(simd.abs_diff(q[3], q[0]), one)))
 	flat = both(flat, simd.lanes_ge(sizes, V(TX_8X8)))
 	flat2 := M(0)
 	when reach == 8 {
 		flat2 = both(flat, simd.lanes_eq(sizes, V(TX_16X16)))
-		#unroll for k in 4 ..< 8 do flat2 = both(flat2, both(le(ad(p[k], p[0]), one), le(ad(q[k], q[0]), one)))
+		#unroll for k in 4 ..< 8 do flat2 = both(flat2, both(le(simd.abs_diff(p[k], p[0]), one), le(simd.abs_diff(q[k], q[0]), one)))
 	}
 	out := e
 	// Narrow filter (8.8.5.2) on lanes that are not flat.
@@ -320,7 +321,7 @@ load_pair :: #force_inline proc(plane: []$T, base, along, across: int, $reach: i
 			at := base + (8 * cell + line) * along - reach + 8 * g
 			rows[line] = H(intrinsics.unaligned_load((^#simd[8]T)(&plane[at])))
 		}
-		cols[cell][g] = transpose(rows)
+		cols[cell][g] = common.transpose(rows)
 	}
 	#unroll for k in 0 ..< reach {
 		p, q := reach - 1 - k, reach + k // p_k is sample -(k + 1), q_k sample k
@@ -353,7 +354,7 @@ store_pair :: #force_inline proc(plane: []$T, base, along, across: int, $reach: 
 			cols[q >> 3][q & 7] = half(e.q[k], cell)
 		}
 		#unroll for g in 0 ..< G {
-			rows := transpose(cols[g])
+			rows := common.transpose(cols[g])
 			#unroll for line in 0 ..< 8 {
 				at := base + (8 * cell + line) * along - reach + 8 * g
 				intrinsics.unaligned_store((^#simd[8]T)(&plane[at]), (#simd[8]T)(rows[line]))

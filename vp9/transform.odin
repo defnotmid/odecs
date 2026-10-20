@@ -1,5 +1,6 @@
 package vp9
 
+import common "../common"
 import "base:intrinsics"
 import "core:simd"
 
@@ -213,37 +214,6 @@ iadst :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
 	}
 }
 
-// Swaps the rows and columns of an L x L tile (L = 4 or 8) by interleaving
-// lanes, then pairs, then quads.
-@(private)
-transpose :: #force_inline proc "contextless" (r: [$L]$V) -> (c: [L]V) {
-	when L == 4 {
-		a0 := simd.shuffle(r[0], r[1], 0, 4, 1, 5)
-		a1 := simd.shuffle(r[0], r[1], 2, 6, 3, 7)
-		a2 := simd.shuffle(r[2], r[3], 0, 4, 1, 5)
-		a3 := simd.shuffle(r[2], r[3], 2, 6, 3, 7)
-		c[0] = simd.shuffle(a0, a2, 0, 1, 4, 5)
-		c[1] = simd.shuffle(a0, a2, 2, 3, 6, 7)
-		c[2] = simd.shuffle(a1, a3, 0, 1, 4, 5)
-		c[3] = simd.shuffle(a1, a3, 2, 3, 6, 7)
-	} else {
-		a, b: [8]V
-		#unroll for i in 0 ..< 4 {
-			a[2 * i] = simd.shuffle(r[2 * i], r[2 * i + 1], 0, 8, 1, 9, 2, 10, 3, 11)
-			a[2 * i + 1] = simd.shuffle(r[2 * i], r[2 * i + 1], 4, 12, 5, 13, 6, 14, 7, 15)
-		}
-		#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 {
-			b[4 * i + 2 * j] = simd.shuffle(a[4 * i + j], a[4 * i + j + 2], 0, 1, 8, 9, 2, 3, 10, 11)
-			b[4 * i + 2 * j + 1] = simd.shuffle(a[4 * i + j], a[4 * i + j + 2], 4, 5, 12, 13, 6, 7, 14, 15)
-		}
-		#unroll for i in 0 ..< 4 {
-			c[2 * i] = simd.shuffle(b[i], b[i + 4], 0, 1, 2, 3, 8, 9, 10, 11)
-			c[2 * i + 1] = simd.shuffle(b[i], b[i + 4], 4, 5, 6, 7, 12, 13, 14, 15)
-		}
-	}
-	return
-}
-
 @(private)
 iwht :: proc "contextless" (t: ^[4]i32, shift: uint) {
 	a := t[0] >> shift
@@ -299,14 +269,14 @@ transform_lanes :: proc(block: []i32, $n: uint, $E: typeid, tx_type, rows: int) 
 		#unroll for jb in 0 ..< N / L {
 			tile: [L]V
 			#unroll for l in 0 ..< L do tile[l] = V(intrinsics.unaligned_load((^W)(&block[(g + l) * N + jb * L])))
-			tile = transpose(tile)
+			tile = common.transpose(tile)
 			#unroll for k in 0 ..< L do t[jb * L + k] = tile[k]
 		}
 		if row_dct {idct(&t, n)} else {iadst(&t, n)}
 		#unroll for jb in 0 ..< N / L {
 			tile: [L]V
 			#unroll for k in 0 ..< L do tile[k] = t[jb * L + k]
-			tile = transpose(tile)
+			tile = common.transpose(tile)
 			#unroll for l in 0 ..< L do intrinsics.unaligned_store((^W)(&block[(g + l) * N + jb * L]), W(tile[l]))
 		}
 	}

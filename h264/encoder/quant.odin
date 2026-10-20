@@ -1,6 +1,6 @@
 package h264_encoder
 
-import h264 ".."
+import common "../../common"
 
 import "base:intrinsics"
 import "core:simd"
@@ -29,14 +29,16 @@ forward_dct_4x4_rows :: #force_inline proc(
 ) {
 	Row :: #simd[4]i32
 	row0, row1, row2, row3 := first_row, second_row, third_row, fourth_row
-	column0, column1, column2, column3 := h264.transpose_4x4(row0, row1, row2, row3)
+	columns := common.transpose([4]Row{row0, row1, row2, row3})
+	column0, column1, column2, column3 := columns[0], columns[1], columns[2], columns[3]
 	column0, column1, column2, column3 = forward_transform_four_vectors(
 		column0,
 		column1,
 		column2,
 		column3,
 	)
-	row0, row1, row2, row3 = h264.transpose_4x4(column0, column1, column2, column3)
+	rows := common.transpose([4]Row{column0, column1, column2, column3})
+	row0, row1, row2, row3 = rows[0], rows[1], rows[2], rows[3]
 	row0, row1, row2, row3 = forward_transform_four_vectors(row0, row1, row2, row3)
 	intrinsics.unaligned_store((^Row)(&coefficients[0]), row0)
 	intrinsics.unaligned_store((^Row)(&coefficients[4]), row1)

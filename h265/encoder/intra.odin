@@ -1,5 +1,6 @@
 package h265_encoder
 
+import common "../../common"
 import "base:intrinsics"
 import "core:simd"
 
@@ -112,31 +113,6 @@ build_reference :: proc(
 	}
 }
 
-// Four input rows become four output columns. Interleave adjacent rows first,
-// then join their two-row column pairs; every lane is moved without arithmetic.
-@(private)
-intra_transpose_4x4 :: #force_inline proc(
-	a, b, c, d: #simd[4]u16,
-) -> (
-	#simd[4]u16,
-	#simd[4]u16,
-	#simd[4]u16,
-	#simd[4]u16,
-) {
-	ab0 := simd.shuffle(a, b, 0, 4, 1, 5)
-	ab1 := simd.shuffle(a, b, 2, 6, 3, 7)
-	cd0 := simd.shuffle(c, d, 0, 4, 1, 5)
-	cd1 := simd.shuffle(c, d, 2, 6, 3, 7)
-	return simd.shuffle(
-		ab0,
-		cd0,
-		0,
-		1,
-		4,
-		5,
-	), simd.shuffle(ab0, cd0, 2, 3, 6, 7), simd.shuffle(ab1, cd1, 0, 1, 4, 5), simd.shuffle(ab1, cd1, 2, 3, 6, 7)
-}
-
 @(private)
 transpose_intra_square :: proc(dst: []Sample, width, stride: int) #no_bounds_check {
 	// Native predictions are 4/8/16/32 squares. Retain the scalar definition
@@ -156,7 +132,8 @@ transpose_intra_square :: proc(dst: []Sample, width, stride: int) #no_bounds_che
 		a1 := intrinsics.unaligned_load((^Row)(&dst[base + stride]))
 		a2 := intrinsics.unaligned_load((^Row)(&dst[base + 2 * stride]))
 		a3 := intrinsics.unaligned_load((^Row)(&dst[base + 3 * stride]))
-		a0, a1, a2, a3 = intra_transpose_4x4(a0, a1, a2, a3)
+		diagonal := common.transpose([4]Row{a0, a1, a2, a3})
+		a0, a1, a2, a3 = diagonal[0], diagonal[1], diagonal[2], diagonal[3]
 		intrinsics.unaligned_store((^Row)(&dst[base]), a0)
 		intrinsics.unaligned_store((^Row)(&dst[base + stride]), a1)
 		intrinsics.unaligned_store((^Row)(&dst[base + 2 * stride]), a2)
@@ -174,8 +151,10 @@ transpose_intra_square :: proc(dst: []Sample, width, stride: int) #no_bounds_che
 			b3 := intrinsics.unaligned_load((^Row)(&dst[lower + 3 * stride]))
 			// Both tiles are fully borrowed into registers before either is
 			// replaced by its partner's columns.
-			a0, a1, a2, a3 = intra_transpose_4x4(a0, a1, a2, a3)
-			b0, b1, b2, b3 = intra_transpose_4x4(b0, b1, b2, b3)
+			ta := common.transpose([4]Row{a0, a1, a2, a3})
+			tb := common.transpose([4]Row{b0, b1, b2, b3})
+			a0, a1, a2, a3 = ta[0], ta[1], ta[2], ta[3]
+			b0, b1, b2, b3 = tb[0], tb[1], tb[2], tb[3]
 			intrinsics.unaligned_store((^Row)(&dst[upper]), b0)
 			intrinsics.unaligned_store((^Row)(&dst[upper + stride]), b1)
 			intrinsics.unaligned_store((^Row)(&dst[upper + 2 * stride]), b2)
