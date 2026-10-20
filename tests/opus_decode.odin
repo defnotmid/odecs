@@ -10,7 +10,7 @@
 //   opus_decode in.bit out.pcm [channels: 2] [loss.txt|-] [reference.pcm|-] [fec]
 package main
 
-import opus "../codec/opus"
+import opus "../opus"
 import "core:fmt"
 import "core:math"
 import "core:os"

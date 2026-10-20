@@ -2,7 +2,7 @@ package main
 
 import "core:strings"
 
-// codec/mp3/tables.odin: normative MPEG audio Layer III data:
+// mp3/tables.odin: normative MPEG audio Layer III data:
 //   - minimp3 (CC0): the Huffman decoding tables in its packed lookup format
 //     (tabs, tab32, tab33, tabindex, linbits), the scalefactor band widths
 //     for the nine sample rates (long, short, mixed), and the MPEG-2

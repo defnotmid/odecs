@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WebP gate: every file of libwebp's test corpus decoded by codec/webp and
+# WebP gate: every file of libwebp's test corpus decoded by webp and
 # compared with dwebp: RGBA identical (-pam), and for lossy files the
 # planes too (-pgm: Y, U, V, alpha); the largest decoded again on a
 # Work_Pool; the animations' every canvas identical to anim_dump's; and a

@@ -1,7 +1,7 @@
 #+build linux
 package benchmark_support
 
-import common "../../codec/common"
+import common "../../common"
 import "core:fmt"
 import "core:os"
 import "core:sys/linux"

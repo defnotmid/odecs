@@ -7,7 +7,7 @@
 //   .work/vt-encode-check OUTDIR [WIDTH HEIGHT FRAMES QP]
 package videotoolbox_encode_check
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:math"
 import "core:os"

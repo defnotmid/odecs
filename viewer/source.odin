@@ -1,8 +1,8 @@
 package viewer
 
-import media "../codec/media"
-import native "../codec/media/native"
-import movie "../codec/movie"
+import media "../media"
+import native "../media/native"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 import "core:strings"

@@ -15,7 +15,7 @@
 // reader's planar frames as yuva420p for comparison with FFmpeg's decode.
 package movie_alpha_write
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:math"
 import "core:os"

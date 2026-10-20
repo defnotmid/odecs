@@ -4,8 +4,8 @@ package main
 // as raw YUV 4:2:0 (bytes at 8 bits, little-endian u16 above) for
 // tests/av1_check.sh to compare with FFmpeg's libdav1d.
 
-import gpu "../codec/gpu"
-import av1 "../codec/av1"
+import vulkan "../media/vulkan"
+import av1 "../av1"
 import "core:fmt"
 import "core:os"
 import "core:time"
@@ -16,10 +16,10 @@ Sink :: struct {
 	bytes:  [dynamic]u8,
 }
 
-receive :: proc(frame: gpu.AV1_Frame, user: rawptr) {
+receive :: proc(frame: vulkan.AV1_Frame, user: rawptr) {
 	s := (^Sink)(user)
 	clear(&s.bytes)
-	gpu.append_frame_samples(&s.bytes, frame)
+	vulkan.append_frame_samples(&s.bytes, frame)
 	os.write(s.out, s.bytes[:])
 	s.frames += 1
 }
@@ -34,12 +34,12 @@ main :: proc() {
 	out, oerr := os.create(os.args[2])
 	if oerr != nil do os.exit(1)
 	defer os.close(out)
-	d: gpu.AV1_Decoder
-	if err := gpu.init_av1_decoder(&d, {}); err != .None {
+	d: vulkan.AV1_Decoder
+	if err := vulkan.init_av1_decoder(&d, {}); err != .None {
 		fmt.eprintln("init:", err)
 		os.exit(1)
 	}
-	defer gpu.destroy_av1_decoder(&d)
+	defer vulkan.destroy_av1_decoder(&d)
 	sink := Sink {
 		out = out,
 	}
@@ -57,13 +57,13 @@ main :: proc() {
 			if o.type == .Temporal_Delimiter && end > at do break
 			end = next
 		}
-		if err := gpu.decode_av1_temporal_unit(&d, data[at:end], receive, &sink); err != .None {
+		if err := vulkan.decode_av1_temporal_unit(&d, data[at:end], receive, &sink); err != .None {
 			fmt.eprintln("unit", unit, ":", err)
 			os.exit(1)
 		}
 		unit += 1
 		at = end
 	}
-	gpu.flush_av1_decoder(&d, receive, &sink)
+	vulkan.flush_av1_decoder(&d, receive, &sink)
 	fmt.eprintfln("%d frames, %d units, %.2f ms", sink.frames, unit, time.duration_milliseconds(time.since(start)))
 }

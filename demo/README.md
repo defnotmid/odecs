@@ -30,13 +30,13 @@ measured for this video:
 
 | on screen | source |
 | --- | --- |
-| ProRes 4444 + alpha, 1080p: 88 fps 1 thread, 322 fps 8 threads | `codec/movie/README.md`, Performance (frames through RGBA, file input) |
+| ProRes 4444 + alpha, 1080p: 88 fps 1 thread, 322 fps 8 threads | `movie/README.md`, Performance (frames through RGBA, file input) |
 | VP9 + alpha stream, 1080p: 72 fps, 183 fps | same table |
-| 11158 × 2156 lossy WebP: 223 ms on one core, libwebp 1.6.0 162 ms | `codec/webp/README.md`, speed against libwebp |
-| all 131 corpus files RGBA-identical to dwebp | `codec/webp/README.md`, the gate checks |
-| Vulkan Video decode, ms per frame, one at a time → three in flight: 1080p H.264 2.45 → 1.05, 1080p H.265 2.36 → 1.00, 720p 10-bit AV1 2.33 → 0.82 | `codec/gpu/README.md`, movie.Reader on the RX 9070 XT |
-| Vulkan Video encode, 900 1080p frames: H.264 3.64 → 2.01, HEVC 3.59 → 1.56 ms per frame | `codec/gpu/README.md`, three pictures in flight (`tests/movie_encode_timing.odin`) |
-| native H.264 encoder: 144 fps at QP 26, x264 medium 221 fps | `codec/h264/README.md`, 1080p, 16 slices on 16 workers |
+| 11158 × 2156 lossy WebP: 223 ms on one core, libwebp 1.6.0 162 ms | `webp/README.md`, speed against libwebp |
+| all 131 corpus files RGBA-identical to dwebp | `webp/README.md`, the gate checks |
+| Vulkan Video decode, ms per frame, one at a time → three in flight: 1080p H.264 2.45 → 1.05, 1080p H.265 2.36 → 1.00, 720p 10-bit AV1 2.33 → 0.82 | `media/vulkan/README.md`, movie.Reader on the RX 9070 XT |
+| Vulkan Video encode, 900 1080p frames: H.264 3.64 → 2.01, HEVC 3.59 → 1.56 ms per frame | `media/vulkan/README.md`, three pictures in flight (`tests/movie_encode_timing.odin`) |
+| native H.264 encoder: 144 fps at QP 26, x264 medium 221 fps | `h264/README.md`, 1080p, 16 slices on 16 workers |
 
 ## Files
 

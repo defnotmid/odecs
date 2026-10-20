@@ -1,4 +1,4 @@
-// Interop gate for codec/movie's reader against an oracle decode of the same
+// Interop gate for movie's reader against an oracle decode of the same
 // file (for example FFmpeg's), which is only a development reference:
 //
 //   ffmpeg -i in.mp4 -map 0:v:0 -fps_mode passthrough -f rawvideo -pix_fmt rgba ref.rgba
@@ -11,7 +11,7 @@
 // and the decode must agree (SNR). Pass "-" to skip a reference.
 package mp4_interop
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:math"
 import "core:os"

@@ -1,9 +1,9 @@
 package main
 
-import aac "../codec/aac"
-import decoder "../codec/aac/decoder"
-import encoder "../codec/aac/encoder"
-import common "../codec/common"
+import aac "../aac"
+import decoder "../aac/decoder"
+import encoder "../aac/encoder"
+import common "../common"
 import "core:fmt"
 import "core:os"
 import "core:slice"

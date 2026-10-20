@@ -3,9 +3,9 @@
 // Optional arguments: prefix h264|h265 depth gop frames width height.
 package main
 
-import media "../codec/media"
-import native "../codec/media/native"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import native "../media/native"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:os"
 import "core:slice"

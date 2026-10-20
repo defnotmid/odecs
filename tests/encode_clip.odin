@@ -1,7 +1,7 @@
 package main
 
-import common "../codec/common"
-import avc_enc "../codec/h264/encoder"
+import common "../common"
+import avc_enc "../h264/encoder"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

@@ -1,9 +1,9 @@
 package main
 
-import common "../codec/common"
-import avc "../codec/h264"
-import media "../codec/media"
-import native "../codec/media/native"
+import common "../common"
+import avc "../h264"
+import media "../media"
+import native "../media/native"
 import "core:fmt"
 import "core:os"
 import "core:slice"

@@ -7,14 +7,14 @@
 //   /tmp/odecs-alpha-fuzz ITERATIONS FIXTURE...
 package alpha_fuzz
 
-import mp4 "../codec/container/mp4"
-import flac "../codec/flac"
-import mp3 "../codec/mp3"
-import wav "../codec/container/wav"
-import webm "../codec/container/webm"
-import movie "../codec/movie"
-import prores "../codec/prores/decoder"
-import vp9 "../codec/vp9/decoder"
+import mp4 "../mp4"
+import flac "../flac"
+import mp3 "../mp3"
+import wav "../wav"
+import webm "../webm"
+import movie "../movie"
+import prores "../prores/decoder"
+import vp9 "../vp9/decoder"
 import "core:fmt"
 import "core:math/rand"
 import "core:mem"

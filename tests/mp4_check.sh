@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MP4 container and codec/movie gate. FFmpeg/ffprobe are development oracles:
+# MP4 container and movie gate. FFmpeg/ffprobe are development oracles:
 # they produce third-party fixtures and reference decodes, never a runtime
 # dependency. Usage: bash tests/mp4_check.sh [work-dir]
 set -euo pipefail
@@ -10,8 +10,8 @@ fail=0
 pass() { printf '  %-44s ok\n' "$1"; }
 bad() { printf '  %-44s FAIL\n' "$1"; fail=1; }
 
-odin test codec/container/mp4
-odin test codec/movie -o:speed
+odin test mp4
+odin test movie -o:speed
 odin build tools/mp4_smoke -o:speed -out:"$work/mp4_smoke"
 odin build tests/mp4_interop.odin -file -o:speed -out:"$work/mp4_interop"
 

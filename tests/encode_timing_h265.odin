@@ -1,7 +1,7 @@
 package main
 
-import common "../codec/common"
-import h265 "../codec/h265/encoder"
+import common "../common"
+import h265 "../h265/encoder"
 import "core:fmt"
 import "core:os"
 import "core:slice"

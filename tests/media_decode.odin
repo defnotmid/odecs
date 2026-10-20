@@ -1,9 +1,9 @@
 // Decode through the common API and optionally save visible raw YUV.
 package main
 
-import media "../codec/media"
-import native "../codec/media/native"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import native "../media/native"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

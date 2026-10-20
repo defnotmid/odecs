@@ -2,8 +2,8 @@
 // surface/dispatch are used. Runs a real Slang shader, then saves visible YUV.
 package main
 
-import media "../codec/media"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:mem"
 import "core:os"

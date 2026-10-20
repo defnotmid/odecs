@@ -4,7 +4,7 @@
 
 1. It synthesises a moving gradient with a bright square, plus a sine tone
    (440/880 Hz).
-2. It writes an MP4 through `codec/movie`.
+2. It writes an MP4 through `movie`.
 3. It reads the file back sequentially, with six `frame_at` lookups, and
    reads all the audio.
 4. It reports PSNR and SNR, the frame indices, the sample counts and the

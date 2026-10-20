@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Opus gate:
-# - the RFC 8251 conformance vectors through codec/opus, checked by libopus's
+# - the RFC 8251 conformance vectors through opus, checked by libopus's
 #   opus_compare (stereo and mono output) and by every packet's final range
 #   against the encoder's;
 # - packet loss: a bursty loss pattern over every vector, against libopus

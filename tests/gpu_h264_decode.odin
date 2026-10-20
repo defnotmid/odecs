@@ -1,7 +1,7 @@
 package main
 
-import gpu "../codec/gpu"
-import avc "../codec/h264"
+import vulkan "../media/vulkan"
+import avc "../h264"
 import "core:fmt"
 import "core:os"
 
@@ -9,9 +9,9 @@ State :: struct {
 	data:   [dynamic]u8,
 	frames: int,
 }
-receive :: proc(frame: gpu.H264_Frame, user: rawptr) {
+receive :: proc(frame: vulkan.H264_Frame, user: rawptr) {
 	s := cast(^State)user
-	gpu.append_frame_samples(&s.data, frame)
+	vulkan.append_frame_samples(&s.data, frame)
 	s.frames += 1
 }
 main :: proc() {
@@ -21,19 +21,19 @@ main :: proc() {
 	defer delete(data)
 	nals := avc.find_nal_units(data)
 	defer delete(nals)
-	d: gpu.H264_Decoder
-	if e := gpu.init_h264_decoder(&d, {device_index = -1});
+	d: vulkan.H264_Decoder
+	if e := vulkan.init_h264_decoder(&d, {device_index = -1});
 	   e != .None {fmt.eprintln("init:", e); os.exit(1)}
-	defer gpu.destroy_h264_decoder(&d)
+	defer vulkan.destroy_h264_decoder(&d)
 	s: State
 	defer delete(s.data)
 	for nal, i in nals {
-		if e := gpu.decode_h264_nal(&d, data[nal.offset:nal.offset + nal.length], receive, &s);
+		if e := vulkan.decode_h264_nal(&d, data[nal.offset:nal.offset + nal.length], receive, &s);
 		   e != .None {
 			fmt.eprintln("decode NAL", i, "failed:", e); os.exit(1)
 		}
 	}
-	if e := gpu.flush_h264_decoder(&d, receive, &s);
+	if e := vulkan.flush_h264_decoder(&d, receive, &s);
 	   e != .None {fmt.eprintln("flush:", e); os.exit(1)}
 	if e := os.write_entire_file(os.args[2], s.data[:]); e != nil do os.exit(1)
 	fmt.printfln("%d hardware AVC frames, %d bytes", s.frames, len(s.data))

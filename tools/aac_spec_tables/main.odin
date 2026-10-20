@@ -464,7 +464,7 @@ emit_tables :: proc(t: ^Tables, output: string) -> Error {
 
 main :: proc() {
 	if len(os.args) !=
-	   4 {fmt.eprintln("usage: aac_spec_tables ISO14496-3.txt codec/aac/tables.odin generated.odin"); os.exit(2)}
+	   4 {fmt.eprintln("usage: aac_spec_tables ISO14496-3.txt aac/tables.odin generated.odin"); os.exit(2)}
 	text, err := os.read_entire_file(os.args[1], context.allocator)
 	if err != nil {fmt.eprintln(Error.Read_Input, os.args[1]); os.exit(1)}
 	defer delete(text)

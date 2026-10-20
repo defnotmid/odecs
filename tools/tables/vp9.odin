@@ -6,7 +6,7 @@ import "core:strings"
 import "core:unicode"
 import "core:unicode/utf8"
 
-// codec/vp9/tables.odin from the VP9 Bitstream & Decoding Process
+// vp9/tables.odin from the VP9 Bitstream & Decoding Process
 // Specification v0.7 (2017-02-22), the primary document:
 //
 //	https://storage.googleapis.com/downloads.webmproject.org/docs/vp9/vp9-bitstream-specification-v0.7-20170222-draft.pdf

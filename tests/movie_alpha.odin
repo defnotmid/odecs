@@ -10,9 +10,9 @@
 // NAME.yuv and NAME.fmt); without one only consistency is checked.
 package movie_alpha
 
-import common "../codec/common"
-import native "../codec/media/native"
-import movie "../codec/movie"
+import common "../common"
+import native "../media/native"
+import movie "../movie"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"

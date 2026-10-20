@@ -1,5 +1,5 @@
 // Synthesises a moving gradient and a sine tone, writes an MP4 through
-// codec/movie, reads it back and reports PSNR/SNR and timing. When ffprobe is
+// movie, reads it back and reports PSNR/SNR and timing. When ffprobe is
 // on PATH its stream report is printed; it is an oracle only.
 //
 //   odin run tools/mp4_smoke -o:speed -- out.mp4 [--frames N] [--size WxH]
@@ -7,8 +7,8 @@
 //       [--native|--hardware] [--no-faststart] [--no-audio]
 package mp4_smoke
 
-import movie "../../codec/movie"
-import media "../../codec/media"
+import movie "../../movie"
+import media "../../media"
 import "core:fmt"
 import "core:math"
 import "core:os"

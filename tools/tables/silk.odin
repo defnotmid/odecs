@@ -2,7 +2,7 @@ package main
 
 import "core:strings"
 
-// codec/opus/silk_tables.odin: normative data of RFC 6716's SILK layer (and
+// opus/silk_tables.odin: normative data of RFC 6716's SILK layer (and
 // its resampler) from libopus. Jagged tables are laid out as CSR: one flat
 // array of values and an array of row offsets (row r is
 // values[at[r] ..< at[r+1]]), in place of libopus's arrays of row pointers.

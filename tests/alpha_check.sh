@@ -12,12 +12,12 @@ fail=0
 pass() { printf '  %-48s ok\n' "$1"; }
 bad() { printf '  %-48s FAIL\n' "$1"; fail=1; }
 
-odin test codec/prores/decoder
-odin test codec/vp9
-odin test codec/vp9/decoder
-odin test codec/container/webm
-odin test codec/container/mp4
-odin test codec/movie -o:speed
+odin test prores/decoder
+odin test vp9
+odin test vp9/decoder
+odin test webm
+odin test mp4
+odin test movie -o:speed
 odin build tests/alpha_compare.odin -file -o:speed -out:"$work/alpha_compare"
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"

@@ -1,8 +1,8 @@
 package main
 
-import common "../codec/common"
-import h264 "../codec/h264"
-import avc_enc "../codec/h264/encoder"
+import common "../common"
+import h264 "../h264"
+import avc_enc "../h264/encoder"
 import "core:fmt"
 import "core:mem"
 

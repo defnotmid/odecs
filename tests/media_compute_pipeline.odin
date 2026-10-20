@@ -2,10 +2,9 @@
 // transfer image -> device encode. No source pixels are downloaded or uploaded.
 package main
 
-import gpu "../codec/gpu"
-import media "../codec/media"
-import native "../codec/media/native"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import native "../media/native"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -18,11 +17,11 @@ Sink :: struct {
 	frames:         int,
 }
 Producer :: struct {
-	descriptor:                      gpu.Context_Descriptor,
+	descriptor:                      vulkan.Context_Descriptor,
 	buffer:                          vk.Buffer,
 	buffer_memory:                   vk.DeviceMemory,
 	image_memory:                    vk.DeviceMemory,
-	surface:                         gpu.Surface,
+	surface:                         vulkan.Surface,
 	pool:                            vk.CommandPool,
 	command:                         vk.CommandBuffer,
 	fence:                           vk.Fence,
@@ -37,7 +36,7 @@ Producer :: struct {
 	produced:                        bool,
 }
 Pipeline :: struct {
-	shared:                   ^gpu.Context,
+	shared:                   ^vulkan.Context,
 	producer:                 ^Producer,
 	encoder:                  ^media.Session,
 	sink:                     ^Sink,
@@ -46,7 +45,7 @@ Pipeline :: struct {
 }
 fail :: proc(message: string) {fmt.eprintln(message); os.exit(1)}
 check :: proc(err: media.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
-check_gpu :: proc(err: gpu.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
+check_gpu :: proc(err: vulkan.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
 check_vk :: proc(result: vk.Result) {if result != .SUCCESS {fmt.eprintln(result); os.exit(1)}}
 integer :: proc(index: int) -> int {v, ok := strconv.parse_int(os.args[index]); if !ok do fail("invalid integer")
 	return v}
@@ -70,7 +69,7 @@ pixel_output :: proc(frame: media.Video_Frame, user: rawptr) {
 }
 
 allocate_device_memory :: proc(
-	d: gpu.Context_Descriptor,
+	d: vulkan.Context_Descriptor,
 	requirements: vk.MemoryRequirements,
 ) -> vk.DeviceMemory {
 	properties: vk.PhysicalDeviceMemoryProperties
@@ -94,7 +93,7 @@ allocate_device_memory :: proc(
 
 init_producer :: proc(
 	p: ^Producer,
-	descriptor: gpu.Context_Descriptor,
+	descriptor: vulkan.Context_Descriptor,
 	width, height, depth: int,
 ) {
 	if descriptor.device == nil || descriptor.device_api == nil || descriptor.get_memory_properties == nil || descriptor.compute_queue == nil do fail("incomplete public Context descriptor")
@@ -133,7 +132,7 @@ init_producer :: proc(
 	a.GetImageMemoryRequirements(d, p.surface.image, &requirements)
 	p.image_memory = allocate_device_memory(descriptor, requirements)
 	check_vk(a.BindImageMemory(d, p.surface.image, p.image_memory, 0))
-	p.surface = gpu.Surface {
+	p.surface = vulkan.Surface {
 		device                = d,
 		physical_device       = descriptor.physical_device,
 		device_api            = a,
@@ -274,7 +273,7 @@ destroy_producer :: proc(p: ^Producer) {
 	p^ = {}
 }
 
-produce :: proc(p: ^Producer, source: gpu.Surface, crop_x, crop_y: int) {
+produce :: proc(p: ^Producer, source: vulkan.Surface, crop_x, crop_y: int) {
 	if source.device != p.descriptor.device || source.bit_depth != p.depth || source.y_view == 0 || source.uv_view == 0 || source.ready_semaphore == 0 || source.ready_value == 0 do fail("invalid sampled source surface")
 	d, a := p.descriptor.device, p.descriptor.device_api
 	images := [2]vk.DescriptorImageInfo {
@@ -454,7 +453,7 @@ transcode :: proc(decoded: media.Video_Frame, user: rawptr) {
 		if frame.storage != .Device || len(frame.planes[0].data) != 0 do fail("hardware decode returned host pixels")
 		source := vulkan.surface(frame)
 		if source == nil do fail("missing public decoded surface")
-		if p.producer.pipeline == 0 do init_producer(p.producer, gpu.context_descriptor(p.shared), p.width, p.height, frame.bit_depth)
+		if p.producer.pipeline == 0 do init_producer(p.producer, vulkan.context_descriptor(p.shared), p.width, p.height, frame.bit_depth)
 		produce(p.producer, source^, frame.crop_x + p.left, frame.crop_y + p.top)
 		frame.surface, frame.crop_x, frame.crop_y = &p.producer.surface, 0, 0
 	} else {
@@ -498,8 +497,8 @@ main :: proc() {
 	input, err := os.read_entire_file(os.args[1], context.allocator)
 	if err != nil do fail("cannot read source")
 	defer delete(input)
-	gc := codec == .H264 ? gpu.Codec.H264 : gpu.Codec.H265
-	requests := []gpu.Request {
+	gc := codec == .H264 ? vulkan.Codec.H264 : vulkan.Codec.H265
+	requests := []vulkan.Request {
 		{
 			codec = gc,
 			operation = .Decode,
@@ -510,9 +509,9 @@ main :: proc() {
 		},
 		{codec = gc, operation = .Encode, width = ow, height = oh, bit_depth = depth},
 	}
-	shared: gpu.Context
-	check_gpu(gpu.init_context(&shared, {requests = requests, device_index = -1}))
-	defer check_gpu(gpu.destroy_context(&shared))
+	shared: vulkan.Context
+	check_gpu(vulkan.init_context(&shared, {requests = requests, device_index = -1}))
+	defer check_gpu(vulkan.destroy_context(&shared))
 	producer: Producer
 	defer destroy_producer(&producer)
 	providers := []media.Provider{vulkan.provider(&shared)}
@@ -524,7 +523,7 @@ main :: proc() {
 	check(media.open(&host_encoder, config, providers)); defer media.close(&host_encoder)
 	config.operation, config.width, config.height, config.output_storage = .Decode, w, h, .Device
 	check(media.open(&decoder, config, providers)); defer media.close(&decoder)
-	if gpu.destroy_context(&shared) != .Busy do fail("live sessions did not retain the Context")
+	if vulkan.destroy_context(&shared) != .Busy do fail("live sessions did not retain the Context")
 	actual, expected := Sink{}, Sink{}
 	defer {delete(actual.stream); delete(actual.pixels); delete(expected.stream)
 		delete(expected.pixels)}
@@ -551,7 +550,7 @@ main :: proc() {
 	if actual.frames == 0 do fail("no device frames")
 	check(media.close(&decoder))
 	check(media.close(&device_encoder))
-	if gpu.context_descriptor(&shared).device == nil do fail("closing borrowed sessions destroyed their shared device")
+	if vulkan.context_descriptor(&shared).device == nil do fail("closing borrowed sessions destroyed their shared device")
 	config.preference, config.output_storage = .Native, .Host
 	check(media.open(&decoder, config, []media.Provider{native.provider()}))
 	pipeline.encoder, pipeline.sink, pipeline.device = &host_encoder, &expected, false
@@ -578,7 +577,7 @@ main :: proc() {
 	if os.write_entire_file(fmt.tprintf("%s.%s", os.args[6], ext), actual.stream[:]) != nil do fail("cannot save bitstream")
 	if os.write_entire_file(fmt.tprintf("%s.yuv", os.args[6]), actual.pixels[:]) != nil do fail("cannot save pixels")
 	destroy_producer(&producer)
-	check_gpu(gpu.destroy_context(&shared))
+	check_gpu(vulkan.destroy_context(&shared))
 	fmt.printfln(
 		"shared_compute_pipeline frames=%d size=%dx%d depth=%d crop=%d,%d bitstream/pixels_exact=true resident_host_pixel_transfers=0 readiness_completed=1 readiness_timeline=%d",
 		frames,

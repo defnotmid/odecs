@@ -3,7 +3,7 @@
 // specification's text.
 //
 //	odin build tools/tables -out:.work/tables
-//	.work/tables opus [third_party] > codec/opus/tables.odin
+//	.work/tables opus [third_party] > opus/tables.odin
 //
 // See tools/tables/README.md for every table and its source.
 package main
@@ -22,12 +22,12 @@ Generator :: struct {
 }
 
 GENERATORS := [?]Generator {
-	{"opus", opus_tables, "third_party", "codec/opus/tables.odin"},
-	{"silk", silk_tables, "third_party", "codec/opus/silk_tables.odin"},
-	{"webp", webp_tables, "third_party", "codec/webp/tables.odin"},
-	{"mp3", mp3_tables, "third_party", "codec/mp3/tables.odin"},
-	{"h265", h265_tables, "third_party", "codec/h265/scan_tables.odin"},
-	{"vp9", vp9_tables, "", "codec/vp9/tables.odin"},
+	{"opus", opus_tables, "third_party", "opus/tables.odin"},
+	{"silk", silk_tables, "third_party", "opus/silk_tables.odin"},
+	{"webp", webp_tables, "third_party", "webp/tables.odin"},
+	{"mp3", mp3_tables, "third_party", "mp3/tables.odin"},
+	{"h265", h265_tables, "third_party", "h265/scan_tables.odin"},
+	{"vp9", vp9_tables, "", "vp9/tables.odin"},
 }
 
 main :: proc() {

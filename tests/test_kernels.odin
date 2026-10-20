@@ -1,8 +1,8 @@
 package main
 
-import h264 "../codec/h264"
-import avc_dec "../codec/h264/decoder"
-import avc_enc "../codec/h264/encoder"
+import h264 "../h264"
+import avc_dec "../h264/decoder"
+import avc_enc "../h264/encoder"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"

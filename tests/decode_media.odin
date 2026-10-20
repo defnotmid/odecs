@@ -1,9 +1,9 @@
 package main
 
-import media "../codec/media"
-import native "../codec/media/native"
-import videotoolbox "../codec/media/videotoolbox"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import native "../media/native"
+import videotoolbox "../media/videotoolbox"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -12,7 +12,7 @@ import "core:time"
 
 // decode_media h264|h265 <in.annexb> <out.yuv|-> [hardware|native] [WxH] [depth=N]
 //
-// Decodes an Annex B stream through codec/media, one NAL unit per packet,
+// Decodes an Annex B stream through media, one NAL unit per packet,
 // with VideoToolbox or Vulkan Video (where available) or the native decoder,
 // and writes the visible 4:2:0 frames in display order: yuv420p, or
 // yuv420p10le above 8 bits ("-" only counts them, to time decoding alone).

@@ -8,7 +8,7 @@
 //   .work/movie-backends FILE
 package movie_backends
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 import "core:time"

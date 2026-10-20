@@ -6,7 +6,7 @@
 //   /tmp/movie_planar FILE [hardware]
 package movie_planar
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 

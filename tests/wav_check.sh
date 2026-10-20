@@ -14,7 +14,7 @@ fail=0
 pass() { printf '  %-40s ok\n' "$1"; }
 bad() { printf '  %-40s FAIL\n' "$1"; fail=1; }
 
-odin test codec/container/wav
+odin test wav
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"
 

@@ -1,6 +1,6 @@
 package main
 
-import h265 "../codec/h265/decoder"
+import h265 "../h265/decoder"
 import "core:fmt"
 import "core:os"
 import "core:slice"

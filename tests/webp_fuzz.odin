@@ -1,4 +1,4 @@
-// Fuzzes codec/webp under AddressSanitizer: mutated and truncated copies of
+// Fuzzes webp under AddressSanitizer: mutated and truncated copies of
 // WebP files (lossy, lossless, alpha, animated) through get_features,
 // decode, decode_yuva and the animation decoder.
 //
@@ -6,7 +6,7 @@
 //   fuzz ROUNDS FILE.webp...
 package main
 
-import webp "../codec/webp"
+import webp "../webp"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"

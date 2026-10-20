@@ -3,7 +3,7 @@ package main
 import "core:fmt"
 import "core:strings"
 
-// codec/h265/scan_tables.odin: the coefficient scans from Kvazaar's tables.c
+// h265/scan_tables.odin: the coefficient scans from Kvazaar's tables.c
 // and tables.h, and the selector over them.
 h265_tables :: proc(out: ^strings.Builder, third_party: string) {
 	tables_c := read(strings.concatenate({third_party, "/kvazaar/src/tables.c"}))

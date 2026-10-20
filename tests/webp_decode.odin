@@ -1,4 +1,4 @@
-// Decodes a WebP file with codec/webp and compares it with libwebp's dwebp
+// Decodes a WebP file with webp and compares it with libwebp's dwebp
 // output: RGBA against `dwebp -pam` (identical, or the PSNR), and for lossy
 // images the planes against `dwebp -pgm` (Y, then U and V side by side, then
 // alpha).
@@ -6,8 +6,8 @@
 //   webp_decode in.webp [ref.pam|-] [ref.pgm|-] [repeat] [threads]
 package main
 
-import "../codec/common"
-import webp "../codec/webp"
+import "../common"
+import webp "../webp"
 import "core:fmt"
 import "core:math"
 import "core:os"

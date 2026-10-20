@@ -6,7 +6,7 @@
 //   movie_av1 FILE OUT.yuv [native]
 package main
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 import "core:time"

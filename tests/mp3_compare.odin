@@ -1,5 +1,5 @@
 // Decodes an MP3 elementary stream (raw .mp3 or a conformance .bit) with
-// codec/mp3 and compares it with a reference: a conformance suite .pcm
+// mp3 and compares it with a reference: a conformance suite .pcm
 // (interleaved s16le; reports PSNR and the largest difference in 16-bit
 // steps, ISO/IEC 11172-4 asks for at most 2) or FFmpeg's f32le decode
 // (gapless-trimmed like FFmpeg when the stream has a LAME tag). Reports the
@@ -9,7 +9,7 @@
 //   /tmp/odecs-mp3-compare FILE [REF.pcm|REF.f32]
 package mp3_compare
 
-import mp3 "../codec/mp3"
+import mp3 "../mp3"
 import "core:fmt"
 import "core:math"
 import "core:os"

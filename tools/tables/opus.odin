@@ -2,7 +2,7 @@ package main
 
 import "core:strings"
 
-// codec/opus/tables.odin: normative data of RFC 6716's CELT layer for the
+// opus/tables.odin: normative data of RFC 6716's CELT layer for the
 // standard 48 kHz mode (shortMdctSize 120, overlap 120), from libopus:
 //   - modes.c: band edges (eband5ms) and the allocation vectors;
 //   - static_modes_float.h: logN, the pulse cache (index, bits, caps) and the MDCT window;

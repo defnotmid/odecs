@@ -2,10 +2,9 @@
 // Context, compared with native decode -> host upload on the same GPU.
 package main
 
-import gpu "../codec/gpu"
-import media "../codec/media"
-import native "../codec/media/native"
-import vulkan "../codec/media/vulkan"
+import media "../media"
+import native "../media/native"
+import vulkan "../media/vulkan"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -16,7 +15,7 @@ Sink :: struct {
 	frames:         int,
 }
 Pipeline :: struct {
-	shared:                   ^gpu.Context,
+	shared:                   ^vulkan.Context,
 	encoder:                  ^media.Session,
 	sink:                     ^Sink,
 	left, top, width, height: int,
@@ -25,7 +24,7 @@ Pipeline :: struct {
 }
 fail :: proc(message: string) {fmt.eprintln(message); os.exit(1)}
 check :: proc(err: media.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
-check_gpu :: proc(err: gpu.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
+check_gpu :: proc(err: vulkan.Error) {if err != .None {fmt.eprintln(err); os.exit(1)}}
 integer :: proc(index: int) -> int {v, ok := strconv.parse_int(os.args[index]); if !ok do fail("invalid integer")
 	return v}
 packet_output :: proc(packet: media.Packet, user: rawptr) {append(
@@ -60,7 +59,7 @@ transcode :: proc(decoded: media.Video_Frame, user: rawptr) {
 	if p.device {
 		if frame.storage != .Device || len(frame.planes[0].data) != 0 do fail("hardware decode unexpectedly returned host pixels")
 		s := vulkan.surface(frame)
-		if s == nil || s.device != gpu.context_descriptor(p.shared).device do fail("decoder did not borrow the shared device")
+		if s == nil || s.device != vulkan.context_descriptor(p.shared).device do fail("decoder did not borrow the shared device")
 		frame.crop_x += p.left
 		frame.crop_y += p.top
 		if p.sink.frames == 0 {
@@ -121,8 +120,8 @@ main :: proc() {
 	input, err := os.read_entire_file(os.args[1], context.allocator)
 	if err != nil do fail("cannot read source")
 	defer delete(input)
-	gc := codec == .H264 ? gpu.Codec.H264 : gpu.Codec.H265
-	requests := []gpu.Request {
+	gc := codec == .H264 ? vulkan.Codec.H264 : vulkan.Codec.H265
+	requests := []vulkan.Request {
 		{
 			codec = gc,
 			operation = .Decode,
@@ -133,9 +132,9 @@ main :: proc() {
 		},
 		{codec = gc, operation = .Encode, width = ow, height = oh, bit_depth = depth},
 	}
-	shared: gpu.Context
-	check_gpu(gpu.init_context(&shared, {requests = requests, device_index = -1}))
-	defer check_gpu(gpu.destroy_context(&shared))
+	shared: vulkan.Context
+	check_gpu(vulkan.init_context(&shared, {requests = requests, device_index = -1}))
+	defer check_gpu(vulkan.destroy_context(&shared))
 	providers := []media.Provider{vulkan.provider(&shared)}
 	config := media.default_config(codec, .Encode)
 	config.width, config.height, config.bit_depth, config.preference =
@@ -146,7 +145,7 @@ main :: proc() {
 	config.operation, config.width, config.height, config.output_storage = .Decode, w, h, .Device
 	check(media.open(&decoder, config, providers)); defer media.close(&decoder)
 	// The lazy decoder already holds the Context before its first SPS.
-	if gpu.destroy_context(&shared) != .Busy do fail("live sessions did not retain the Context")
+	if vulkan.destroy_context(&shared) != .Busy do fail("live sessions did not retain the Context")
 	actual, expected := Sink{}, Sink{}
 	defer {delete(actual.stream); delete(actual.pixels); delete(expected.stream)
 		delete(expected.pixels)}
@@ -172,7 +171,7 @@ main :: proc() {
 	if actual.frames == 0 do fail("no device frames")
 	check(media.close(&decoder))
 	check(media.close(&device_encoder))
-	if gpu.context_descriptor(&shared).device == nil do fail("closing borrowed sessions destroyed their shared device")
+	if vulkan.context_descriptor(&shared).device == nil do fail("closing borrowed sessions destroyed their shared device")
 	config.preference, config.output_storage = .Native, .Host
 	check(media.open(&decoder, config, []media.Provider{native.provider()}))
 	pipeline.encoder, pipeline.sink, pipeline.device = &host_encoder, &expected, false
@@ -198,7 +197,7 @@ main :: proc() {
 	ext := codec == .H264 ? "264" : "265"
 	if os.write_entire_file(fmt.tprintf("%s.%s", os.args[6], ext), actual.stream[:]) != nil do fail("cannot save bitstream")
 	if os.write_entire_file(fmt.tprintf("%s.yuv", os.args[6]), actual.pixels[:]) != nil do fail("cannot save pixels")
-	check_gpu(gpu.destroy_context(&shared))
+	check_gpu(vulkan.destroy_context(&shared))
 	fmt.printfln(
 		"shared_device_pipeline frames=%d refusals=%d size=%dx%d depth=%d crop=%d,%d bitstream/pixels_exact=true",
 		frames,

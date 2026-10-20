@@ -8,9 +8,9 @@
 // Up/Down volume, M mute, V visualizer, I info, F fullscreen, Q/Esc quit.
 package viewer
 
-import common "../codec/common"
-import media "../codec/media"
-import native "../codec/media/native"
+import common "../common"
+import media "../media"
+import native "../media/native"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

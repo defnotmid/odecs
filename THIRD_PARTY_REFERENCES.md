@@ -9,19 +9,19 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 
 | Reference | Used for | Local path | Commit | Commit date | License |
 | --- | --- | --- | --- | --- | --- |
-| [libopus](https://gitlab.xiph.org/xiph/opus) v1.6.1 | ported: `codec/opus`; oracle | `third_party/opus` | `22244de5a79bd1d6d623c32e72bf1954b56235be` | 2026-01-13 | BSD-3-Clause |
-| [libwebp](https://chromium.googlesource.com/webm/libwebp) v1.6.0 | ported: `codec/webp`; oracle | `third_party/libwebp` | `4fa21912338357f89e4fd51cf2368325b59e9bd9` | 2025-07-07 | BSD-3-Clause + patent grant |
+| [libopus](https://gitlab.xiph.org/xiph/opus) v1.6.1 | ported: `opus`; oracle | `third_party/opus` | `22244de5a79bd1d6d623c32e72bf1954b56235be` | 2026-01-13 | BSD-3-Clause |
+| [libwebp](https://chromium.googlesource.com/webm/libwebp) v1.6.0 | ported: `webp`; oracle | `third_party/libwebp` | `4fa21912338357f89e4fd51cf2368325b59e9bd9` | 2025-07-07 | BSD-3-Clause + patent grant |
 | [gen2brain/h265](https://github.com/gen2brain/h265) | ported: H.265 decoder | `third_party/h265` | `5138267a04330b8f0e36ddeabbcf6f49b664fa88` | 2026-08-30 | MIT |
 | [oxideav-h265](https://github.com/OxideAV/oxideav-h265) | cross-reference: H.265 decoder | `third_party/oxideav-h265` | `a1ecd6adceedeefd83740f6537946cc3ee8ab3ec` | 2026-09-05 | MIT |
 | [Kvazaar](https://github.com/ultravideo/kvazaar) | ported: H.265 encoder parts | `third_party/kvazaar` | `2b06691bb5844404c0e703f12a5d7b0fee914ec7` | 2026-09-14 | BSD-3-Clause |
 | [OpenH264](https://github.com/cisco/openh264) | ported: H.264 CABAC tables; fixtures | `third_party/openh264` | `9d974972d9f1ef572b87d8d774af8f8c304ad3e1` | 2026-09-04 | BSD-2-Clause |
-| [minimp3](https://github.com/lieff/minimp3) | ported: `codec/mp3` | `third_party/minimp3` | `ea99364f61c14656440e8d77e9c233ccf3124633` | 2026-07-27 | CC0 1.0 |
+| [minimp3](https://github.com/lieff/minimp3) | ported: `mp3` | `third_party/minimp3` | `ea99364f61c14656440e8d77e9c233ccf3124633` | 2026-07-27 | CC0 1.0 |
 | [PDMP3](https://github.com/technosaurus/PDMP3) | ported: MP3 synthesis window | `third_party/PDMP3` | `2a206a3ada78ec4d13434847f05f50097c60c36a` | 2017-08-12 | public domain (Unlicense) |
 | [dr_libs](https://github.com/mackron/dr_libs) | read: `dr_mp3.h` | `third_party/dr_libs` | `dfe8377631000664666519fdb83da193fd8037f4` | 2026-09-01 | Unlicense or MIT-0 |
 | [edge264](https://github.com/tvlabs/edge264) | read: H.264 decoder study | `third_party/edge264` | `2c2ab95d63c1ad89c5687f9e50b57cad772c871b` | 2026-07-28 | BSD-3-Clause |
 | [hevc.js](https://github.com/lid-labs/hevc.js) | read: HEVC decoder study | `third_party/hevc.js` | `fa6c1bb2a58fbc1e425030555ef57121717de746` | 2026-10-01 | MIT |
 | [Glint](https://github.com/CrispStrobe/glint) | read: AAC study | `third_party/glint` | `77738f3ed9b15f627196cc5bbd7f6406814ba2fb` | 2026-08-19 | MIT |
-| [Apple ALAC](https://github.com/macosforge/alac) | ported: `codec/alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
+| [Apple ALAC](https://github.com/macosforge/alac) | ported: `alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause

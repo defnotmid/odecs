@@ -1,7 +1,7 @@
 package main
 
-import h264 "../codec/h264"
-import avc_dec "../codec/h264/decoder"
+import h264 "../h264"
+import avc_dec "../h264/decoder"
 import "core:fmt"
 import "core:os"
 import "core:time"

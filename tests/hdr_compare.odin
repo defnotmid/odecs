@@ -3,12 +3,12 @@
 // white, 203 nits), passed through the reader's BT.2390 curve and the
 // BT.1886 inverse; this isolates Y'CbCr to RGB, the PQ/HLG EOTF (and HLG's
 // OOTF), the gamut conversion and the tables from the tone curve, which
-// codec/movie's unit tests check. Reports the 8-bit differences.
+// movie's unit tests check. Reports the 8-bit differences.
 //
 //   /tmp/hdr_compare FILE ORACLE.lin [LIGHT_SCALE]
 package hdr_compare
 
-import movie "../codec/movie"
+import movie "../movie"
 import "core:fmt"
 import "core:math"
 import "core:os"

@@ -7,8 +7,8 @@
 //   /tmp/odecs-movie-equal A B [--no-audio]
 package movie_equal
 
-import native "../codec/media/native"
-import movie "../codec/movie"
+import native "../media/native"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 

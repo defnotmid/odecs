@@ -7,11 +7,11 @@
 //   /tmp/odecs-alpha-compare FIXTURE.mov|webm [ORACLE.yuv] [THREADS]
 package alpha_compare
 
-import common "../codec/common"
-import mp4 "../codec/container/mp4"
-import webm "../codec/container/webm"
-import prores "../codec/prores/decoder"
-import vp9 "../codec/vp9/decoder"
+import common "../common"
+import mp4 "../mp4"
+import webm "../webm"
+import prores "../prores/decoder"
+import vp9 "../vp9/decoder"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

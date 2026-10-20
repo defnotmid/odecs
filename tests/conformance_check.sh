@@ -2,10 +2,10 @@
 # H.264 and HEVC conformance gate (with FFmpeg). Decodes the OpenH264
 # reference streams (bash tools/fetch_third_party.sh openh264) and the JCT-VC
 # HEVC conformance streams (bash tests/hevc_conformance.sh) through
-# codec/media: MODE=hardware (the default; VideoToolbox on macOS, Vulkan Video
+# media: MODE=hardware (the default; VideoToolbox on macOS, Vulkan Video
 # elsewhere) or MODE=native. Output must match the conformance MD5s where a
 # stream has them, and FFmpeg's software decode otherwise. A stream the
-# hardware or our admission refuses is listed as refused (codec/media then
+# hardware or our admission refuses is listed as refused (media then
 # falls back to the native decoder); any difference fails.
 # usage: [MODE=native] tests/conformance_check.sh [name-regex]
 set -euo pipefail

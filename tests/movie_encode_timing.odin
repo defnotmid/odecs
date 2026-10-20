@@ -8,8 +8,8 @@
 //   /tmp/odecs-movie-encode [h264|h265] [W H FRAMES] [out.mp4]
 package movie_encode_timing
 
-import mp4 "../codec/container/mp4"
-import movie "../codec/movie"
+import mp4 "../mp4"
+import movie "../movie"
 import "core:fmt"
 import "core:os"
 import "core:slice"

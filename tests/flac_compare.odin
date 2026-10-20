@@ -1,4 +1,4 @@
-// Decodes a native .flac file with codec/flac and checks it three ways: the
+// Decodes a native .flac file with flac and checks it three ways: the
 // MD5 of the decoded samples against the one in streaminfo (the encoder's
 // own checksum, RFC 9639 section 8.2), the samples as f32 against FFmpeg's
 // decode, and random seeks against the sequential decode. Reports decode
@@ -8,7 +8,7 @@
 //   /tmp/odecs-flac-compare FILE.flac [ORACLE.f32|-]
 package flac_compare
 
-import flac "../codec/flac"
+import flac "../flac"
 import "core:crypto/legacy/md5"
 import "core:fmt"
 import "core:math/rand"

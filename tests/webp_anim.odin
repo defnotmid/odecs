@@ -1,4 +1,4 @@
-// Decodes an animated WebP with codec/webp and compares every composited
+// Decodes an animated WebP with webp and compares every composited
 // canvas with libwebp's `anim_dump -pam` frames (dump_0000.pam, ...).
 // anim_dump writes fully transparent pixels as transparent black (to compare
 // with GIF); the decoders keep their colour, so they are compared the same
@@ -7,7 +7,7 @@
 //   webp_anim in.webp ref-folder
 package main
 
-import webp "../codec/webp"
+import webp "../webp"
 import "core:fmt"
 import "core:math"
 import "core:os"

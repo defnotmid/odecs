@@ -2,7 +2,7 @@ package main
 
 import "core:strings"
 
-// codec/webp/tables.odin: normative data of VP8 (RFC 6386) and WebP
+// webp/tables.odin: normative data of VP8 (RFC 6386) and WebP
 // lossless, from libwebp's decoder:
 //   - tree_dec.c: the default coefficient probabilities, their update
 //     probabilities, and the 4x4 intra mode probabilities by the modes above
