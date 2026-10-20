@@ -244,3 +244,23 @@ writer_round_trips :: proc(t: ^testing.T) {
 	_, e := encode(samples[:3], 44100, 2, .S16)
 	testing.expect_value(t, e, Error.Invalid_Argument)
 }
+
+@(test)
+header_matches_encode :: proc(t: ^testing.T) {
+	samples := [8]f32{0, 0.5, -0.5, 1, -1, 1.5, -2, 0.25}
+	for format in Write_Format {
+		for channels in ([3]int{1, 2, 4}) {
+			data, err := encode(samples[:], 48000, channels, format)
+			defer delete(data)
+			testing.expect_value(t, err, Error.None)
+			h: [HEADER_SIZE]u8
+			testing.expect_value(t, header_into(h[:], len(samples) / channels, 48000, channels, format), Error.None)
+			testing.expectf(t, h == ([^][HEADER_SIZE]u8)(raw_data(data))[0], "%v x%d: the header differs from encode's", format, channels)
+		}
+	}
+	h: [HEADER_SIZE]u8
+	testing.expect_value(t, header_into(h[:HEADER_SIZE - 1], 1, 44100, 2, .S16), Error.Invalid_Argument)
+	testing.expect_value(t, header_into(h[:], -1, 44100, 2, .S16), Error.Invalid_Argument)
+	testing.expect_value(t, header_into(h[:], 1 << 30, 44100, 2, .S16), Error.Invalid_Argument) // 4 GiB of data: past a u32
+	testing.expect_value(t, header_into(h[:], (int(max(u32)) - 36) / 4, 44100, 2, .S16), Error.None)
+}
