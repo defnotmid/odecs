@@ -57,10 +57,20 @@ main :: proc() {
 			if psnr < worst_psnr do worst_psnr, worst_file = psnr, name
 			verdict = fmt.tprintf("%s PSNR %.2f dB", ok ? "ok  " : "FAIL", psnr)
 		} else {
+			// stb fills a GIF's background with red and blue swapped; odecs
+			// writes the table's colour (gif.decode).
+			gif_file := image.format_of(data) == .GIF
+			swapped := 0
 			first := -1
-			for v, i in img.pixels do if v != expected[i] {first = i; break}
+			for i := 0; i < len(img.pixels); i += 4 {
+				a, b := img.pixels[i:][:4], expected[i:][:4]
+				if string(a) == string(b) do continue
+				if gif_file && a[3] == 255 && a[0] == b[2] && a[1] == b[1] && a[2] == b[0] {swapped += 1; continue}
+				first = i
+				break
+			}
 			if first < 0 {
-				verdict = "ok   identical"
+				verdict = swapped > 0 ? fmt.tprintf("ok   identical but %d background pixels stb swaps", swapped) : "ok   identical"
 			} else {
 				p := first / 4
 				verdict = fmt.tprintf("FAIL pixel (%d, %d): %v, stb %v", p % int(w), p / int(w), img.pixels[p * 4:][:4], expected[p * 4:][:4])

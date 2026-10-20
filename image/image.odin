@@ -8,6 +8,7 @@ package odecs_image
 
 import bmp "../bmp"
 import common "../common"
+import gif "../gif"
 import png_encoder "../png/encoder"
 import webp "../webp"
 import core_image "core:image"
@@ -73,8 +74,12 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 	switch i.format {
 	case .Unknown:
 		return i, .Unsupported
-	case .JPEG, .GIF:
+	case .JPEG:
 		return i, .Unsupported
+	case .GIF:
+		ft, e := gif.get_features(data)
+		if e != .None do return i, .Invalid
+		i.width, i.height, i.has_alpha, i.animated = ft.width, ft.height, ft.has_alpha, ft.animated
 	case .WebP:
 		ft, e := webp.get_features(data)
 		if e != .None do return i, .Invalid
@@ -85,8 +90,8 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 		i.width, i.height, i.has_alpha = b.width, b.height, b.has_alpha
 	case .PNG, .TGA, .QOI:
 		img, e := core_image.load_from_bytes(data, {.info})
+		defer if e == nil || i.format != .TGA do core_image.destroy(img) // see decode_core
 		if e != nil do return i, .Invalid
-		defer core_image.destroy(img)
 		i.width, i.height, i.has_alpha = img.width, img.height, img.channels == 2 || img.channels == 4
 	}
 	return
@@ -95,9 +100,13 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 // Decodes the image (an animation's first frame) to RGBA8 straight alpha,
 // allocated with `allocator`; free it with destroy_image.
 decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> (img: Image, err: Error) {
-	switch format_of(data) {
-	case .Unknown, .JPEG, .GIF:
+	switch format := format_of(data); format {
+	case .Unknown, .JPEG:
 		return img, .Unsupported
+	case .GIF:
+		g, e := gif.decode(data, allocator)
+		if e != .None do return img, e == .Out_Of_Memory ? .Out_Of_Memory : .Invalid
+		return {g.width, g.height, g.pixels}, .None
 	case .WebP:
 		w, e := webp.decode(data, pool, allocator)
 		if e != .None do return img, .Invalid
@@ -115,7 +124,7 @@ decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.a
 		}
 		return img, .Invalid
 	case .PNG, .TGA, .QOI:
-		return decode_core(data, allocator)
+		return decode_core(data, format, allocator)
 	}
 	return img, .Unsupported
 }
@@ -131,11 +140,13 @@ write_png :: png_encoder.write_file
 
 // core:image's pixels to RGBA8 as stb_image gives them: gray replicated into
 // R, G and B, a missing alpha as 255, 16-bit samples as their high byte.
+// On failure core:image's PNG and QOI loaders return the half-built image for
+// the caller to free; TGA has freed it already and returns the pointer anyway.
 @(private)
-decode_core :: proc(data: []u8, allocator := context.allocator) -> (img: Image, err: Error) {
+decode_core :: proc(data: []u8, format: Format, allocator := context.allocator) -> (img: Image, err: Error) {
 	src, e := core_image.load_from_bytes(data, {}, allocator)
+	defer if e == nil || format != .TGA do core_image.destroy(src, allocator)
 	if e != nil do return img, .Invalid
-	defer core_image.destroy(src, allocator)
 	n := src.width * src.height
 	ch := src.channels
 	if ch < 1 || ch > 4 || src.depth != 8 && src.depth != 16 || len(src.pixels.buf) < n * ch * src.depth / 8 do return img, .Invalid

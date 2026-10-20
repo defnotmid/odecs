@@ -62,6 +62,23 @@ for d in none background previous; do
 		\( "$src/small.png" -crop 40x30+20+10 -colors 32 \) -loop 0 "$out/gif_anim_$d.gif"
 done
 [ -f "$out/gif_anim_opt.gif" ] || gifsicle -O3 "$out/gif_anim_none.gif" -o "$out/gif_anim_opt.gif"
+# Transparent frames smaller than the screen, each disposal in turn, local
+# colour tables and a background index.
+if [ ! -f "$out/gif_anim_mixed.gif" ]; then
+	for k in 0 1 2 3 4; do
+		magick "$src/alpha.png" -crop 120x80+$((k * 40))+$((k * 15)) +repage -channel A -threshold 50% +channel -colors 48 "$src/piece$k.gif"
+	done
+	gifsicle --loopcount=3 --logical-screen 260x160 --background "#305070" --delay 7 \
+		--disposal=background -p 0,0 "$src/piece0.gif" --disposal=previous -p 40,20 "$src/piece1.gif" \
+		--disposal=none -p 100,50 "$src/piece2.gif" --disposal=background -p 20,70 "$src/piece3.gif" \
+		--disposal=previous -p 130,10 "$src/piece4.gif" --disposal=none -p 50,40 "$src/piece0.gif" -o "$out/gif_anim_mixed.gif"
+fi
+# The same with a global colour table and background index 5: stb fills
+# where the first frame does not reach (byte 11 is the background index).
+if [ ! -f "$out/gif_anim_global.gif" ]; then
+	gifsicle --colors 64 "$out/gif_anim_mixed.gif" -o "$out/gif_anim_global.gif"
+	printf '\x05' | dd of="$out/gif_anim_global.gif" bs=1 seek=11 conv=notrunc status=none
+fi
 
 # BMP, TGA, QOI.
 m bmp_24.bmp "BMP3" "$src/odd.png" -type TrueColor

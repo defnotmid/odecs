@@ -24,13 +24,17 @@ Audio:
 - `mp3`: MPEG-1/2/2.5 Layer III decoding ([README](mp3/README.md)).
 
 Images:
+- `image`: one decode path for PNG, BMP, TGA, QOI, GIF and WebP to RGBA8, matching stb_image, and PNG writing.
+- `gif`: GIF decoding, the first frame or the animation composited as browsers show it ([README](gif/README.md)).
+- `bmp`: BMP decoding by stb_image's rules ([README](bmp/README.md)).
+- `png/encoder`: PNG writing ([README](png/README.md)).
 - `webp`: WebP lossy, lossless, alpha and animation to RGBA8 ([README](webp/README.md)).
 
 Containers:
 - `mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](mp4/README.md)).
 - `webm`: WebM/Matroska reading, and VP9 WebM writing with alpha ([README](webm/README.md)).
 - `ogg`: Ogg (for Ogg Opus) ([README](ogg/README.md)).
-- `wav`: WAV, RF64 and RIFX ([README](wav/README.md)).
+- `wav`: WAV, RF64 and RIFX reading; 16-bit PCM and float writing ([README](wav/README.md)).
 
 Putting them together:
 - `media`: one encode/decode API over the native codecs and the hardware ones, choosing what the machine supports ([README](media/README.md)).
