@@ -3,7 +3,7 @@
 Hardware H.264 and HEVC decoding and encoding on Apple platforms through
 VideoToolbox.
 Most callers use it through [`media`](../README.md)'s
-`media_videotoolbox.provider()`, which `movie` lists before Vulkan Video.
+`media_videotoolbox.provider()`, which `video` lists before Vulkan Video.
 Off Apple platforms the package builds with a stub session that reports
 `.Unavailable`, so it can be imported everywhere.
 
@@ -34,7 +34,7 @@ rows into a pixel buffer from the session's pool. Each call completes its
 frame; the packet is Annex B, with the format description's parameter
 sets before each keyframe.
 
-On the M4 at 1080p through `movie.Writer`: H.264 about 164 fps and HEVC
+On the M4 at 1080p through `video.Writer`: H.264 about 164 fps and HEVC
 about 154 fps from I420 or NV12 (`tests/videotoolbox_encode_check.odin`),
 both decoded by odecs' native decoders and FFmpeg; QP 18, 30 and 40 give
 49.7, 43.6 and 37.8 dB (H.264, 720p).
@@ -54,7 +54,7 @@ both decoded by odecs' native decoders and FFmpeg; QP 18, 30 and 40 give
 - On an M4 (macOS 27.0.1, 2026-10-11), 196 streams were bit-exact: 50 H.264 and all 146 HEVC streams FFmpeg can read.
   - Refused: 3 (unequal luma/chroma depths, a stream without an IDR, and one FFmpeg cannot read).
   - VideoToolbox limits: 3. Two streams reference deliberately lost pictures, which FFmpeg's VideoToolbox path rejects too. The third has 8160 slices in one picture; 255 decode fine.
-- `tests/movie_backends.odin FILE` checks that `movie.Reader` gives every frame, and seeks, identically through hardware and native decoding.
+- `tests/movie_backends.odin FILE` checks that `video.Reader` gives every frame, and seeks, identically through hardware and native decoding.
 
 Speed on the M4, 240 frames, raw decode with frames copied to memory:
 

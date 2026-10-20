@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Alpha-video gate: ProRes in QuickTime and VP9 (with alpha) in WebM, decoded
-# by odecs and compared with FFmpeg, plus movie.Reader end to end, QuickTime
+# by odecs and compared with FFmpeg, plus video.Reader end to end, QuickTime
 # PCM, and a short fuzz pass. FFmpeg is a development oracle only.
 #   bash tests/alpha_check.sh [work-dir] [--large]
 set -euo pipefail
@@ -17,7 +17,7 @@ odin test vp9
 odin test vp9/decoder
 odin test webm
 odin test mp4
-odin test movie -o:speed
+odin test video -o:speed
 odin build tests/alpha_compare.odin -file -o:speed -out:"$work/alpha_compare"
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"
@@ -28,13 +28,13 @@ echo "== decoded planes against FFmpeg (ProRes colour within 1, VP9 and alpha ex
 for f in "$work"/fx/*.mov "$work"/fx/*.webm; do
 	name=$(basename "$f")
 	[ -f "${f%.*}.yuv" ] || continue
-	[[ "$name" == hevc_* ]] && continue # checked through movie.Reader below
+	[[ "$name" == hevc_* ]] && continue # checked through video.Reader below
 	for threads in 1 8; do
 		if "$work/alpha_compare" "$f" - $threads > "$f.$threads.log" 2>&1; then pass "$name threads=$threads"; else bad "$name threads=$threads"; cat "$f.$threads.log"; fi
 	done
 done
 
-echo "== movie.Reader: frames, alpha, seeks, PCM"
+echo "== video.Reader: frames, alpha, seeks, PCM"
 for f in "$work"/fx/prores_4444_a16.mov "$work"/fx/prores_4444_odd.mov "$work"/fx/prores_422_interlaced.mov "$work"/fx/vp9_alpha.webm "$work"/fx/vp9_twopass.webm "$work"/fx/vp9_rgb.webm; do
 	if "$work/movie_alpha" "$f" "${f%.*}.yuv" 4 > "$f.reader.log" 2>&1 && ! grep -q "alpha vs FFmpeg: max difference [1-9]" "$f.reader.log"; then pass "reader $(basename "$f")"; else bad "reader $(basename "$f")"; cat "$f.reader.log"; fi
 done

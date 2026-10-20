@@ -25,7 +25,7 @@ alac.destroy_decoder(&d)
   order (`L, R, C, LFE, ...`), with no intermediate packed-byte conversions.
 - **Containers:** [`mp4`](../mp4/README.md) reads the
   `alac` sample entry and magic cookie; [`media`](../media/README.md)
-  exposes codec `.ALAC`; [`movie`](../movie/README.md) plays `.m4a` and
+  exposes codec `.ALAC`; [`video`](../video/README.md) plays `.m4a` and
   `.mov`/`.mp4` files with ALAC tracks.
 
 ```sh

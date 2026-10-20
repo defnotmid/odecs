@@ -219,7 +219,7 @@ in 935 KB. Native output is still several times larger than libvpx's.
 
 ## Movie writer
 
-`movie.Writer` with `codec = .VP9` writes WebM through the native media
+`video.Writer` with `codec = .VP9` writes WebM through the native media
 provider: one colour encoder and, with `transparency = .Straight`, a second
 for the alpha stream (`Packet.alpha`). QP 0..51 maps to
 `base_q_idx = 5 * qp`. Frame timestamps come from the rational frame rate in

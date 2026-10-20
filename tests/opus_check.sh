@@ -10,7 +10,7 @@
 #   loss's last packet, on the vectors that carry it and on FEC streams;
 # - DTX streams from opus_demo against libopus;
 # - Ogg and WebM files in every mode, and 5.1 surround (multistream),
-#   through movie.Reader against FFmpeg's libopus decode, full and after
+#   through video.Reader against FFmpeg's libopus decode, full and after
 #   seeks;
 # - a fuzz pass under AddressSanitizer.
 # Fixtures: tests/opus_fixtures.sh.
@@ -84,7 +84,7 @@ for t in silk:1:exact voip:2:exact audio:2:90 celt:2:90; do
 	if [ "$need" = exact ]; then [[ "$log" == *identical* ]]; else snr_at_least "$log" "$need"; fi
 	result $? "DTX $name: $log"
 done
-# Containers through movie.Reader. After a seek's 80 ms pre-roll the
+# Containers through video.Reader. After a seek's 80 ms pre-roll the
 # decoder has re-converged to within (worst over every position) 0.007 for
 # CELT and hybrid; SILK converges more slowly (0.044, exactly as libopus
 # restarted at the same packet, SILK being bit-exact), and the surround LFE

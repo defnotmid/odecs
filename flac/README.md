@@ -18,7 +18,7 @@ flac.close(&r)
 
 Inside other containers, frames come from the demuxer (Matroska `A_FLAC`,
 MP4 `fLaC`) and `parse_metadata` reads the configuration they carry.
-`media` exposes the decoder as codec `FLAC`, and `movie.Reader` plays
+`media` exposes the decoder as codec `FLAC`, and `video.Reader` plays
 `.flac` files and FLAC tracks in MKV and MP4.
 
 - **Scope:** 4 to 32 bits per sample, 1 to 8 channels, fixed and variable
@@ -59,7 +59,7 @@ and FFmpeg (8 to 32 bits, mono to 7.1, compression levels 0 to 12, LPC
 order 32, 65535-sample blocks, every stereo mode, wasted bits, tags,
 pictures, ID3) and requires the streaminfo MD5 to match, the samples to
 equal FFmpeg's bit for bit, and 50 random seeks to land exactly; it also
-checks FLAC in Matroska and MP4 through `movie.Reader` and fuzzes the reader
+checks FLAC in Matroska and MP4 through `video.Reader` and fuzzes the reader
 and decoder.
 
 ```sh

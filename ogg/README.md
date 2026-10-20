@@ -1,6 +1,6 @@
 # Ogg
 
-Demuxing of one logical stream of an Ogg file (RFC 3533). Its main use is Ogg Opus (RFC 7845) through `movie.Reader`.
+Demuxing of one logical stream of an Ogg file (RFC 3533). Its main use is Ogg Opus (RFC 7845) through `video.Reader`.
 
 ```odin
 import ogg "../ogg"

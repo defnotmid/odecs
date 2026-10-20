@@ -1,7 +1,7 @@
 # Opus
 
 Opus (RFC 6716, with the RFC 8251 updates) decoding to 48 kHz `f32`, from
-any container's packets. `movie.Reader` reads it from Ogg (`.opus`, `.ogg`,
+any container's packets. `video.Reader` reads it from Ogg (`.opus`, `.ogg`,
 through [`ogg`](../ogg)) and from WebM/Matroska
 (`A_OPUS`).
 
@@ -41,7 +41,7 @@ A single stream can be decoded directly too: `Decoder`, `init_decoder`,
   - output channels are in the stream's mapping order;
   - family 3 (ambisonics with a demixing matrix) returns `.Unsupported`.
 - **Output:** the header's output gain and libopus's soft clipping are applied, as libopus's 16-bit API does; concealed packets are not soft-clipped.
-- **Containers (`movie.Reader`):**
+- **Containers (`video.Reader`):**
   - pre-skip (Ogg) and `CodecDelay` (Matroska) are trimmed, and so is the end, by Ogg's last granule position;
   - seeks decode 80 ms ahead of the target (RFC 7845 4.6).
 
@@ -69,7 +69,7 @@ The MDCT tables are computed once at startup and shared by every decoder.
   - CELT: 44–81 dB. CELT's LPC fit stops at 30 dB of prediction gain, and a rounding-level difference can stop it one order earlier or later. Every concealment decision (noise or periodic, the pitch, the attenuations) matches libopus's.
 - **Forward error correction:** each loss's last packet recovered from the next one, against libopus doing the same. Identical on SILK streams in 20, 40 and 60 ms packets, mono and stereo, and on a hybrid stream; identical on vectors 02 and 04, within the concealment's differences on 10 and 12.
 - **DTX:** `opus_demo -dtx` streams. SILK and voip-tuned hybrid are identical to libopus; audio-tuned hybrid and CELT are within 1 LSB.
-- **Containers through `movie.Reader`:** Ogg and WebM files in each mode, and a 5.1 file (four streams, two coupled).
+- **Containers through `video.Reader`:** Ogg and WebM files in each mode, and a 5.1 file (four streams, two coupled).
   - Sample counts are exact against FFmpeg's libopus decode, and the full decode is within 1.5e-5 (SILK: identical).
   - After 30 random seeks the decoder has re-converged in the pre-roll. Worst over every position: 0.007 for CELT and hybrid, 0.044 for SILK (exactly libopus restarted at the same packet), 0.02 for the surround tones. The surround LFE's 60 Hz onset in the first 250 ms is 0.118 off, as it is for libopus restarted at the same packet.
 - **Fuzzing:** a pass under AddressSanitizer, with mutated packets and losses, mutated and random multistream packets with random layouts, and mutated Ogg files.

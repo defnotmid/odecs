@@ -1,4 +1,4 @@
-// Checks movie.Reader's HDR and wide-gamut conversion against FFmpeg's
+// Checks video.Reader's HDR and wide-gamut conversion against FFmpeg's
 // zscale: the oracle is zscale's linear BT.709 light (gbrpf32le, 1.0 = SDR
 // white, 203 nits), passed through the reader's BT.2390 curve and the
 // BT.1886 inverse; this isolates Y'CbCr to RGB, the PQ/HLG EOTF (and HLG's
@@ -8,7 +8,7 @@
 //   /tmp/hdr_compare FILE ORACLE.lin [LIGHT_SCALE]
 package hdr_compare
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -19,9 +19,9 @@ main :: proc() {
 	if len(os.args) < 3 {fmt.eprintln("usage: hdr_compare FILE ORACLE.lin [LIGHT_SCALE]"); os.exit(2)}
 	scale := 1.0
 	if len(os.args) > 3 do scale, _ = strconv.parse_f64(os.args[3])
-	r: movie.Reader
-	if e := movie.open_reader(&r, os.args[1], {preference = .Native}); e != .None {fmt.eprintln("open", e); os.exit(1)}
-	defer movie.close_reader(&r)
+	r: video.Reader
+	if e := video.open_reader(&r, os.args[1], {preference = .Native}); e != .None {fmt.eprintln("open", e); os.exit(1)}
+	defer video.close_reader(&r)
 	oracle, err := os.read_entire_file(os.args[2], context.allocator)
 	if err != nil {fmt.eprintln("cannot read oracle"); os.exit(1)}
 	floats := ([^]f32)(raw_data(oracle))[:len(oracle) / 4]
@@ -33,7 +33,7 @@ main :: proc() {
 	elapsed: time.Duration
 	for {
 		t0 := time.tick_now()
-		f, e := movie.next_frame(&r)
+		f, e := video.next_frame(&r)
 		elapsed += time.tick_since(t0)
 		if e != .None do break
 		base := frames * 3 * plane
@@ -43,7 +43,7 @@ main :: proc() {
 			rgb := [3]f64{f64(floats[base + 2 * plane + i]), f64(floats[base + i]), f64(floats[base + plane + i])}
 			for &c in rgb do c = max(c * scale, 0)
 			m := max(rgb[0], rgb[1], rgb[2])
-			k := m > 0 ? movie.tone(m) / m : 1
+			k := m > 0 ? video.tone(m) / m : 1
 			for c in 0 ..< 3 {
 				want := int(math.round(255 * math.pow(min(rgb[c] * k, 1), 1 / 2.4)))
 				d := abs(int(f.rgba[i * 4 + c]) - want)

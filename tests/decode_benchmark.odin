@@ -1,5 +1,5 @@
 // odecs half of tests/decode_benchmark.sh: one track of a file, demuxed once
-// by movie.Reader's containers into resident packets, then decoded by the
+// by video.Reader's containers into resident packets, then decoded by the
 // native provider through media, a fresh session per round. Decode and drain
 // are timed (opening the session is not), median of seven after a warmup.
 // Frames or samples are counted, never touched. An image is a WebP file
@@ -10,7 +10,7 @@ package decode_benchmark
 import flac "../flac"
 import media "../media"
 import native "../media/native"
-import movie "../movie"
+import video "../video"
 import mp3 "../mp3"
 import mp4 "../mp4"
 import ogg "../ogg"
@@ -45,13 +45,13 @@ main :: proc() {
 		image(os.args[1])
 		return
 	}
-	video := os.args[2] == "video"
-	r: movie.Reader
-	if e := movie.open_reader(&r, os.args[1], {preference = .Native}); e != .None do fail("open: %v %s", e, r.error_detail)
+	is_video := os.args[2] == "video"
+	r: video.Reader
+	if e := video.open_reader(&r, os.args[1], {preference = .Native}); e != .None do fail("open: %v %s", e, r.error_detail)
 	config: media.Config
 	setup: [dynamic][]u8 // parameter sets, fed first each round
 	packets: [dynamic]media.Packet
-	if video {
+	if is_video {
 		config = video_track(&r, &setup, &packets)
 	} else {
 		config = audio_track(&r, &packets)
@@ -77,7 +77,7 @@ main :: proc() {
 	}
 	slice.sort(times[:])
 	fmt.printfln("odecs decode: codec=%v %s=%d packets=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f",
-		config.codec, video ? "frames" : "samples", units, len(packets), times[3], times[0], times[6])
+		config.codec, is_video ? "frames" : "samples", units, len(packets), times[3], times[0], times[6])
 }
 
 image :: proc(path: string) {
@@ -98,7 +98,7 @@ image :: proc(path: string) {
 	fmt.printfln("odecs decode: codec=WebP pixels=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f", width * height, times[3], times[0], times[6])
 }
 
-video_track :: proc(r: ^movie.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]media.Packet) -> media.Config {
+video_track :: proc(r: ^video.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]media.Packet) -> media.Config {
 	if r.video_index < 0 do fail("no video track")
 	codec: media.Codec
 	switch r.video.codec {
@@ -119,11 +119,11 @@ video_track :: proc(r: ^movie.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]
 	for i in 0 ..< len(r.index.pts) {
 		data, alpha: []u8
 		if r.audio.container == .WebM {
-			p, e := webm.read_sample(&r.webm, r.video_index, i)
+			p, e := webm.read_sample(&r.audio.webm, r.video_index, i)
 			if e != .None do fail("video sample %d: %v", i, e)
 			data, alpha = p.data, p.additional
 		} else {
-			p, e := mp4.read_sample(&r.demux, r.video_index, i)
+			p, e := mp4.read_sample(&r.audio.demux, r.video_index, i)
 			if e != .None do fail("video sample %d: %v", i, e)
 			data = p.data
 		}
@@ -143,7 +143,7 @@ video_track :: proc(r: ^movie.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]
 	return config
 }
 
-audio_track :: proc(r: ^movie.Reader, packets: ^[dynamic]media.Packet) -> media.Config {
+audio_track :: proc(r: ^video.Reader, packets: ^[dynamic]media.Packet) -> media.Config {
 	codec: media.Codec
 	#partial switch r.audio.codec {
 	case .AAC: codec = .AAC
@@ -155,41 +155,41 @@ audio_track :: proc(r: ^movie.Reader, packets: ^[dynamic]media.Packet) -> media.
 	}
 	config := media.default_config(codec, .Decode)
 	config.sample_rate, config.channels = r.audio.sample_rate, r.audio.channels
-	config.extradata = r.audio_config
+	config.extradata = r.audio.config
 	framing: media.Framing = codec == .AAC ? .Raw_AAC : .Frame
 	add :: proc(packets: ^[dynamic]media.Packet, data: []u8, framing: media.Framing) {
 		append(packets, media.Packet{data = slice.clone(data), framing = framing})
 	}
 	switch r.audio.container {
 	case .FLAC:
-		if e := flac.seek(&r.flac_file, 0); e != .None do fail("flac seek: %v", e)
+		if e := flac.seek(&r.audio.flac_file, 0); e != .None do fail("flac seek: %v", e)
 		for {
-			p, e := flac.read_frame(&r.flac_file)
+			p, e := flac.read_frame(&r.audio.flac_file)
 			if e == .End_Of_Stream do break
 			if e != .None do fail("flac frame: %v", e)
 			add(packets, p.data, framing)
 		}
 	case .MP3:
-		for i in 0 ..< len(r.mp3_file.frames) {
-			data, e := mp3.read_frame(&r.mp3_file, i)
+		for i in 0 ..< len(r.audio.mp3_file.frames) {
+			data, e := mp3.read_frame(&r.audio.mp3_file, i)
 			if e != .None do fail("mp3 frame %d: %v", i, e)
 			add(packets, data, framing)
 		}
 	case .Ogg:
-		for i in 2 ..< len(r.ogg_file.packets) { 	// after OpusHead and OpusTags
-			data, e := ogg.read_packet(&r.ogg_file, i)
+		for i in 2 ..< len(r.audio.ogg_file.packets) { 	// after OpusHead and OpusTags
+			data, e := ogg.read_packet(&r.audio.ogg_file, i)
 			if e != .None do fail("ogg packet %d: %v", i, e)
 			add(packets, data, framing)
 		}
 	case .WebM:
-		for i in 0 ..< len(r.webm.tracks[r.audio_index].samples) {
-			p, e := webm.read_sample(&r.webm, r.audio_index, i)
+		for i in 0 ..< len(r.audio.webm.tracks[r.audio.track].samples) {
+			p, e := webm.read_sample(&r.audio.webm, r.audio.track, i)
 			if e != .None do fail("audio sample %d: %v", i, e)
 			add(packets, p.data, framing)
 		}
 	case .MP4:
-		for i in 0 ..< len(r.demux.tracks[r.audio_index].samples) {
-			p, e := mp4.read_sample(&r.demux, r.audio_index, i)
+		for i in 0 ..< len(r.audio.demux.tracks[r.audio.track].samples) {
+			p, e := mp4.read_sample(&r.audio.demux, r.audio.track, i)
 			if e != .None do fail("audio sample %d: %v", i, e)
 			add(packets, p.data, framing)
 		}

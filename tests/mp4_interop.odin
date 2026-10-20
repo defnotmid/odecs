@@ -11,7 +11,7 @@
 // and the decode must agree (SNR). Pass "-" to skip a reference.
 package mp4_interop
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -22,7 +22,7 @@ main :: proc() {
 		fmt.eprintln("usage: mp4_interop in.mp4 ref.rgba|- ref.pcm|- [--native] [--min-psnr DB]")
 		os.exit(2)
 	}
-	config: movie.Reader_Config
+	config: video.Reader_Config
 	floor := 35.0
 	first_time := -1.0
 	for i := 4; i < len(os.args); i += 1 {
@@ -35,12 +35,12 @@ main :: proc() {
 			first_time, _ = strconv.parse_f64(os.args[i + 1]); i += 1
 		}
 	}
-	r: movie.Reader
-	if e := movie.open_reader(&r, os.args[1], config); e != .None {
+	r: video.Reader
+	if e := video.open_reader(&r, os.args[1], config); e != .None {
 		fmt.printfln("open: %v (%s)", e, r.error_detail)
 		os.exit(e == .Unsupported ? 3 : 1)
 	}
-	defer movie.close_reader(&r)
+	defer video.close_reader(&r)
 	v := r.video
 	fmt.printfln("video %v %dx%d frames=%d fps=%d/%d duration=%.4f rotation=%d colour=%v", v.codec, v.width, v.height, v.frame_count, v.fps_num, v.fps_den, v.duration, v.rotation, v.color)
 	failures := 0
@@ -58,7 +58,7 @@ main :: proc() {
 		// from alignment: our frame i is the oracle's frame i - skip.
 		skip := 0
 		for {
-			f, e := movie.next_frame(&r)
+			f, e := video.next_frame(&r)
 			if e == .End_Of_Stream do break
 			if e != .None {fmt.printfln("next_frame %d: %v %s", decoded, e, r.error_detail); failures += 1; break}
 			if f.index != decoded {fmt.printfln("next_frame %d reports index %d", decoded, f.index); failures += 1}
@@ -97,7 +97,7 @@ main :: proc() {
 		lookups := min(len(times), 24)
 		for k in 0 ..< lookups {
 			i := (k * 7919) % len(times)
-			f, e := movie.frame_at(&r, times[i] + 0.25 / fps)
+			f, e := video.frame_at(&r, times[i] + 0.25 / fps)
 			ri := i - skip
 			if e != .None || f.index != i || ri >= 0 && ri < count && psnr(frame(reference, size, ri), f.rgba, v.width, v.height) < floor {
 				fmt.printfln("frame_at %d: %v index %d", i, e, f.index)
@@ -105,8 +105,8 @@ main :: proc() {
 			}
 		}
 		// Outside the presented range, lookups clamp to its ends.
-		if f, e := movie.frame_at(&r, -1000); e != .None || f.index != 0 do bad += 1
-		if f, e := movie.frame_at(&r, 1e9); e != .None || f.index != v.frame_count - 1 do bad += 1
+		if f, e := video.frame_at(&r, -1000); e != .None || f.index != 0 do bad += 1
+		if f, e := video.frame_at(&r, 1e9); e != .None || f.index != v.frame_count - 1 do bad += 1
 		if bad > 0 do failures += 1
 		fmt.printfln("frame_at: %d shuffled lookups and both ends %s", lookups, bad == 0 ? "ok" : "FAIL")
 	}
@@ -122,13 +122,13 @@ main :: proc() {
 			reference = reference[:len(reference_bytes) / 4]
 			// The oracle starts at the first decoded sample; read_audio starts
 			// at movie time zero, so a delayed track leads with silence.
-			a := &r.demux.tracks[r.audio_index]
+			a := &r.audio.demux.tracks[r.audio.track]
 			delay := int(a.edit.delay * i64(r.audio.sample_rate) / i64(a.timescale))
 			expected := len(reference) / ch + delay
 			decoded := make([]f32, expected * ch + 8192 * ch)
 			total := 0
 			for {
-				n, e := movie.read_audio(&r, decoded[total * ch:])
+				n, e := video.read_audio(&r, decoded[total * ch:])
 				if e != .None || n == 0 do break
 				total += n
 			}

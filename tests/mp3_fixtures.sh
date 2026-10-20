@@ -31,7 +31,7 @@ lame "$out/src/stereo44.wav" id3v1.mp3 -b:a 128k -id3v2_version 0 -write_id3v1 1
 ff -f lavfi -i color=blue:s=64x64 -frames:v 1 "$out/src/cover.png"
 ff -i "$out/src/stereo44.wav" -i "$out/src/cover.png" -map 0 -map 1 -c:a libmp3lame -b:a 128k -c:v copy -id3v2_version 3 -metadata title=gate "$out/id3v2_cover.mp3"
 for f in "$out"/*.mp3; do ff -i "$f" -map 0:a -f f32le "${f%.mp3}.f32"; done
-# MP3 in containers, decoded through movie.Reader.
+# MP3 in containers, decoded through video.Reader.
 ff -i "$out/vbr_q2.mp3" -c:a copy "$out/in_mp4.mp4"
 ff -i "$out/cbr128.mp3" -c:a copy "$out/in_mov.mov"
 ff -i "$out/transients48.mp3" -c:a copy "$out/in_matroska.mkv"

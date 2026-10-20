@@ -35,19 +35,20 @@ Images:
 Containers:
 - `mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](mp4/README.md)).
 - `webm`: WebM/Matroska reading, and VP9 WebM writing with alpha ([README](webm/README.md)).
-- `ogg`: Ogg (for Ogg Opus) ([README](ogg/README.md)).
+- `ogg`: Ogg (for Ogg Opus and Ogg Vorbis) ([README](ogg/README.md)).
 - `wav`: WAV, RF64 and RIFX reading; 16-bit PCM and float writing ([README](wav/README.md)).
 
 Putting them together:
 - `media`: one encode/decode API over the native codecs and the hardware ones, choosing what the machine supports ([README](media/README.md)).
 - `media/vulkan`: the Vulkan Video provider, with its H.264, H.265 and AV1 sessions and the shared `Context` ([README](media/vulkan/README.md)).
 - `media/videotoolbox`: the VideoToolbox provider, H.264 and HEVC hardware decoding and encoding on macOS ([README](media/videotoolbox/README.md)).
-- `movie`: RGBA or planar frames and `f32` PCM from and to movie and audio files, with frame-accurate seeking; writes MP4/M4A (H.264, H.265, HEVC with alpha, AAC-LC) and WebM (VP9, with alpha) ([README](movie/README.md)).
+- `audio`: any file's first audio track (AAC, PCM, FLAC, MP3, Opus, ALAC, Vorbis in MP4, Matroska, WAV, FLAC, MP3 or Ogg) as interleaved `f32` in WAVE channel order, with seeking; `decode` for a file in memory ([README](audio/README.md)).
+- `video`: RGBA or planar frames and `f32` PCM from and to movie files (its audio through `audio`), with frame-accurate seeking; writes MP4/M4A (H.264, H.265, HEVC with alpha, AAC-LC) and WebM (VP9, with alpha) ([README](video/README.md)).
 - `viewer`: an SDL3 player for all of the above.
 
 Each layer imports only the ones below it: `common`, then the codecs and
 containers, then `media` with one provider package per backend under it, then
-`movie`.
+`audio`, then `video`. `image` stands on the image codecs alone.
 
 Parallel work runs on the caller's `common.Work_Pool`; the codecs never create
 threads of their own.
@@ -62,14 +63,14 @@ odin build . -collection:deps=path/to/parent-of-odecs
 ```
 
 ```odin
-import movie "deps:odecs/movie"
+import video "deps:odecs/video"
 
-config := movie.default_writer_config(1920, 1080, 30000, 1001)
-w: movie.Writer
-err := movie.create(&w, "out.mp4", config)
-for frame in frames do err = movie.write_frame(&w, frame.rgba, frame.width * 4)
-err = movie.finish(&w)
-movie.destroy(&w)
+config := video.default_writer_config(1920, 1080, 30000, 1001)
+w: video.Writer
+err := video.create(&w, "out.mp4", config)
+for frame in frames do err = video.write_frame(&w, frame.rgba, frame.width * 4)
+err = video.finish(&w)
+video.destroy(&w)
 ```
 
 Each package's README covers its API, limits and how it was verified.

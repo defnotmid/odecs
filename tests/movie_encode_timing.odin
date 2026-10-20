@@ -1,4 +1,4 @@
-// movie.Writer encode throughput from ready I420 planes, the onimite path:
+// video.Writer encode throughput from ready I420 planes, the onimite path:
 // frames arrive faster than the encoder takes them, so wall time per frame
 // is the encoder's cost as seen by the caller. Median of ROUNDS runs; the
 // MP4 hash checks that every run (and every encoder change) writes the
@@ -9,7 +9,7 @@
 package movie_encode_timing
 
 import mp4 "../mp4"
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -20,7 +20,7 @@ ROUNDS :: 5
 SOURCES :: 30 // distinct pictures, cycled
 
 main :: proc() {
-	codec := movie.Video_Codec.H264
+	codec := video.Video_Codec.H264
 	W, H, FRAMES := 1920, 1080, 900
 	out := ""
 	if len(os.args) >= 2 && os.args[1] == "h265" do codec = .H265
@@ -53,22 +53,22 @@ main :: proc() {
 	backend: string
 	for r in 0 ..< ROUNDS {
 		m: mp4.Memory_Stream
-		config := movie.default_writer_config(W, H, 30, 1)
+		config := video.default_writer_config(W, H, 30, 1)
 		config.codec = codec
 		config.preference = .Require_Hardware
-		w: movie.Writer
-		if e := movie.create_stream(&w, mp4.memory_stream(&m), config); e != .None {fmt.eprintln("create", e, w.error_detail); os.exit(1)}
-		_, backend = movie.video_backend(&w)
+		w: video.Writer
+		if e := video.create_stream(&w, mp4.memory_stream(&m), config); e != .None {fmt.eprintln("create", e, w.error_detail); os.exit(1)}
+		_, backend = video.video_backend(&w)
 		strides := [3]int{W, W / 2, W / 2}
 		start := time.tick_now()
 		for f in 0 ..< FRAMES {
 			p := pictures[f % SOURCES * (luma + 2 * chroma):]
 			planes := [3][]u8{p[:luma], p[luma:][:chroma], p[luma + chroma:][:chroma]}
-			if e := movie.write_i420(&w, planes, strides); e != .None {fmt.eprintln("write", e, w.error_detail); os.exit(1)}
+			if e := video.write_i420(&w, planes, strides); e != .None {fmt.eprintln("write", e, w.error_detail); os.exit(1)}
 		}
-		if e := movie.finish(&w); e != .None {fmt.eprintln("finish", e, w.error_detail); os.exit(1)}
+		if e := video.finish(&w); e != .None {fmt.eprintln("finish", e, w.error_detail); os.exit(1)}
 		times[r] = time.duration_milliseconds(time.tick_since(start))
-		movie.destroy(&w)
+		video.destroy(&w)
 		hashes[r] = 14695981039346656037
 		for b in m.data do hashes[r] = (hashes[r] ~ u64(b)) * 1099511628211
 		size = len(m.data)

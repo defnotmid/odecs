@@ -28,7 +28,7 @@ err := av1.parse_temporal_unit(&p, unit, &frames, &tiles) // one temporal unit
 
 Through the common API, AV1 is `media.Codec.AV1`, one temporal unit per
 `.Frame` packet. Only the Vulkan provider admits it, for host output.
-`movie.Reader` reads it from MP4 (`av01`/`av1C`) and Matroska (`V_AV1`).
+`video.Reader` reads it from MP4 (`av01`/`av1C`) and Matroska (`V_AV1`).
 
 ## Scope
 
@@ -56,7 +56,7 @@ It checks three things:
 
 1. **Headers.** Every frame header element that FFmpeg's `trace_headers` prints must equal ours, frame by frame.
 2. **Raw decode.** Decoding each raw OBU stream must give exactly libdav1d's output, film grain included.
-3. **Containers.** The MP4 and Matroska copies, read through `movie.Reader`'s planar output, must also equal libdav1d's output.
+3. **Containers.** The MP4 and Matroska copies, read through `video.Reader`'s planar output, must also equal libdav1d's output.
 
 The gate also confirms that the RADV case above is refused.
 
@@ -64,8 +64,8 @@ A real 10-bit 720p60 file (7650 frames) decodes to an MD5 identical to libdav1d'
 
 | decoder | ms/frame |
 |---|---|
-| `movie.Reader`, planar, 3 frames in flight, native-width planes | 0.82 |
-| `movie.Reader`, one at a time, u16 planes | 2.33 |
+| `video.Reader`, planar, 3 frames in flight, native-width planes | 0.82 |
+| `video.Reader`, one at a time, u16 planes | 2.33 |
 | FFmpeg Vulkan with download (whole file) | 1.24 |
 | dav1d, one thread | 1.6 |
 | dav1d, all threads (3.6 cores busy) | 0.93 |

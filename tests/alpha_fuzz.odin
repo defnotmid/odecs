@@ -1,5 +1,5 @@
 // Mutation fuzzing of the alpha-video input paths: the QuickTime and WebM
-// demuxers, the ProRes and VP9 decoders on mutated packets, and movie.Reader
+// demuxers, the ProRes and VP9 decoders on mutated packets, and video.Reader
 // end to end on mutated files. Every input must be accepted or refused with
 // an error; a crash, bounds failure or sanitizer report fails the run.
 //
@@ -12,7 +12,7 @@ import flac "../flac"
 import mp3 "../mp3"
 import wav "../wav"
 import webm "../webm"
-import movie "../movie"
+import video "../video"
 import prores "../prores/decoder"
 import vp9 "../vp9/decoder"
 import "core:fmt"
@@ -62,7 +62,7 @@ main :: proc() {
 		file, err := os.read_entire_file(path, context.allocator)
 		if err != nil {fmt.eprintln("cannot read", path); os.exit(2)}
 		// Matroska (.mkv) shares the WebM demuxer; its H.264/H.265 packets
-		// are not mutated here, but movie.Reader runs on it more often.
+		// are not mutated here, but video.Reader runs on it more often.
 		is_mkv := strings.has_suffix(path, ".mkv")
 		is_webm := is_mkv || strings.has_suffix(path, ".webm")
 		is_wav := strings.has_suffix(path, ".wav")
@@ -247,23 +247,23 @@ main :: proc() {
 					prores.destroy_decoder(&d)
 				}
 			}
-			// 3. movie.Reader end to end on a mutated file, every few rounds.
+			// 3. video.Reader end to end on a mutated file, every few rounds.
 			if it % (is_mkv || is_wav || is_flac || is_mp3 ? 2 : 8) == 0 {
 				mutate(file, &buffer)
 				m2 := mp4.Memory_Stream{data = buffer}
-				r: movie.Reader
-				if movie.open_reader_stream(&r, mp4.memory_stream(&m2), {preference = .Native}) == .None {
+				r: video.Reader
+				if video.open_reader_stream(&r, mp4.memory_stream(&m2), {preference = .Native}) == .None {
 					if r.video_index >= 0 do for _ in 0 ..< 64 {
-						_, e := movie.next_frame(&r)
+						_, e := video.next_frame(&r)
 						if e == .End_Of_Stream do break
 						if e != .None {refused[2] += 1; break}
 					}
-					movie.frame_at(&r, 0.1)
+					video.frame_at(&r, 0.1)
 					pcm: [4096]f32
-					for _ in 0 ..< 16 do if n, _ := movie.read_audio(&r, pcm[:]); n == 0 do break
-					movie.seek_audio(&r, 1.5)
-					movie.read_audio(&r, pcm[:])
-					movie.close_reader(&r)
+					for _ in 0 ..< 16 do if n, _ := video.read_audio(&r, pcm[:]); n == 0 do break
+					video.seek_audio(&r, 1.5)
+					video.read_audio(&r, pcm[:])
+					video.close_reader(&r)
 				} else {
 					refused[2] += 1
 				}

@@ -1,4 +1,4 @@
-package movie
+package video
 
 // How colour is stored beside an alpha channel in the video.
 Transparency :: enum u8 {

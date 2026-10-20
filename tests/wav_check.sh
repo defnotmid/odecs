@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # WAV gate: every supported sample format, RF64, header chunks before the
 # data, unfilled sizes from a piped writer and a cut-off file through
-# movie.Reader, bit-exact against FFmpeg's f32 decode (whole stream and
+# video.Reader, bit-exact against FFmpeg's f32 decode (whole stream and
 # reads after random seeks); a refused codec; and a short fuzz pass. FFmpeg
 # is a development oracle only.
 #   bash tests/wav_check.sh [work-dir]

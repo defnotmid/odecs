@@ -6,27 +6,27 @@
 //   /tmp/movie_planar FILE [hardware]
 package movie_planar
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 
 main :: proc() {
 	if len(os.args) < 2 {fmt.eprintln("usage: movie_planar FILE [hardware]"); os.exit(2)}
-	preference: movie.Reader_Config
+	preference: video.Reader_Config
 	preference.preference = len(os.args) > 2 && os.args[2] == "hardware" ? .Automatic : .Native
-	rgba_reader, planar_reader: movie.Reader
+	rgba_reader, planar_reader: video.Reader
 	planar_config := preference
 	planar_config.format = .Planar
-	if e := movie.open_reader(&rgba_reader, os.args[1], preference); e != .None {fmt.eprintln("open", e, rgba_reader.error_detail); os.exit(1)}
-	if e := movie.open_reader(&planar_reader, os.args[1], planar_config); e != .None {fmt.eprintln("open", e); os.exit(1)}
-	defer movie.close_reader(&rgba_reader)
-	defer movie.close_reader(&planar_reader)
+	if e := video.open_reader(&rgba_reader, os.args[1], preference); e != .None {fmt.eprintln("open", e, rgba_reader.error_detail); os.exit(1)}
+	if e := video.open_reader(&planar_reader, os.args[1], planar_config); e != .None {fmt.eprintln("open", e); os.exit(1)}
+	defer video.close_reader(&rgba_reader)
+	defer video.close_reader(&planar_reader)
 	scratch: [dynamic]u8
 	frames, mismatched := 0, 0
-	layout: movie.Planar
+	layout: video.Planar
 	for {
-		a, ea := movie.next_frame(&rgba_reader)
-		b, eb := movie.next_frame(&planar_reader)
+		a, ea := video.next_frame(&rgba_reader)
+		b, eb := video.next_frame(&planar_reader)
 		if ea != eb {fmt.eprintln("frame", frames, ea, "vs", eb); os.exit(1)}
 		if ea != .None {
 			if ea != .End_Of_Stream {fmt.eprintln("frame", frames, ea, rgba_reader.error_detail, planar_reader.error_detail); os.exit(1)}
@@ -34,7 +34,7 @@ main :: proc() {
 		}
 		if len(b.rgba) != 0 || len(b.planar.planes[0]) == 0 {fmt.eprintln("planar frame without planes"); os.exit(1)}
 		resize(&scratch, a.width * a.height * 4)
-		movie.planar_to_rgba(b.planar, scratch[:])
+		video.planar_to_rgba(b.planar, scratch[:])
 		if string(scratch[:]) != string(a.rgba) do mismatched += 1
 		layout = b.planar
 		frames += 1

@@ -21,7 +21,7 @@ for _ in 0 ..< a.features.frame_count {
 	frame := webp.next_frame(&a) or_return // frame.pixels: the whole canvas; frame.start, frame.duration (ms)
 }
 
-// Lossy images as decoded, for conversion on the GPU (like movie.Reader's
+// Lossy images as decoded, for conversion on the GPU (like video.Reader's
 // planar output): 4:2:0 planes sized to whole macroblocks, and alpha.
 yuv, alpha, e := webp.decode_yuva(data)
 ```

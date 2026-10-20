@@ -87,6 +87,6 @@ webm.destroy(&w)
 
 The writer's tests cover reader round-trip, alpha, gaps/cluster rollover,
 SeekHead targets, patched sizes and errors. `tests/vp9_encode_check.sh` adds
-FFmpeg/libvpx byte equality, movie.Reader planar round-trip, ffprobe checks,
+FFmpeg/libvpx byte equality, video.Reader planar round-trip, ffprobe checks,
 and headless Chromium compositing. See the
 [encoder README](../vp9/encoder/README.md) for exact results and limits.

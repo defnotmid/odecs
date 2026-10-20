@@ -1,4 +1,4 @@
-package movie
+package video
 
 import aac "../aac"
 import audio "../audio"

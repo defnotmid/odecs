@@ -3,7 +3,7 @@
 # at full accuracy (PSNR >= 96 dB against the reference PCM), malformed and
 # unsupported streams refused without crashing, LAME fixtures against
 # FFmpeg (same gapless length, differences at float rounding), MP3 in .mp3,
-# MP4, MOV and Matroska through movie.Reader with seeks, and a fuzz pass.
+# MP4, MOV and Matroska through video.Reader with seeks, and a fuzz pass.
 # FFmpeg and the vectors are development oracles only.
 #   bash tests/mp3_check.sh [work-dir]
 set -euo pipefail
@@ -58,7 +58,7 @@ for f in "$fx"/*.mp3; do
 	fi
 done
 
-echo "== movie.Reader: .mp3, MP4, MOV, Matroska (whole stream and 30 seeks)"
+echo "== video.Reader: .mp3, MP4, MOV, Matroska (whole stream and 30 seeks)"
 for f in "$fx"/vbr_q2.mp3 "$fx"/transients48.mp3 "$fx"/mpeg25_8k.mp3 "$fx"/id3v2_cover.mp3 "$fx"/in_mp4.mp4 "$fx"/in_mov.mov "$fx"/in_matroska.mkv "$fx"/video_mp3.mp4; do
 	name=$(basename "$f")
 	oracle="$f.f32"

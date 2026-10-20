@@ -33,7 +33,7 @@ the crop origin. At 8 bits the luma plane is the readback buffer itself and
 only the interleaved chroma is split; P010 is shifted down in one pass.
 `append_frame_samples` writes a frame tightly (yuv420p/yuv420p10le).
 
-Through `movie.Reader` (best of five on the RX 9070 XT):
+Through `video.Reader` (best of five on the RX 9070 XT):
 
 | stream | one picture at a time, u16 planes | three in flight, native-width planes |
 |---|---|---|
@@ -74,7 +74,7 @@ queued (nil before that). After the last picture, call `flush_encoder` or
 the call returns, and Surface input waits only for its GPU copy, so both input
 borrows still end with the call. The bitstream is identical at every depth.
 The common Vulkan media adapter uses three pictures in flight and flushes them
-in `drain`. 900 1080p I420 frames through `movie.Writer` on an RX 9070 XT
+in `drain`. 900 1080p I420 frames through `video.Writer` on an RX 9070 XT
 (`tests/movie_encode_timing.odin`): H.264 3.64 → 2.01 ms/frame, HEVC 3.59 →
 1.56 ms/frame, with identical MP4 bytes; the hardware encoder is now the bound
 (the encoding thread is about 30% busy).

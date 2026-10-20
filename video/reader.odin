@@ -1,4 +1,4 @@
-package movie
+package video
 
 import audio "../audio"
 import mp4 "../mp4"

@@ -44,7 +44,7 @@ restructured port of minimp3 (CC0), the tables are generated from minimp3
 and PDMP3 (public domain) by [`tools/tables`](../tools/tables/README.md), and the filterbank
 follows the standard's definitions. `bash tests/mp3_check.sh` runs the
 conformance streams, malformed streams, FFmpeg comparisons, MP3 in MP4,
-MOV and Matroska through `movie.Reader`, and a fuzz pass.
+MOV and Matroska through `video.Reader`, and a fuzz pass.
 
 ```sh
 odin test mp3

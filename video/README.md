@@ -1,6 +1,6 @@
-# Movie files: RGBA and PCM to and from MP4 and WebM
+# Video: RGBA and PCM to and from MP4 and WebM
 
-`movie` is a thin layer over [`media`](../media/README.md) and
+`video` is a thin layer over [`media`](../media/README.md) and
 the [MP4](../mp4/README.md) and [WebM](../webm/README.md)
 containers. It takes RGBA8 frames and interleaved `f32` PCM and writes an MP4
 with H.264/H.265 and AAC-LC tracks, or a VP9 WebM. It also reads such files
@@ -13,17 +13,17 @@ native codecs elsewhere (and for alpha and VP9).
 ## Writing
 
 ```odin
-import movie "../movie"
+import video "../movie"
 
-config := movie.default_writer_config(1920, 1080, 30000, 1001) // qp 23, faststart
+config := video.default_writer_config(1920, 1080, 30000, 1001) // qp 23, faststart
 config.codec = .H264                 // or .H265
 config.sample_rate, config.channels = 48000, 2
-w: movie.Writer
-err := movie.create(&w, "out.mp4", config)   // or create_stream
-err = movie.write_audio(&w, pcm)     // any amount, any time
-for frame in frames do err = movie.write_frame(&w, frame.rgba, frame.width * 4)
-err = movie.finish(&w)
-movie.destroy(&w)
+w: video.Writer
+err := video.create(&w, "out.mp4", config)   // or create_stream
+err = video.write_audio(&w, pcm)     // any amount, any time
+for frame in frames do err = video.write_frame(&w, frame.rgba, frame.width * 4)
+err = video.finish(&w)
+video.destroy(&w)
 ```
 
 - **Pixels:** RGBA8, sRGB, straight alpha by default. `Alpha.Premultiplied`
@@ -100,29 +100,29 @@ movie.destroy(&w)
 ## Reading
 
 ```odin
-r: movie.Reader
-err := movie.open_reader(&r, "in.mov", {preference = .Native}) // or open_reader_stream
+r: video.Reader
+err := video.open_reader(&r, "in.mov", {preference = .Native}) // or open_reader_stream
 // r.video: codec, width, height, frame_count, fps_num/den, duration, rotation,
 //          color, has_alpha, bit_depth, chroma, decodable
 // r.audio: codec, present, sample_rate, channels, samples
 for {
-    f, e := movie.next_frame(&r)     // sequential playback
+    f, e := video.next_frame(&r)     // sequential playback
     if e == .End_Of_Stream do break
     // f.rgba (borrowed until the next call), f.pts, f.time, f.index
 }
-f, e := movie.frame_at(&r, 12.34)   // frame on screen at 12.34 s
-keys := movie.keyframe_times(&r) // where decoding can restart, ascending
-n, e2 := movie.read_audio(&r, pcm)  // interleaved f32 from the audio position
-movie.seek_audio(&r, 12.34)
-movie.close_reader(&r)
+f, e := video.frame_at(&r, 12.34)   // frame on screen at 12.34 s
+keys := video.keyframe_times(&r) // where decoding can restart, ascending
+n, e2 := video.read_audio(&r, pcm)  // interleaved f32 from the audio position
+video.seek_audio(&r, 12.34)
+video.close_reader(&r)
 ```
 
 - **Inputs:** MP4, `.m4a` and QuickTime `.mov` (including fragmented
   `moof`/`traf`; H.264, H.265, ProRes, AV1; AAC-LC, ALAC, FLAC, MP3, Opus or
   PCM audio) and WebM/Matroska `.webm`/`.mkv` (VP9, H.264, H.265, AV1; AAC-LC,
   FLAC, MP3, Opus (every mode, surround included; see [`opus`](../opus/README.md)) or
-  PCM audio; Vorbis is reported in `Audio_Info.codec` but not decoded), and
-  audio-only WAV, Ogg Opus (`.opus`, `.ogg`), native `.flac`
+  PCM or Vorbis audio), and
+  audio-only WAV, Ogg Opus or Vorbis (`.opus`, `.ogg`), native `.flac`
   (which seeks with its seek table and bisection, never reading the whole
   file) and `.mp3` (frames indexed at open, LAME gapless trimming; seeks
   pre-roll 13 frames so the bit reservoir is complete and the output exact).
@@ -210,10 +210,14 @@ movie.close_reader(&r)
   takes the smallest outstanding `pts`. A stream without composition offsets
   sets the decoder's `no_reordering`, so frames come out as soon as they are
   decoded.
-- **Audio:**
-  - The first AAC-LC or QuickTime PCM track is decoded (8-bit unsigned;
-    16/24/32-bit integer and 32/64-bit float, either endianness). HE-AAC is
-    refused.
+- **Audio** is [`audio`](../audio/README.md)'s: the reader embeds an
+  `audio.Reader`, which opens the file, and reads its video from the same
+  container.
+  - The first audio track is decoded (AAC-LC, PCM in any common layout,
+    FLAC, MP3, Opus, ALAC, Vorbis); HE-AAC is refused.
+  - Channels come in WAVE order (FL, FR, FC, LFE, BL, BR, then side and
+    centre pairs) whatever the codec stores, and `write_audio` takes the
+    same order.
   - PCM index zero is movie time zero: priming and padding are trimmed by the
     edit list, and a delayed track starts with silence.
   - `seek_audio` restarts one access unit early to rebuild the MDCT overlap,
@@ -247,8 +251,8 @@ movie.close_reader(&r)
 - **Containers and codecs:** writing is MP4 with H.264/H.265 and AAC-LC.
   Reading adds ProRes and PCM in `.mov`, FLAC and MP3 in MP4, VP9, H.264,
   H.265, AAC, FLAC, MP3, Opus and PCM in WebM/MKV, AV1 in MP4 and WebM/MKV
-  (Vulkan Video only), Ogg Opus, `.wav`, `.flac` and `.mp3`. VP8 and
-  Vorbis are not decoded.
+  (Vulkan Video only), Ogg Opus and Vorbis, `.wav`, `.flac` and `.mp3`. VP8 is
+  not decoded.
 - **VP9 seek cost:** a far seek decodes from the previous keyframe. At
   1080p, a 60-frame GOP and one thread, that is up to about 0.5 s; encode
   overlays with a short GOP (`-g 30` or less) when they will be scrubbed.
@@ -292,7 +296,7 @@ The timing harness is `tests/movie_timing.odin`, pinned to one core (AMD Ryzen 9
 ## Validation
 
 ```sh
-odin test movie -o:speed
+odin test video -o:speed
 bash tests/mp4_check.sh /tmp/odecs-mp4
 odin run tools/mp4_smoke -o:speed -- /tmp/smoke.mp4 --codec h264
 ```

@@ -7,7 +7,7 @@
 //       [--native|--hardware] [--no-faststart] [--no-audio]
 package mp4_smoke
 
-import movie "../../movie"
+import video "../../video"
 import media "../../media"
 import "core:fmt"
 import "core:math"
@@ -23,7 +23,7 @@ main :: proc() {
 	}
 	path := os.args[1]
 	frames, width, height := 90, 640, 360
-	config := movie.default_writer_config(width, height, 30, 1)
+	config := video.default_writer_config(width, height, 30, 1)
 	config.sample_rate, config.channels = 48000, 2
 	for i := 2; i < len(os.args); i += 1 {
 		arg := os.args[i]
@@ -70,22 +70,22 @@ main :: proc() {
 		pcm[i * config.channels + c] = f32(0.3 * math.sin(2 * math.PI * f64(i) * f64(440 * (c + 1)) / f64(config.sample_rate)))
 	}
 
-	w: movie.Writer
-	if e := movie.create(&w, path, config); e != .None {
+	w: video.Writer
+	if e := video.create(&w, path, config); e != .None {
 		fmt.eprintfln("create failed: %v %s", e, w.error_detail); os.exit(1)
 	}
-	backend, provider := movie.video_backend(&w)
+	backend, provider := video.video_backend(&w)
 	start := time.tick_now()
 	convert: time.Duration
-	if config.sample_rate != 0 do check(movie.write_audio(&w, pcm), "write_audio", &w)
+	if config.sample_rate != 0 do check(video.write_audio(&w, pcm), "write_audio", &w)
 	for f in 0 ..< frames {
 		t0 := time.tick_now()
 		fill(rgba, width, height, f)
 		convert += time.tick_since(t0)
-		check(movie.write_frame(&w, rgba, width * 4), "write_frame", &w)
+		check(video.write_frame(&w, rgba, width * 4), "write_frame", &w)
 	}
-	check(movie.finish(&w), "finish", &w)
-	movie.destroy(&w)
+	check(video.finish(&w), "finish", &w)
+	video.destroy(&w)
 	encode := time.tick_since(start)
 	info, _ := os.stat(path, context.temp_allocator)
 	size := info.size
@@ -96,17 +96,17 @@ main :: proc() {
 	)
 
 	// Read back: sequential playback, random access and audio.
-	r: movie.Reader
-	if e := movie.open_reader(&r, path, {preference = config.preference}); e != .None {
+	r: video.Reader
+	if e := video.open_reader(&r, path, {preference = config.preference}); e != .None {
 		fmt.eprintfln("open failed: %v %s", e, r.error_detail); os.exit(1)
 	}
-	defer movie.close_reader(&r)
+	defer video.close_reader(&r)
 	fmt.printfln("read: %dx%d %d frames %d/%d fps %.3f s, colour %v, rotation %d", r.video.width, r.video.height, r.video.frame_count, r.video.fps_num, r.video.fps_den, r.video.duration, r.video.color, r.video.rotation)
 	failures := 0
 	worst := 1000.0
 	start = time.tick_now()
 	for f in 0 ..< frames {
-		frame, e := movie.next_frame(&r)
+		frame, e := video.next_frame(&r)
 		if e != .None || frame.index != f {fmt.eprintfln("frame %d: %v index %d", f, e, frame.index); failures += 1; break}
 		fill(rgba, width, height, f)
 		worst = min(worst, psnr(rgba, frame.rgba, width, height))
@@ -115,7 +115,7 @@ main :: proc() {
 	fmt.printfln("sequential: %.1f fps decode+RGBA, worst PSNR %.2f dB", f64(frames) / time.duration_seconds(sequential), worst)
 	picks := [?]int{frames / 2, 1, frames - 1, frames / 3, frames / 2 + 1, 0}
 	for f in picks {
-		frame, e := movie.frame_at(&r, (f64(f) + 0.5) / fps)
+		frame, e := video.frame_at(&r, (f64(f) + 0.5) / fps)
 		fill(rgba, width, height, f)
 		quality := psnr(rgba, frame.rgba, width, height)
 		ok := e == .None && frame.index == f && quality > 30
@@ -126,7 +126,7 @@ main :: proc() {
 		decoded := make([]f32, (audio_samples + 4096) * config.channels)
 		total := 0
 		for {
-			n, e := movie.read_audio(&r, decoded[total * config.channels:])
+			n, e := video.read_audio(&r, decoded[total * config.channels:])
 			if e != .None || n == 0 do break
 			total += n
 		}
@@ -156,7 +156,7 @@ main :: proc() {
 	fmt.println("ok")
 }
 
-check :: proc(e: movie.Error, what: string, w: ^movie.Writer) {
+check :: proc(e: video.Error, what: string, w: ^video.Writer) {
 	if e == .None do return
 	fmt.eprintfln("%s failed: %v %s", what, e, w.error_detail)
 	os.exit(1)

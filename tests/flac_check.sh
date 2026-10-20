@@ -2,7 +2,7 @@
 # FLAC gate: the RFC 9639 example files and corruption tests, then every
 # fixture from tests/flac_fixtures.sh decoded natively and checked against
 # the encoder's MD5 and FFmpeg's decode (bit-exact), with random seeks;
-# FLAC in .flac, Matroska and MP4 through movie.Reader; and a fuzz pass.
+# FLAC in .flac, Matroska and MP4 through video.Reader; and a fuzz pass.
 # FFmpeg and the flac tool are development oracles only.
 #   bash tests/flac_check.sh [work-dir]
 set -euo pipefail
@@ -30,7 +30,7 @@ for f in "$fx"/*.flac; do
 	fi
 done
 
-echo "== movie.Reader: .flac, Matroska, MP4 (whole stream and 30 seeks, exact)"
+echo "== video.Reader: .flac, Matroska, MP4 (whole stream and 30 seeks, exact)"
 for f in "$fx"/ref_l8.flac "$fx"/ref_32.flac "$fx"/ref_id3.flac "$fx"/in_matroska.mkv "$fx"/in_mp4.mp4 "$fx"/video_flac.mkv; do
 	name=$(basename "$f")
 	oracle="$f.f32" # containers: NAME.mkv.f32

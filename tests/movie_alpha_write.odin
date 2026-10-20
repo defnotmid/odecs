@@ -1,9 +1,9 @@
-// Transparent H.265 through movie.Writer and back. Renders premultiplied
+// Transparent H.265 through video.Writer and back. Renders premultiplied
 // RGBA frames like onimite's (a moving disc with an anti-aliased edge, a
 // soft glow, thin strokes, an alpha ramp over changing hues), writes them
 // with colour stored premultiplied and straight (H.265) and as VP9 in
 // WebM, reads each file back with
-// movie.Reader, and reports what a viewer would see: the frames composited
+// video.Reader, and reports what a viewer would see: the frames composited
 // over black and over white, and alpha, as PSNR and maximum error.
 //
 //   odin build tests/movie_alpha_write.odin -file -o:speed -out:/tmp/odecs-movie-alpha-write
@@ -15,7 +15,7 @@
 // reader's planar frames as yuva420p for comparison with FFmpeg's decode.
 package movie_alpha_write
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -46,27 +46,27 @@ main :: proc() {
 	_ = os.write_entire_file(fmt.tprintf("%s/source.rgba", dir), source)
 	ok := true
 	Case :: struct {
-		codec: movie.Video_Codec,
-		mode:  movie.Transparency,
+		codec: video.Video_Codec,
+		mode:  video.Transparency,
 		name:  string,
 		floor: f64, // dB over black and white; premultiplied 4:2:0 tops out near 33
 	}
 	for test in ([]Case{{.H265, .Premultiplied, "alpha_premultiplied.mov", 32}, {.H265, .Straight, "alpha_straight.mov", 38}, {.VP9, .Straight, "alpha_vp9.webm", 38}}) {
 		mode := test.mode
 		path := fmt.tprintf("%s/%s", dir, test.name)
-		config := movie.default_writer_config(width, height, 30, 1)
+		config := video.default_writer_config(width, height, 30, 1)
 		config.codec = test.codec
 		config.qp = qp
 		config.alpha = .Premultiplied
 		config.transparency = mode
-		w: movie.Writer
-		if e := movie.create(&w, path, config); e != .None do fail("create", mode, e, w.error_detail)
+		w: video.Writer
+		if e := video.create(&w, path, config); e != .None do fail("create", mode, e, w.error_detail)
 		start := time.tick_now()
 		for f in 0 ..< frames {
-			if e := movie.write_frame(&w, source[f * width * height * 4:][:width * height * 4], width * 4); e != .None do fail("write", f, e, w.error_detail)
+			if e := video.write_frame(&w, source[f * width * height * 4:][:width * height * 4], width * 4); e != .None do fail("write", f, e, w.error_detail)
 		}
-		if e := movie.finish(&w); e != .None do fail("finish", e, w.error_detail)
-		movie.destroy(&w)
+		if e := video.finish(&w); e != .None do fail("finish", e, w.error_detail)
+		video.destroy(&w)
 		elapsed := time.duration_seconds(time.tick_since(start))
 		info, _ := os.stat(path, context.temp_allocator)
 		size := info.size
@@ -128,13 +128,13 @@ psnr :: proc(sse, count: f64) -> f64 {
 }
 
 compare :: proc(path: string, floor: f64, source: []u8, width, height, frames: int, size: i64, elapsed: f64) -> bool {
-	r: movie.Reader
-	if e := movie.open_reader(&r, path, {preference = .Native, premultiplied_alpha = true}); e != .None do fail("open", path, e, r.error_detail)
-	defer movie.close_reader(&r)
+	r: video.Reader
+	if e := video.open_reader(&r, path, {preference = .Native, premultiplied_alpha = true}); e != .None do fail("open", path, e, r.error_detail)
+	defer video.close_reader(&r)
 	if !r.video.has_alpha || r.video.frame_count != frames do fail(path, "has_alpha", r.video.has_alpha, "frames", r.video.frame_count)
 	s: Stats
 	for f in 0 ..< frames {
-		frame, e := movie.next_frame(&r)
+		frame, e := video.next_frame(&r)
 		if e != .None do fail("next_frame", f, e, r.error_detail)
 		src := source[f * width * height * 4:][:width * height * 4]
 		for i := 0; i < len(src); i += 4 {
@@ -157,12 +157,12 @@ compare :: proc(path: string, floor: f64, source: []u8, width, height, frames: i
 }
 
 dump_planar :: proc(path, out_path: string) {
-	r: movie.Reader
-	if e := movie.open_reader(&r, path, {preference = .Native, format = .Planar}); e != .None do fail("open", path, e, r.error_detail)
-	defer movie.close_reader(&r)
+	r: video.Reader
+	if e := video.open_reader(&r, path, {preference = .Native, format = .Planar}); e != .None do fail("open", path, e, r.error_detail)
+	defer video.close_reader(&r)
 	out: [dynamic]u8
 	for {
-		frame, e := movie.next_frame(&r)
+		frame, e := video.next_frame(&r)
 		if e == .End_Of_Stream do break
 		if e != .None do fail("next_frame", e, r.error_detail)
 		p := frame.planar

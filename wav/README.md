@@ -52,7 +52,7 @@ n, e := wav.encode_into(dst, samples, 48000, 2, .S16) // dst holds wav.encoded_s
   channels are 1..64, and every truncation of a valid file opens with what
   it holds or returns an error.
 
-`movie.Reader` plays WAV files as audio-only movies. `bash tests/wav_check.sh`
+`video.Reader` plays WAV files as audio-only movies. `bash tests/wav_check.sh`
 compares every supported format with FFmpeg (bit-exact, whole files and
 after random seeks) and fuzzes the reader.
 

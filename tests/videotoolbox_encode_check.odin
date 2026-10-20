@@ -1,4 +1,4 @@
-// Hardware encoding through movie.Writer on macOS: writes H.264 and HEVC
+// Hardware encoding through video.Writer on macOS: writes H.264 and HEVC
 // from RGBA, from I420 and from NV12, checks that VideoToolbox was chosen,
 // decodes each file with the native decoders and reports size, speed and
 // PSNR against the encoded planes.
@@ -7,7 +7,7 @@
 //   .work/vt-encode-check OUTDIR [WIDTH HEIGHT FRAMES QP]
 package videotoolbox_encode_check
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -38,42 +38,42 @@ main :: proc() {
 	rgba := make([]u8, width * height * 4)
 	luma, quarter := width * height, width * height / 4
 	planes := make([]u8, frames * (luma + 2 * quarter)) // every frame's I420, the reference
-	k := movie.rgb_to_yuv_coefficients(.BT709, false)
+	k := video.rgb_to_yuv_coefficients(.BT709, false)
 	for f in 0 ..< frames {
 		render(rgba, width, height, f)
 		p := planes[f * (luma + 2 * quarter):]
-		movie.rgba_to_i420(rgba, width * 4, width, height, {p[:luma], p[luma:][:quarter], p[luma + quarter:][:quarter]}, {width, width / 2, width / 2}, &k, .Opaque, {})
+		video.rgba_to_i420(rgba, width * 4, width, height, {p[:luma], p[luma:][:quarter], p[luma + quarter:][:quarter]}, {width, width / 2, width / 2}, &k, .Opaque, {})
 	}
 	nv12 := make([]u8, luma / 2)
 	ok := true
-	for codec in ([]movie.Video_Codec{.H264, .H265}) {
+	for codec in ([]video.Video_Codec{.H264, .H265}) {
 		for input in Input {
 			path := fmt.tprintf("%s/vt_%v_%v.mp4", dir, codec, input)
-			config := movie.default_writer_config(width, height, 30, 1)
+			config := video.default_writer_config(width, height, 30, 1)
 			config.codec, config.qp = codec, qp
-			w: movie.Writer
-			if e := movie.create(&w, path, config); e != .None do fail("create", path, e, w.error_detail)
-			backend, name := movie.video_backend(&w)
+			w: video.Writer
+			if e := video.create(&w, path, config); e != .None do fail("create", path, e, w.error_detail)
+			backend, name := video.video_backend(&w)
 			start := time.tick_now()
 			for f in 0 ..< frames {
 				p := planes[f * (luma + 2 * quarter):]
 				y, u, v := p[:luma], p[luma:][:quarter], p[luma + quarter:][:quarter]
-				e: movie.Error
+				e: video.Error
 				switch input {
 				case .RGBA:
 					render(rgba, width, height, f) // timed: the conversion is part of this path
-					e = movie.write_frame(&w, rgba, width * 4)
+					e = video.write_frame(&w, rgba, width * 4)
 				case .I420:
-					e = movie.write_i420(&w, {y, u, v}, {width, width / 2, width / 2})
+					e = video.write_i420(&w, {y, u, v}, {width, width / 2, width / 2})
 				case .NV12:
 					for j in 0 ..< quarter do nv12[2 * j], nv12[2 * j + 1] = u[j], v[j]
-					e = movie.write_nv12(&w, {y, nv12}, {width, width})
+					e = video.write_nv12(&w, {y, nv12}, {width, width})
 				}
 				if e != .None do fail("write", path, f, e, w.error_detail)
 			}
-			if e := movie.finish(&w); e != .None do fail("finish", path, e, w.error_detail)
+			if e := video.finish(&w); e != .None do fail("finish", path, e, w.error_detail)
 			elapsed := time.duration_seconds(time.tick_since(start))
-			movie.destroy(&w)
+			video.destroy(&w)
 			db := decoded_psnr(path, planes, width, height, frames)
 			info, _ := os.stat(path, context.temp_allocator)
 			fmt.printfln("%s: %v (%s), %.1f fps, %d bytes, %.2f dB", path, backend, name, f64(frames) / elapsed, info.size, db)
@@ -99,14 +99,14 @@ render :: proc(rgba: []u8, width, height, f: int) {
 
 // PSNR of the native decode of path against the reference planes.
 decoded_psnr :: proc(path: string, planes: []u8, width, height, frames: int) -> f64 {
-	r: movie.Reader
-	if e := movie.open_reader(&r, path, {preference = .Native, format = .Planar}); e != .None do fail("open", path, e, r.error_detail)
-	defer movie.close_reader(&r)
+	r: video.Reader
+	if e := video.open_reader(&r, path, {preference = .Native, format = .Planar}); e != .None do fail("open", path, e, r.error_detail)
+	defer video.close_reader(&r)
 	if r.video.frame_count != frames do fail(path, "frames", r.video.frame_count)
 	luma, quarter := width * height, width * height / 4
 	sse: f64
 	for f in 0 ..< frames {
-		frame, e := movie.next_frame(&r)
+		frame, e := video.next_frame(&r)
 		if e != .None do fail("next_frame", path, f, e, r.error_detail)
 		ref := planes[f * (luma + 2 * quarter):]
 		p := frame.planar

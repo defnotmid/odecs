@@ -2,12 +2,12 @@ package viewer
 
 import media "../media"
 import native "../media/native"
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 
-// What the viewer plays: a container through movie.Reader (MP4, MOV, WebM),
+// What the viewer plays: a container through video.Reader (MP4, MOV, WebM),
 // or a raw elementary stream decoded directly (Annex-B H.264/H.265, ADTS AAC).
 Source_Kind :: enum {
 	Movie,
@@ -33,7 +33,7 @@ Source :: struct {
 	duration:              f64, // seconds; 0 when unknown
 	frame_count:           int, // 0 when unknown
 	sample_rate, channels: int,
-	reader:                movie.Reader,
+	reader:                video.Reader,
 	// Raw streams: the whole file, a decoder session and its output.
 	data:                  []u8,
 	codec:                 media.Codec,
@@ -49,7 +49,7 @@ Source :: struct {
 	decoded:               int, // raw video pictures decoded since the start
 	pcm:                   [dynamic]f32,
 	pcm_head:              int,
-	coefficients:          movie.Yuv_To_Rgb,
+	coefficients:          video.Yuv_To_Rgb,
 	error_detail:          string,
 }
 
@@ -65,7 +65,7 @@ source_open :: proc(s: ^Source, path: string, options: ^native.Options, preferen
 		return open_raw_audio(s, path)
 	}
 	s.kind = .Movie
-	if e := movie.open_reader(&s.reader, path, {preference = preference, native_options = options, premultiplied_alpha = true}); e != .None {
+	if e := video.open_reader(&s.reader, path, {preference = preference, native_options = options, premultiplied_alpha = true}); e != .None {
 		s.error_detail = fmt.aprintf("%v: %s", e, s.reader.error_detail)
 		return false
 	}
@@ -92,7 +92,7 @@ source_open :: proc(s: ^Source, path: string, options: ^native.Options, preferen
 }
 
 source_close :: proc(s: ^Source) {
-	if s.kind == .Movie do movie.close_reader(&s.reader)
+	if s.kind == .Movie do video.close_reader(&s.reader)
 	if s.session_open do media.close(&s.session)
 	for f in s.queue do delete(f.rgba)
 	for b in s.spare do delete(b)
@@ -109,7 +109,7 @@ source_close :: proc(s: ^Source) {
 // The next frame in presentation order, or ok = false at the end.
 source_next_frame :: proc(s: ^Source) -> (f: Frame, ok: bool) {
 	if s.kind == .Movie {
-		mf, e := movie.next_frame(&s.reader)
+		mf, e := video.next_frame(&s.reader)
 		if e != .None {
 			if e != .End_Of_Stream do s.error_detail = fmt.aprintf("decode: %v %s", e, s.reader.error_detail)
 			return {}, false
@@ -131,9 +131,9 @@ source_next_frame :: proc(s: ^Source) -> (f: Frame, ok: bool) {
 source_seek :: proc(s: ^Source, seconds: f64) -> (f: Frame, ok: bool) {
 	switch s.kind {
 	case .Movie:
-		if s.has_audio do movie.seek_audio(&s.reader, seconds)
+		if s.has_audio do video.seek_audio(&s.reader, seconds)
 		if !s.has_video do return {}, false
-		mf, e := movie.frame_at(&s.reader, seconds)
+		mf, e := video.frame_at(&s.reader, seconds)
 		if e != .None do return {}, false
 		return {mf.rgba, mf.width, mf.height, mf.time, mf.index}, true
 	case .Raw_Video:
@@ -159,13 +159,13 @@ source_seek :: proc(s: ^Source, seconds: f64) -> (f: Frame, ok: bool) {
 
 // Moves only the audio position (movies; raw video has no audio).
 source_seek_audio :: proc(s: ^Source, seconds: f64) {
-	if s.kind == .Movie && s.has_audio do movie.seek_audio(&s.reader, seconds)
+	if s.kind == .Movie && s.has_audio do video.seek_audio(&s.reader, seconds)
 }
 
 // Interleaved f32 PCM at the current audio position; 0 at the end.
 source_read_audio :: proc(s: ^Source, out: []f32) -> int {
 	if s.kind == .Movie {
-		n, _ := movie.read_audio(&s.reader, out)
+		n, _ := video.read_audio(&s.reader, out)
 		return n
 	}
 	if s.kind != .Raw_Audio do return 0
@@ -296,13 +296,13 @@ on_raw_frame :: proc(f: media.Video_Frame, user: rawptr) {
 	}
 	if rgba == nil do rgba = make([]u8, size)
 	// Raw streams carry no container colour: the common player rule.
-	m: movie.Matrix = f.height <= 576 ? .BT601 : .BT709
-	s.coefficients = movie.yuv_to_rgb_coefficients(m, false, f.bit_depth)
+	m: video.Matrix = f.height <= 576 ? .BT601 : .BT709
+	s.coefficients = video.yuv_to_rgb_coefficients(m, false, f.bit_depth)
 	sx, sy := media.chroma_subsampling(f.chroma)
 	planes := [3][]u8{f.planes[0].data, f.planes[1].data, f.planes[2].data}
 	strides := [3]int{f.planes[0].stride, f.planes[1].stride, f.planes[2].stride}
 	if f.chroma == .Monochrome do planes[1], planes[2] = nil, nil
-	movie.yuv_to_rgba(planes, strides, f.width, f.height, f.storage_bits, uint(sx >> 1), uint(sy >> 1), &s.coefficients, rgba, f.width * 4)
+	video.yuv_to_rgba(planes, strides, f.width, f.height, f.storage_bits, uint(sx >> 1), uint(sy >> 1), &s.coefficients, rgba, f.width * 4)
 	append(&s.queue, Frame{rgba, f.width, f.height, f64(s.decoded) / s.fps, s.decoded})
 	s.decoded += 1
 }

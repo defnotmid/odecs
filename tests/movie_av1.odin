@@ -1,4 +1,4 @@
-// Reads an AV1 movie (MP4 or Matroska) through movie.Reader with planar
+// Reads an AV1 movie (MP4 or Matroska) through video.Reader with planar
 // output and writes every frame's planes as raw YUV (bytes at 8 bits,
 // little-endian u16 above), for tests/av1_check.sh to compare with FFmpeg's
 // libdav1d. Also reports the description and the time per frame.
@@ -6,28 +6,28 @@
 //   movie_av1 FILE OUT.yuv [native]
 package main
 
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 import "core:time"
 
 main :: proc() {
 	if len(os.args) < 3 {fmt.eprintln("usage: movie_av1 FILE OUT.yuv"); os.exit(2)}
-	r: movie.Reader
-	config := movie.Reader_Config {
+	r: video.Reader
+	config := video.Reader_Config {
 		format = .Planar,
 	}
 	if len(os.args) > 3 && os.args[3] == "native" do config.preference = .Native
 	start := time.now()
-	if e := movie.open_reader(&r, os.args[1], config); e != .None {fmt.eprintln("open", e, r.error_detail); os.exit(1)}
-	defer movie.close_reader(&r)
+	if e := video.open_reader(&r, os.args[1], config); e != .None {fmt.eprintln("open", e, r.error_detail); os.exit(1)}
+	defer video.close_reader(&r)
 	out, oerr := os.create(os.args[2])
 	if oerr != nil do os.exit(1)
 	defer os.close(out)
 	frames := 0
-	p: movie.Planar
+	p: video.Planar
 	for {
-		f, e := movie.next_frame(&r)
+		f, e := video.next_frame(&r)
 		if e == .End_Of_Stream do break
 		if e != .None {fmt.eprintln("frame", frames, e, r.error_detail); os.exit(1)}
 		p = f.planar

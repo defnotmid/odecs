@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Matroska gate: H.264/H.265 video and AAC/PCM audio in .mkv through
-# movie.Reader. Video must match the same streams remuxed to MP4 frame for
+# video.Reader. Video must match the same streams remuxed to MP4 frame for
 # frame (that path is verified against FFmpeg); audio is compared with
 # FFmpeg's own decode of the .mkv. Also a stream written without seeking
 # (unknown Segment size), a cut-off recording, and a short fuzz pass.
@@ -16,7 +16,7 @@ pass() { printf '  %-48s ok\n' "$1"; }
 bad() { printf '  %-48s FAIL\n' "$1"; fail=1; }
 
 odin test webm
-odin test movie -o:speed
+odin test video -o:speed
 odin build tests/movie_equal.odin -file -o:speed -out:"$work/movie_equal"
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"

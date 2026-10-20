@@ -208,7 +208,7 @@ filter waves. Neither codec has an encoder.
 `decode` accepts complete NAL units or complete Annex-B units/streams, and AAC
 ADTS, raw AAC or LOAS packets. Packet fragments, container demuxing and muxing
 are outside this layer: [`mp4`](../mp4/README.md)
-muxes/demuxes MP4, and [`movie`](../movie/README.md) joins both for
+muxes/demuxes MP4, and [`video`](../video/README.md) joins both for
 RGBA/PCM files. POC describes codec picture order; video timestamps, time
 bases and source/edit metadata belong to the caller. Do not treat POC as a
 continuous timestamp across random-access resets.

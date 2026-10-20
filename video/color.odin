@@ -1,4 +1,4 @@
-package movie
+package video
 
 import "base:intrinsics"
 import "core:math"

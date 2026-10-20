@@ -2,7 +2,7 @@
 # AV1 gate, on every fixture from tests/av1_fixtures.sh: the frame header
 # parser against FFmpeg's trace_headers (every element both print must agree,
 # frame by frame), then Vulkan Video decoding against libdav1d, bit-exact, of
-# the raw streams and of MP4/Matroska files through movie.Reader.
+# the raw streams and of MP4/Matroska files through video.Reader.
 set -euo pipefail
 fx=${1:-.work/av1fx}
 work=.work/av1gate
@@ -55,7 +55,7 @@ for f in "$fx"/*.obu; do
 		fail=$((fail + 1))
 	fi
 done
-# MP4 (av01) and Matroska (V_AV1) through movie.Reader's planar output.
+# MP4 (av01) and Matroska (V_AV1) through video.Reader's planar output.
 for f in "$fx"/*.mp4 "$fx"/*.mkv; do
 	name=$(basename "$f")
 	fmt=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$f")

@@ -5,7 +5,7 @@ import encoder "../vp9/encoder"
 import decoder "../vp9/decoder"
 import webm "../webm"
 import common "../common"
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -159,9 +159,9 @@ verify :: proc(path: string, expected, expected_alpha: []u8, w, h, frames, gop: 
 	d, ad: decoder.Decoder
 	decoder.init_decoder(&d); decoder.init_decoder(&ad)
 	defer {decoder.destroy_decoder(&d); decoder.destroy_decoder(&ad)}
-	mr: movie.Reader
-	require(movie.open_reader(&mr, path, {preference = .Native, format = .Planar}) == .None, "movie open")
-	defer movie.close_reader(&mr)
+	mr: video.Reader
+	require(video.open_reader(&mr, path, {preference = .Native, format = .Planar}) == .None, "movie open")
+	defer video.close_reader(&mr)
 	require(mr.video.has_alpha == alpha, "movie alpha metadata")
 	at := 0
 	for f in 0 ..< frames {
@@ -169,7 +169,7 @@ verify :: proc(path: string, expected, expected_alpha: []u8, w, h, frames, gop: 
 		require(err == .None && packet.sync == (f % gop == 0), "read packet/keyframe")
 		pic, shown, de := decoder.decode_packet(&d, packet.data)
 		require(de == .None && shown, "native decode colour")
-		frame, me := movie.next_frame(&mr)
+		frame, me := video.next_frame(&mr)
 		require(me == .None, "movie decode")
 		ap: decoder.Picture
 		if alpha {
@@ -189,6 +189,6 @@ verify :: proc(path: string, expected, expected_alpha: []u8, w, h, frames, gop: 
 			}
 		}
 	}
-	_, end := movie.next_frame(&mr)
+	_, end := video.next_frame(&mr)
 	require(end == .End_Of_Stream, "movie frame count")
 }

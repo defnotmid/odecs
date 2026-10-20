@@ -52,7 +52,7 @@ ff -f lavfi -i color=red:s=64x64 -frames:v 1 "$out/src/cover.png"
 metaflac --import-picture-from="$out/src/cover.png" "$out/ref_picture.flac"
 { printf 'ID3\x04\x00\x00\x00\x00\x00\x0a'; head -c 10 /dev/zero; cat "$out/ref_l5.flac"; } > "$out/ref_id3.flac"
 for f in "$out"/*.flac; do ff -i "$f" -f f32le "${f%.flac}.f32"; done
-# FLAC inside containers, decoded through movie.Reader.
+# FLAC inside containers, decoded through video.Reader.
 ff -i "$out/ref_l8.flac" -c:a copy "$out/in_matroska.mkv"
 ff -i "$out/ref_24_96k.flac" -c:a copy "$out/in_mp4.mp4"
 ff -f lavfi -i testsrc2=size=320x240:rate=30:d=4 -i "$out/ref_l5.flac" -c:v libx264 -c:a copy -shortest "$out/video_flac.mkv"

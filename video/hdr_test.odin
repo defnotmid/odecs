@@ -1,4 +1,4 @@
-package movie
+package video
 
 import media "../media"
 import "core:testing"

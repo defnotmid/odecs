@@ -8,7 +8,7 @@ package movie_timing
 import mp4 "../mp4"
 import media "../media"
 import native "../media/native"
-import movie "../movie"
+import video "../video"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -37,16 +37,16 @@ main :: proc() {
 	planes := make([]u8, W * H * 3 / 2)
 	p := [3][]u8{planes[:W * H], planes[W * H:][:W * H / 4], planes[W * H * 5 / 4:]}
 	strides := [3]int{W, W / 2, W / 2}
-	forward := movie.rgb_to_yuv_coefficients(.BT709, false)
-	inverse := movie.yuv_to_rgb_coefficients(.BT709, false, 8)
+	forward := video.rgb_to_yuv_coefficients(.BT709, false)
+	inverse := video.yuv_to_rgb_coefficients(.BT709, false, 8)
 	out := make([]u8, W * H * 4)
 	times: [ROUNDS]f64
 
 	REPS :: 20
-	for alpha in movie.Alpha {
+	for alpha in video.Alpha {
 		for r in 0 ..< ROUNDS {
 			start := time.tick_now()
-			for _ in 0 ..< REPS do movie.rgba_to_i420(rgba, W * 4, W, H, p, strides, &forward, alpha, {})
+			for _ in 0 ..< REPS do video.rgba_to_i420(rgba, W * 4, W, H, p, strides, &forward, alpha, {})
 			times[r] = time.duration_milliseconds(time.tick_since(start)) / REPS
 		}
 		hash: u64 = 14695981039346656037
@@ -55,37 +55,37 @@ main :: proc() {
 	}
 	for r in 0 ..< ROUNDS {
 		start := time.tick_now()
-		for _ in 0 ..< REPS do movie.yuv_to_rgba(p, strides, W, H, 8, 1, 1, &inverse, out, W * 4)
+		for _ in 0 ..< REPS do video.yuv_to_rgba(p, strides, W, H, 8, 1, 1, &inverse, out, W * 4)
 		times[r] = time.duration_milliseconds(time.tick_since(start)) / REPS
 	}
 	fmt.printfln("yuv_to_rgba 8-bit 4:2:0 %dx%d: %.3f ms/frame (median of %d)", W, H, median(times[:]), ROUNDS)
 
 	if FRAMES == 0 do return // kernels only, for counters
 
-	// A native H.264 clip in memory, then playback through movie.Reader
+	// A native H.264 clip in memory, then playback through video.Reader
 	// against the same samples decoded without the movie layer.
 	m: mp4.Memory_Stream
-	config := movie.default_writer_config(W, H, 30, 1)
+	config := video.default_writer_config(W, H, 30, 1)
 	config.preference = .Native
-	w: movie.Writer
-	if e := movie.create_stream(&w, mp4.memory_stream(&m), config); e != .None {fmt.eprintln("create", e); os.exit(1)}
+	w: video.Writer
+	if e := video.create_stream(&w, mp4.memory_stream(&m), config); e != .None {fmt.eprintln("create", e); os.exit(1)}
 	encode_start := time.tick_now()
 	for f in 0 ..< FRAMES {
 		for i in 0 ..< W * H do rgba[i * 4] = u8(i + f * 5)
-		if e := movie.write_frame(&w, rgba, W * 4); e != .None {fmt.eprintln("write", e); os.exit(1)}
+		if e := video.write_frame(&w, rgba, W * 4); e != .None {fmt.eprintln("write", e); os.exit(1)}
 	}
-	if e := movie.finish(&w); e != .None {fmt.eprintln("finish", e); os.exit(1)}
+	if e := video.finish(&w); e != .None {fmt.eprintln("finish", e); os.exit(1)}
 	encode := time.tick_since(encode_start)
-	movie.destroy(&w)
+	video.destroy(&w)
 	fmt.printfln("native H.264 encode incl. conversion: %.1f fps (single run, %d bytes)", f64(FRAMES) / time.duration_seconds(encode), len(m.data))
 
 	for r in 0 ..< ROUNDS {
-		reader: movie.Reader
-		if e := movie.open_reader_stream(&reader, mp4.memory_stream(&m), {preference = .Native}); e != .None {fmt.eprintln("open", e); os.exit(1)}
+		reader: video.Reader
+		if e := video.open_reader_stream(&reader, mp4.memory_stream(&m), {preference = .Native}); e != .None {fmt.eprintln("open", e); os.exit(1)}
 		start := time.tick_now()
-		for _ in 0 ..< FRAMES do if _, e := movie.next_frame(&reader); e != .None {fmt.eprintln("next", e); os.exit(1)}
+		for _ in 0 ..< FRAMES do if _, e := video.next_frame(&reader); e != .None {fmt.eprintln("next", e); os.exit(1)}
 		times[r] = time.duration_milliseconds(time.tick_since(start)) / f64(FRAMES)
-		movie.close_reader(&reader)
+		video.close_reader(&reader)
 	}
 	playback := median(times[:])
 

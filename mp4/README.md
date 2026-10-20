@@ -5,7 +5,7 @@ and reading of QuickTime ProRes and PCM. The
 package imports only Odin `core`. Codec configuration records are built from
 the parameter sets in the stream. Sample bytes pass through unchanged, apart
 from Annex-B/length-prefix framing. For RGBA frames and PCM in or out, use
-[`movie`](../movie/README.md), which drives this package and
+[`video`](../video/README.md), which drives this package and
 `media`.
 
 ## Writing
@@ -62,7 +62,7 @@ mp4.destroy(&w)
   dropped. `starts_access_unit` and `is_picture_nal` group an encoder's NAL
   stream into samples.
 - **No reordering:** packets are written in call order. Interleave tracks by
-  time yourself; `movie` does this. Independently encoded segments can
+  time yourself; `video` does this. Independently encoded segments can
   be concatenated at packet level when their parameter sets are identical:
   write each segment's packets in order with continuing timestamps.
 - **Output:** a path, or any `io.Stream` with `Write_At` (plus `Read_At` for
@@ -171,4 +171,4 @@ entries, `M4A ` branding, `mvhd` after `trak`, ISO audio entry v1, and
 50k samples in reversed composition order. Every truncation and a byte-corruption sweep
 of a muxed file must be refused, or must read consistently without
 out-of-bounds access. `tests/mp4_check.sh` uses FFmpeg/ffprobe as oracles
-only; see the [movie README](../movie/README.md).
+only; see the [movie README](../video/README.md).
