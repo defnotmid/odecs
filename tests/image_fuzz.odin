@@ -1,7 +1,8 @@
 // Mutation fuzzing of the image inputs: image.info and image.decode for every
-// format, and a GIF animation played through. Every input must be decoded or
-// refused with an error, and everything allocated released; a crash, bounds
-// failure or sanitizer report fails the run.
+// format (decode_float_into for HDR), and a GIF animation played through.
+// Every input must be decoded or refused with an error, and everything
+// allocated released; a crash, bounds failure or sanitizer report fails the
+// run.
 //
 //   odin build tests/image_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/odecs-image-fuzz
 //   /tmp/odecs-image-fuzz ITERATIONS FIXTURE...
@@ -67,6 +68,12 @@ main :: proc() {
 			if img, e := image.decode(data); e == .None {
 				decoded += 1
 				image.destroy_image(&img)
+			}
+			// The harness bounds the size it allocates for.
+			if i, e := image.info(data); e == .None && i.format == .HDR && i.width * i.height <= 1 << 24 {
+				pixels := make([]f32, i.width * i.height * 4)
+				if image.decode_float_into(data, pixels) == .None do decoded += 1
+				delete(pixels)
 			}
 			if image.format_of(data) == .GIF {
 				a: gif.Animation

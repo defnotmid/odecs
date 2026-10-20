@@ -3,13 +3,14 @@
 // colour profile applied, no EXIF orientation), as stb_image gives them; JPEG
 // as libjpeg-turbo decodes it. PNG, TGA and QOI go through Odin's core:image;
 // BMP, WebP, JPEG and GIF through odecs' own decoders (core:image's BMP drops
-// alpha).
+// alpha). Radiance HDR decodes to linear f32 through decode_float_into.
 // Writing is PNG (png/encoder).
 package odecs_image
 
 import bmp "./bmp"
 import common "../common"
 import gif "./gif"
+import hdr "./hdr"
 import jpeg "./jpeg"
 import png_encoder "./png/encoder"
 import webp "./webp"
@@ -29,6 +30,7 @@ Format :: enum {
 	TGA,
 	QOI,
 	WebP,
+	HDR, // Radiance RGBE: decode_float_into
 }
 
 Error :: enum {
@@ -67,6 +69,8 @@ format_of :: proc(data: []u8) -> Format {
 		return .QOI
 	case len(data) >= 12 && starts(data, "RIFF") && string(data[8:12]) == "WEBP":
 		return .WebP
+	case starts(data, "#?RADIANCE\n") || starts(data, "#?RGBE\n"):
+		return .HDR
 	}
 	// TGA has no magic; core:image recognises it from its header.
 	if core_image.which_bytes(data) == .TGA do return .TGA
@@ -94,6 +98,10 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 		b, e := bmp.info(data)
 		if e != .None do return i, e == .Unsupported ? .Unsupported : .Invalid
 		i.width, i.height, i.has_alpha = b.width, b.height, b.has_alpha
+	case .HDR:
+		h, e := hdr.info(data)
+		if e != .None do return i, hdr_error(e)
+		i.width, i.height = h.width, h.height
 	case .PNG, .TGA, .QOI:
 		img, e := core_image.load_from_bytes(data, {.info}, runtime.heap_allocator())
 		defer if e == nil || i.format != .TGA do core_image.destroy(img, runtime.heap_allocator()) // see decode_core
@@ -104,9 +112,11 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 }
 
 // Decodes the image (an animation's first frame) to RGBA8 straight alpha,
-// allocated with `allocator`; free it with destroy_image.
+// allocated with `allocator`; free it with destroy_image. HDR is float:
+// decode_float_into.
 decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> (img: Image, err: Error) {
 	i := info(data) or_return
+	if i.format == .HDR do return img, .Unsupported
 	pixels, aerr := make([]u8, i.width * i.height * 4, allocator)
 	if aerr != nil do return img, .Out_Of_Memory
 	if err = decode_into(data, pixels, pool); err != .None {
@@ -130,10 +140,33 @@ decode_into :: proc(data: []u8, pixels: []u8, pool: ^common.Work_Pool = nil, all
 		return codec_error(webp.decode_into(data, pixels, pool, allocator))
 	case .BMP:
 		return codec_error(bmp.decode_into(data, pixels))
+	case .HDR:
+		return .Unsupported // decode_float_into
 	case .PNG, .TGA, .QOI:
 		return decode_core(data, format, pixels)
 	}
 	return .Unsupported
+}
+
+// Decodes a Radiance HDR image into `pixels`, width * height * 4 floats the
+// caller owns (sized from info): linear RGBA, alpha 1, rows top-down, as
+// stb_image's stbi_loadf gives them. The other formats are 8-bit and decode
+// with decode_into.
+decode_float_into :: proc(data: []u8, pixels: []f32) -> Error {
+	if format_of(data) != .HDR do return .Unsupported
+	return hdr_error(hdr.decode_into(data, pixels))
+}
+
+@(private)
+hdr_error :: proc(e: hdr.Error) -> Error {
+	switch e {
+	case .None:
+		return .None
+	case .Unsupported:
+		return .Unsupported
+	case .Invalid:
+	}
+	return .Invalid
 }
 
 // A codec's error: each names its own Unsupported, Out_Of_Memory, and

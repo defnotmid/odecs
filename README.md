@@ -26,12 +26,13 @@ Audio:
 - `audio/wav`: WAV, RF64 and RIFX reading; 16-bit PCM and float writing ([README](audio/wav/README.md)).
 
 Images:
-- `image`: one decode path for PNG, JPEG, BMP, TGA, QOI, GIF and WebP to RGBA8, and PNG writing.
+- `image`: one decode path for PNG, JPEG, BMP, TGA, QOI, GIF and WebP to RGBA8, Radiance HDR to linear f32, and PNG writing.
 - `image/jpeg`: baseline and progressive JPEG, identical to libjpeg-turbo and as fast ([README](image/jpeg/README.md)).
 - `image/gif`: GIF decoding, the first frame or the animation composited as browsers show it ([README](image/gif/README.md)).
 - `image/bmp`: BMP decoding by stb_image's rules ([README](image/bmp/README.md)).
 - `image/png/encoder`: PNG writing ([README](image/png/README.md)).
 - `image/webp`: WebP lossy, lossless, alpha and animation to RGBA8 ([README](image/webp/README.md)).
+- `image/hdr`: Radiance RGBE to linear RGBA f32, identical to stb_image's `stbi_loadf` ([README](image/hdr/README.md)).
 
 Containers:
 - `container/mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](container/mp4/README.md)).

@@ -1,7 +1,7 @@
 // Decodes image files with odecs/image and with stb_image (the development
 // oracle, through Odin's vendor:stb/image) and compares the RGBA8 results:
 // identical for the lossless formats, PSNR for JPEG (IDCT rounding may
-// differ). Also reports the best of five decode times and odecs' peak
+// differ); Radiance HDR as f32 against stbi_loadf, identical bits. Also reports the best of five decode times and odecs' peak
 // allocation.
 //   odin run tests/image_compare.odin -file -o:speed -- file...
 package image_compare
@@ -22,6 +22,10 @@ main :: proc() {
 		data, err := os.read_entire_file(path, context.allocator)
 		if err != nil {fmt.println("cannot read", path); failed += 1; continue}
 		name := filepath.base(path)
+		if image.format_of(data) == .HDR {
+			if !compare_hdr(name, data) do failed += 1
+			continue
+		}
 		w, h, ch: i32
 		ref := stbi.load_from_memory(raw_data(data), i32(len(data)), &w, &h, &ch, 4)
 		track: mem.Tracking_Allocator
@@ -96,4 +100,56 @@ main :: proc() {
 	if worst_file != "" do fmt.printfln("worst JPEG: %s at %.2f dB", worst_file, worst_psnr)
 	fmt.printfln("%d failed", failed)
 	os.exit(failed == 0 ? 0 : 1)
+}
+
+// decode_float_into against stbi_loadf's RGBA: identical bits; the brightest
+// sample shows the range is past 1.
+compare_hdr :: proc(name: string, data: []u8) -> bool {
+	w, h, ch: i32
+	ref := stbi.loadf_from_memory(raw_data(data), i32(len(data)), &w, &h, &ch, 4)
+	defer if ref != nil do stbi.image_free(ref)
+	i, err := image.info(data)
+	pixels: []f32
+	defer delete(pixels)
+	if err == .None {
+		pixels = make([]f32, i.width * i.height * 4)
+		err = image.decode_float_into(data, pixels)
+	}
+	switch {
+	case ref == nil && err != .None:
+		fmt.printfln("%-26s both refuse (%v)", name, err)
+		return true
+	case ref == nil:
+		fmt.printfln("%-26s stb refuses, odecs decodes %dx%d", name, i.width, i.height)
+		return true
+	case err != .None:
+		fmt.printfln("%-26s FAIL odecs %v, stb decodes %dx%d", name, err, w, h)
+		return false
+	case i.width != int(w) || i.height != int(h):
+		fmt.printfln("%-26s FAIL size %dx%d, stb %dx%d", name, i.width, i.height, w, h)
+		return false
+	}
+	expected := ref[:w * h * 4]
+	brightest: f32
+	for v, k in pixels {
+		if transmute(u32)v != transmute(u32)expected[k] {
+			p := k / 4
+			fmt.printfln("%-26s FAIL pixel (%d, %d): %v, stb %v", name, p % int(w), p / int(w), pixels[p * 4:][:4], expected[p * 4:][:4])
+			return false
+		}
+		if k % 4 != 3 do brightest = max(brightest, v)
+	}
+	// Best of five, each side.
+	ours, theirs := max(f64), max(f64)
+	for _ in 0 ..< 5 {
+		t := time.tick_now()
+		_ = image.decode_float_into(data, pixels)
+		ours = min(ours, time.duration_milliseconds(time.tick_since(t)))
+		t = time.tick_now()
+		other := stbi.loadf_from_memory(raw_data(data), i32(len(data)), &w, &h, &ch, 4)
+		theirs = min(theirs, time.duration_milliseconds(time.tick_since(t)))
+		stbi.image_free(other)
+	}
+	fmt.printfln("%-26s %dx%d ok   identical, brightest %.4g; %.2f ms (stb %.2f)", name, w, h, brightest, ours, theirs)
+	return true
 }

@@ -112,6 +112,17 @@ m tga_rle.tga "" "$src/alpha.png" -compress RLE
 m qoi_rgba.qoi "" "$src/alpha.png"
 m qoi_rgb.qoi "" "$src/odd.png"
 
+# Radiance HDR, linear and brighter than 1: RLE scanlines (widths 8 to
+# 32767) from ImageMagick and ffmpeg, flat ones (narrower or wider), and the
+# #?RGBE signature. The wide one is ffmpeg's: ImageMagick writes RLE at
+# width 32768, past the format's limit, which Radiance and stb read as flat.
+m hdr_rle.hdr "" "$src/odd.png" -colorspace RGB -evaluate pow 2 -evaluate multiply 40
+m hdr_small.hdr "" "$src/small.png" -colorspace RGB -evaluate multiply 3
+m hdr_flat.hdr "" "$src/small.png" -crop 5x40+0+0 +repage -colorspace RGB -evaluate multiply 7
+[ -f "$out/hdr_ffmpeg.hdr" ] || ffmpeg -v error -y -i "$src/photo.png" -vf format=gbrpf32le "$out/hdr_ffmpeg.hdr"
+[ -f "$out/hdr_wide.hdr" ] || ffmpeg -v error -y -f lavfi -i gradients=s=32768x3:c0=0x200000:c1=0x0000ff:nb_colors=2 -frames:v 1 -vf format=gbrpf32le "$out/hdr_wide.hdr"
+[ -f "$out/hdr_rgbe.hdr" ] || sed '1s/^#?RADIANCE$/#?RGBE/' "$out/hdr_small.hdr" > "$out/hdr_rgbe.hdr"
+
 # WebP comes from the WebP gate's corpus; add two.
 [ -f "$out/webp_lossy.webp" ] || cp .work/decode-benchmark/inputs/webp-lossy.webp "$out/webp_lossy.webp" 2>/dev/null || true
 [ -f "$out/webp_lossless.webp" ] || cp .work/decode-benchmark/inputs/webp-lossless.webp "$out/webp_lossless.webp" 2>/dev/null || true
