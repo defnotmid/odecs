@@ -1,0 +1,70 @@
+// Development-only FFmpeg oracle for tests/decode_benchmark.sh: one stream of
+// any container, its packets resident, a fresh one-thread decoder per round,
+// decode and flush timed (opening the decoder is not), median of seven after
+// a warmup. Frames or samples are counted, never touched.
+//   reference_decode FILE video|audio [decoder]   (decoder: e.g. libvpx-vp9)
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+}
+using Clock = std::chrono::steady_clock;
+static void fail(const char *s) { std::fprintf(stderr, "reference decode: %s\n", s); std::exit(1); }
+
+int main(int argc, char **argv) {
+    if (argc < 3 || argc > 4) { std::fprintf(stderr, "usage: reference_decode FILE video|audio [decoder]\n"); return 2; }
+    bool video = std::strcmp(argv[2], "video") == 0;
+    if (!video && std::strcmp(argv[2], "audio") != 0) return 2;
+    av_log_set_level(AV_LOG_ERROR);
+    AVFormatContext *format = nullptr;
+    if (avformat_open_input(&format, argv[1], nullptr, nullptr) < 0 || avformat_find_stream_info(format, nullptr) < 0) fail("demux");
+    int index = av_find_best_stream(format, video ? AVMEDIA_TYPE_VIDEO : AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (index < 0) fail("no such stream");
+    std::vector<AVPacket *> packets;
+    for (;;) {
+        AVPacket *p = av_packet_alloc();
+        int r = av_read_frame(format, p);
+        if (r < 0) { av_packet_free(&p); if (r != AVERROR_EOF) fail("packet read"); break; }
+        if (p->stream_index == index) packets.push_back(p); else av_packet_free(&p);
+    }
+    const AVCodec *codec = argc == 4 ? avcodec_find_decoder_by_name(argv[3])
+                                     : avcodec_find_decoder(format->streams[index]->codecpar->codec_id);
+    if (!codec) fail("decoder unavailable");
+    AVFrame *frame = av_frame_alloc();
+    std::vector<double> times;
+    long long units = 0;
+    for (int round = 0; round < 8; ++round) {
+        AVCodecContext *ctx = avcodec_alloc_context3(codec);
+        if (!ctx || avcodec_parameters_to_context(ctx, format->streams[index]->codecpar) < 0) fail("context");
+        ctx->thread_count = 1;
+        ctx->thread_type = 0;
+        if (avcodec_open2(ctx, codec, nullptr) < 0) fail("decoder open");
+        units = 0;
+        auto drain = [&] {
+            int r;
+            while ((r = avcodec_receive_frame(ctx, frame)) >= 0) {
+                units += video ? 1 : frame->nb_samples;
+                av_frame_unref(frame);
+            }
+            if (r != AVERROR(EAGAIN) && r != AVERROR_EOF) fail("receive frame");
+        };
+        auto t = Clock::now();
+        for (auto p : packets) { if (avcodec_send_packet(ctx, p) < 0) fail("send packet"); drain(); }
+        if (avcodec_send_packet(ctx, nullptr) < 0) fail("flush");
+        drain();
+        double ms = std::chrono::duration<double, std::milli>(Clock::now() - t).count();
+        if (round > 0) times.push_back(ms);
+        avcodec_free_context(&ctx);
+    }
+    std::sort(times.begin(), times.end());
+    std::printf("reference decode: decoder=%s %s=%lld packets=%zu codec_ms=%.3f min_ms=%.3f max_ms=%.3f ffmpeg=%s\n",
+                codec->name, video ? "frames" : "samples", units, packets.size(), times[3], times[0], times[6], av_version_info());
+    for (auto p : packets) av_packet_free(&p);
+    av_frame_free(&frame);
+    avformat_close_input(&format);
+}

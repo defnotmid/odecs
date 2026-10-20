@@ -22,6 +22,8 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [hevc.js](https://github.com/lid-labs/hevc.js) | read: HEVC decoder study | `third_party/hevc.js` | `fa6c1bb2a58fbc1e425030555ef57121717de746` | 2026-10-01 | MIT |
 | [Glint](https://github.com/CrispStrobe/glint) | read: AAC study | `third_party/glint` | `77738f3ed9b15f627196cc5bbd7f6406814ba2fb` | 2026-08-19 | MIT |
 | [Apple ALAC](https://github.com/macosforge/alac) | ported: `alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
+| [FFmpeg](https://github.com/FFmpeg/FFmpeg) n9.0.2 | oracle: decode reference and speed baseline (`tests/decode_benchmark.sh` builds it decoders-only, LGPL) | `third_party/ffmpeg` | `946fcce07b6dcd0331c8cc609192aeff5e1924f8` | 2026-09-18 | LGPL-2.1-or-later |
+| [libvpx](https://github.com/webmproject/libvpx) v1.17.0 | oracle: VP9 decode reference and speed baseline | `third_party/libvpx` | `6df3ec34557879fff673706f4a1d9fbd0f3a6f0e` | 2026-08-20 | BSD-3-Clause + patent grant |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
@@ -48,3 +50,7 @@ against.
 | `third_party/hevc.js/LICENSE` | `9b3c1a02861d51028709ff474e32154ab9d759494f6072c1eb30a17adb80c975` |
 | `third_party/glint/LICENSE` | `ab08fb7ec4a030bd27a9a0d1fb60a39b832f7779fb11d0f2753e85593f6f944e` |
 | `third_party/alac/LICENSE` | `a337314dd82d26791112c1e5a85725b2eb92f5b7e6f9102fa4eaa2903f77518f` |
+| `third_party/ffmpeg/LICENSE.md` | `2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af` |
+| `third_party/ffmpeg/COPYING.LGPLv2.1` | `246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30` |
+| `third_party/libvpx/LICENSE` | `8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615` |
+| `third_party/libvpx/PATENTS` | `cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c` |

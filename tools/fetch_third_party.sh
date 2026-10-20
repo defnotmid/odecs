@@ -22,6 +22,8 @@ refs=(
 	"opus         https://gitlab.xiph.org/xiph/opus.git                22244de5a79bd1d6d623c32e72bf1954b56235be"
 	"libwebp      https://chromium.googlesource.com/webm/libwebp       4fa21912338357f89e4fd51cf2368325b59e9bd9"
 	"alac         https://github.com/macosforge/alac.git               c38887c5c5e64a4b31108733bd79ca9b2496d987"
+	"ffmpeg       https://github.com/FFmpeg/FFmpeg.git                 946fcce07b6dcd0331c8cc609192aeff5e1924f8"
+	"libvpx       https://github.com/webmproject/libvpx.git            6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
 )
 
 fetch() { # name upstream commit
