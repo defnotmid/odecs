@@ -168,45 +168,21 @@ encode_block :: proc(t: ^Tile, r, c, size: int) {
 }
 
 @(private)
-default_scan :: proc(tx, tx_type: int) -> []u16 {
-	switch tx {
-	case 0: return tx_type == vp9.ADST_DCT ? vp9.ROW_SCAN_4X4[:] : tx_type == vp9.DCT_ADST ? vp9.COL_SCAN_4X4[:] : vp9.DEFAULT_SCAN_4X4[:]
-	case 1: return tx_type == vp9.ADST_DCT ? vp9.ROW_SCAN_8X8[:] : tx_type == vp9.DCT_ADST ? vp9.COL_SCAN_8X8[:] : vp9.DEFAULT_SCAN_8X8[:]
-	case 2: return tx_type == vp9.ADST_DCT ? vp9.ROW_SCAN_16X16[:] : tx_type == vp9.DCT_ADST ? vp9.COL_SCAN_16X16[:] : vp9.DEFAULT_SCAN_16X16[:]
-	}
-	return vp9.DEFAULT_SCAN_32X32[:]
-}
-
-@(private)
 put_tokens :: proc(t: ^Tile, p, x, y, tx, tx_type: int, quant: []i32) -> bool {
 	probs := &t.e.probs.coef[tx][min(p, 1)][int(!t.e.keyframe)]
 	above, left: u8
 	step := 1 << uint(tx)
 	for i in 0 ..< step {above |= t.above_nonzero[p][(x >> 2) + i]; left |= t.left_nonzero[p][((y >> 2) + i) & 15]}
 	ctx := int(above) + int(left)
-	scan := default_scan(tx, tx_type)
+	scan := vp9.scan_entries(tx, tx_type)
 	eob := 0
-	for pos, i in scan do if quant[pos] != 0 do eob = i + 1
+	for e, i in scan do if quant[e.pos] != 0 do eob = i + 1
 	cache: [1024]u8
 	check_eob := true
-	n := 4 << uint(tx)
-	for c in 0 ..< n * n {
-		pos := int(scan[c])
-		if c > 0 {
-			i, j := pos / n, pos % n
-			a, l: int
-			switch {
-			case i > 0 && j > 0:
-				a, l = pos - n, pos - 1
-				if tx_type == vp9.DCT_ADST do l = a
-				if tx_type == vp9.ADST_DCT do a = l
-			case i > 0: a, l = pos - n, pos - n
-			case: a, l = pos - 1, pos - 1
-			}
-			ctx = (1 + int(cache[a]) + int(cache[l])) >> 1
-		}
-		band := tx == 0 ? vp9.COEFBAND_4X4[c] : vp9.COEFBAND_8X8PLUS[c]
-		pr := probs[band][ctx]
+	for e, c in scan {
+		pos := int(e.pos)
+		if c > 0 do ctx = (1 + int(cache[e.above]) + int(cache[e.left])) >> 1
+		pr := probs[e.band][ctx]
 		if check_eob {
 			put_bool(&t.b, int(c < eob), pr[0])
 			if c >= eob do break

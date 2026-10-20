@@ -938,7 +938,7 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 			tx_type = int(vp9.MODE2TXFM_MAP[b.y_mode])
 		}
 	}
-	scan := scan_for(tx, tx_type)
+	scan := vp9.scan_entries(tx, tx_type)
 	coefs := t.coefs[:n * n]
 	intrinsics.mem_zero(raw_data(coefs), len(coefs) * size_of(i32))
 	probs := &d.probs.coef[tx][min(p, 1)][int(b.is_inter)]
@@ -969,25 +969,11 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 	max_row := 0
 	c := 0
 	for ; c < seg_eob; c += 1 {
-		pos := int(scan[c])
-		band := tx == vp9.TX_4X4 ? int(vp9.COEFBAND_4X4[c]) : int(vp9.COEFBAND_8X8PLUS[c])
-		if c > 0 {
-			// Neighbours above and to the left in the transform block.
-			i, j := pos / n, pos % n
-			a, l: int
-			switch {
-			case i > 0 && j > 0:
-				a, l = (i - 1) * n + j, i * n + j - 1
-				if tx_type == vp9.DCT_ADST do l = a
-				if tx_type == vp9.ADST_DCT do a = l
-			case i > 0:
-				a, l = (i - 1) * n + j, (i - 1) * n + j
-			case:
-				a, l = i * n + j - 1, i * n + j - 1
-			}
-			ctx = (1 + int(cache[a]) + int(cache[l])) >> 1
-		}
-		pr := &probs[band][ctx]
+		e := scan[c]
+		pos := int(e.pos)
+		if c > 0 do ctx = (1 + int(cache[e.above]) + int(cache[e.left])) >> 1
+		pr := &probs[e.band][ctx]
+		band := int(e.band)
 		if check_eob {
 			more := read_bool(&t.b, pr[0])
 			counts_more[band][ctx][more] += 1
@@ -1010,7 +996,7 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 		coef := read_coef(&t.b, token, bit_depth)
 		value := (i32(coef) * (c == 0 ? dc : ac)) >> shift
 		coefs[pos] = read_bool(&t.b, 128) == 1 ? -value : value
-		max_row = max(max_row, pos / n + 1)
+		max_row = max(max_row, int(e.row) + 1)
 		check_eob = true
 	}
 	return c, max_row, tx_type
@@ -1045,21 +1031,6 @@ read_coef :: #force_inline proc(b: ^Bool_Decoder, token, bit_depth: int) -> int 
 	}
 	for e in 0 ..< count do coef += read_bool(b, vp9.CAT_PROBS[cat][e]) << uint(count - 1 - e)
 	return coef
-}
-
-@(private)
-scan_for :: proc(tx, tx_type: int) -> []u16 {
-	row := tx_type == vp9.ADST_DCT // ADST columns: rows scanned first
-	col := tx_type == vp9.DCT_ADST
-	switch tx {
-	case vp9.TX_4X4:
-		return row ? vp9.ROW_SCAN_4X4[:] : col ? vp9.COL_SCAN_4X4[:] : vp9.DEFAULT_SCAN_4X4[:]
-	case vp9.TX_8X8:
-		return row ? vp9.ROW_SCAN_8X8[:] : col ? vp9.COL_SCAN_8X8[:] : vp9.DEFAULT_SCAN_8X8[:]
-	case vp9.TX_16X16:
-		return row ? vp9.ROW_SCAN_16X16[:] : col ? vp9.COL_SCAN_16X16[:] : vp9.DEFAULT_SCAN_16X16[:]
-	}
-	return vp9.DEFAULT_SCAN_32X32[:]
 }
 
 @(private)
