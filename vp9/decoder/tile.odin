@@ -47,9 +47,6 @@ Block :: struct {
 	left_single, above_single: bool,
 	mode_context:            [4]int,
 	ref_list_mv:             [2]vp9.Mv,
-	ref_mv_count:            int,
-	candidate_mv:            [2]vp9.Mv,
-	candidate_frame:         [2]int,
 	nearest_mv, near_mv:     [2]vp9.Mv,
 	best_mv:                 [2]vp9.Mv,
 	mv:                      [2]vp9.Mv,
@@ -374,9 +371,11 @@ inter_block_mode_info :: proc(t: ^Tile) {
 	h := &d.h
 	b := &t.blk
 	read_ref_frames(t)
+	neighbours: Mv_Neighbours
+	gather_neighbours(t, &neighbours)
 	for j in 0 ..< 2 {
 		if b.ref_frame[j] > vp9.INTRA_FRAME {
-			find_mv_refs(t, b.ref_frame[j], -1)
+			find_mv_refs(t, &neighbours, b.ref_frame[j], -1)
 			find_best_ref_mvs(t, j)
 		}
 	}
@@ -417,7 +416,7 @@ inter_block_mode_info :: proc(t: ^Tile) {
 				t.counts.inter_mode[ctx][mode] += 1
 				b.y_mode = vp9.NEARESTMV + mode
 				if b.y_mode == vp9.NEARESTMV || b.y_mode == vp9.NEARMV {
-					for j in 0 ..< 1 + int(compound) do append_sub8x8_mvs(t, idy * 2 + idx, j)
+					for j in 0 ..< 1 + int(compound) do append_sub8x8_mvs(t, &neighbours, idy * 2 + idx, j)
 				}
 				assign_mv(t, compound)
 				for y2 in 0 ..< h4 do for x2 in 0 ..< w4 {
@@ -726,102 +725,118 @@ clamp_mv_col :: #force_inline proc(t: ^Tile, v, border: int) -> int {
 	return clamp(v, to_left - border, to_right + border)
 }
 
+// The cells motion vector prediction reads around a block (6.4.21): the
+// MV_REF_BLOCKS positions and the previous frame's co-located cell. Gathered
+// once per block, since each reference frame and each sub-block searches
+// them again.
 @(private)
-add_mv_ref_list :: #force_inline proc(b: ^Block, list: int) {
-	if b.ref_mv_count >= 2 do return
-	if b.ref_mv_count > 0 && b.candidate_mv[list] == b.ref_list_mv[0] do return
-	b.ref_list_mv[b.ref_mv_count] = b.candidate_mv[list]
-	b.ref_mv_count += 1
+Mv_Neighbours :: struct {
+	cells:  [8]Motion,
+	at:     [8]int, // grid index, -1 outside the tile
+	prev:   Motion,
+	use_prev: bool,
 }
 
 @(private)
-get_block_mv :: #force_inline proc(t: ^Tile, r, c, list: int, use_prev: bool) {
+gather_neighbours :: proc(t: ^Tile, n: ^Mv_Neighbours) {
+	d := t.d
 	b := &t.blk
-	grid := use_prev ? &t.d.prev_motion : &t.d.motion
-	m := &grid[r * t.d.h.mi_cols + c]
-	b.candidate_mv[list] = m.mv[list]
-	b.candidate_frame[list] = int(m.ref_frame[list])
+	search := &vp9.MV_REF_BLOCKS[b.mi_size]
+	for i in 0 ..< 8 {
+		r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
+		n.at[i] = -1
+		if !is_inside(t, r, c) do continue
+		n.at[i] = r * d.h.mi_cols + c
+		n.cells[i] = d.motion[n.at[i]]
+	}
+	n.use_prev = d.h.use_prev_mvs
+	if n.use_prev do n.prev = d.prev_motion[b.mi_row * d.h.mi_cols + b.mi_col]
+}
+
+// Up to two distinct candidate vectors, in order.
+@(private)
+Mv_Candidates :: struct {
+	mv:    [2]vp9.Mv,
+	count: int,
 }
 
 @(private)
-if_same_ref_frame_add :: proc(t: ^Tile, r, c, ref_frame: int, use_prev: bool) {
-	b := &t.blk
+add_candidate :: #force_inline proc(c: ^Mv_Candidates, mv: vp9.Mv) {
+	if c.count >= 2 || c.count > 0 && mv == c.mv[0] do return
+	c.mv[c.count] = mv
+	c.count += 1
+}
+
+// A cell's vector on the same reference frame, the first list that matches.
+@(private)
+add_same_ref :: #force_inline proc(c: ^Mv_Candidates, m: ^Motion, ref_frame: int) {
 	for j in 0 ..< 2 {
-		get_block_mv(t, r, c, j, use_prev)
-		if b.candidate_frame[j] == ref_frame {
-			add_mv_ref_list(b, j)
+		if int(m.ref_frame[j]) == ref_frame {
+			add_candidate(c, m.mv[j])
 			return
 		}
 	}
 }
 
+// A cell's vectors on other inter references, negated where the sign bias
+// differs; the second only when it differs from the first.
 @(private)
-if_diff_ref_frame_add :: proc(t: ^Tile, r, c, ref_frame: int, use_prev: bool) {
-	b := &t.blk
-	h := &t.d.h
-	for j in 0 ..< 2 do get_block_mv(t, r, c, j, use_prev)
-	same := b.candidate_mv[0] == b.candidate_mv[1]
-	scale :: proc(b: ^Block, h: ^Header, list, ref_frame: int) {
-		if h.sign_bias[b.candidate_frame[list]] != h.sign_bias[ref_frame] do b.candidate_mv[list] = -b.candidate_mv[list]
-	}
-	if b.candidate_frame[0] > vp9.INTRA_FRAME && b.candidate_frame[0] != ref_frame {
-		scale(b, h, 0, ref_frame)
-		add_mv_ref_list(b, 0)
-	}
-	if b.candidate_frame[1] > vp9.INTRA_FRAME && b.candidate_frame[1] != ref_frame && !same {
-		scale(b, h, 1, ref_frame)
-		add_mv_ref_list(b, 1)
+add_diff_ref :: #force_inline proc(c: ^Mv_Candidates, m: ^Motion, ref_frame: int, h: ^Header) {
+	same := m.mv[0] == m.mv[1]
+	for j in 0 ..< 2 {
+		f := int(m.ref_frame[j])
+		if f <= vp9.INTRA_FRAME || f == ref_frame || j == 1 && same do continue
+		mv := m.mv[j]
+		if h.sign_bias[f] != h.sign_bias[ref_frame] do mv = -mv
+		add_candidate(c, mv)
 	}
 }
 
 // Section 6.5.1: up to two candidate vectors from the neighbourhood (and
-// the previous frame), and the inter mode context.
+// the previous frame), and the inter mode context. Once two are found the
+// rest of the search cannot change them.
 @(private)
-find_mv_refs :: proc(t: ^Tile, ref_frame, block: int) {
+find_mv_refs :: proc(t: ^Tile, n: ^Mv_Neighbours, ref_frame, block: int) {
 	d := t.d
 	b := &t.blk
-	b.ref_mv_count = 0
-	b.ref_list_mv = {}
+	c: Mv_Candidates
 	different_ref_found := false
 	context_counter := 0
 	search := &vp9.MV_REF_BLOCKS[b.mi_size]
-	for i in 0 ..< 2 {
-		r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
-		if !is_inside(t, r, c) do continue
-		cell := r * d.h.mi_cols + c
-		m := &d.motion[cell]
-		different_ref_found = true
-		context_counter += int(vp9.MODE_2_COUNTER[m.y_mode])
-		for j in 0 ..< 2 {
-			if int(m.ref_frame[j]) == ref_frame {
-				if block >= 0 && m.sub8x8 {
-					idx := int(vp9.IDX_N_COLUMN_TO_SUBBLOCK[block][search[i][1] == 0 ? 1 : 0])
-					b.candidate_mv[j] = d.sub_mvs[cell][j][idx]
-				} else {
-					b.candidate_mv[j] = m.mv[j] // every sub-block of an 8x8 or larger block
+	search_loop: {
+		for i in 0 ..< 2 {
+			if n.at[i] < 0 do continue
+			m := &n.cells[i]
+			different_ref_found = true
+			context_counter += int(vp9.MODE_2_COUNTER[m.y_mode])
+			for j in 0 ..< 2 {
+				if int(m.ref_frame[j]) == ref_frame {
+					mv := m.mv[j] // every sub-block of an 8x8 or larger block
+					if block >= 0 && m.sub8x8 {
+						idx := int(vp9.IDX_N_COLUMN_TO_SUBBLOCK[block][search[i][1] == 0 ? 1 : 0])
+						mv = d.sub_mvs[n.at[i]][j][idx]
+					}
+					add_candidate(&c, mv)
+					break
 				}
-				add_mv_ref_list(b, j)
-				break
 			}
 		}
-	}
-	for i in 2 ..< 8 {
-		r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
-		if !is_inside(t, r, c) do continue
-		different_ref_found = true
-		if_same_ref_frame_add(t, r, c, ref_frame, false)
-	}
-	if d.h.use_prev_mvs do if_same_ref_frame_add(t, b.mi_row, b.mi_col, ref_frame, true)
-	if different_ref_found {
-		for i in 0 ..< 8 {
-			r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
-			if is_inside(t, r, c) do if_diff_ref_frame_add(t, r, c, ref_frame, false)
+		if c.count == 2 do break search_loop
+		for i in 2 ..< 8 {
+			if n.at[i] < 0 do continue
+			different_ref_found = true
+			add_same_ref(&c, &n.cells[i], ref_frame)
 		}
+		if n.use_prev do add_same_ref(&c, &n.prev, ref_frame)
+		if c.count == 2 do break search_loop
+		if different_ref_found {
+			for i in 0 ..< 8 do if n.at[i] >= 0 do add_diff_ref(&c, &n.cells[i], ref_frame, &d.h)
+		}
+		if n.use_prev do add_diff_ref(&c, &n.prev, ref_frame, &d.h)
 	}
-	if d.h.use_prev_mvs do if_diff_ref_frame_add(t, b.mi_row, b.mi_col, ref_frame, true)
 	b.mode_context[ref_frame] = int(vp9.COUNTER_TO_CONTEXT[context_counter])
 	for i in 0 ..< 2 {
-		b.ref_list_mv[i] = {i16(clamp_mv_row(t, int(b.ref_list_mv[i][0]), vp9.MV_BORDER)), i16(clamp_mv_col(t, int(b.ref_list_mv[i][1]), vp9.MV_BORDER))}
+		b.ref_list_mv[i] = {i16(clamp_mv_row(t, int(c.mv[i][0]), vp9.MV_BORDER)), i16(clamp_mv_col(t, int(c.mv[i][1]), vp9.MV_BORDER))}
 	}
 }
 
@@ -844,9 +859,9 @@ find_best_ref_mvs :: proc(t: ^Tile, list: int) {
 }
 
 @(private)
-append_sub8x8_mvs :: proc(t: ^Tile, block, list: int) {
+append_sub8x8_mvs :: proc(t: ^Tile, neighbours: ^Mv_Neighbours, block, list: int) {
 	b := &t.blk
-	find_mv_refs(t, b.ref_frame[list], block)
+	find_mv_refs(t, neighbours, b.ref_frame[list], block)
 	candidates: [2]vp9.Mv
 	n := 0
 	switch {
