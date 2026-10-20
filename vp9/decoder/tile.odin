@@ -1,6 +1,7 @@
 package vp9_decoder
 
 import vp9 ".."
+import common "../../common"
 import "base:intrinsics"
 
 // One tile's decoding state: its bool decoder, left contexts, symbol counts
@@ -14,7 +15,7 @@ Tile :: struct {
 	mi_row_end:     int,
 	mi_col_start:   int,
 	mi_col_end:     int,
-	b:              Bool_Decoder,
+	b:              common.Bool_Decoder,
 	err:            Error,
 	counts:         vp9.Counts,
 	left_partition: [8]u8,
@@ -62,7 +63,7 @@ decode_tile :: proc(t: ^Tile, $T: typeid) {
 		t.left_partition, t.left_nonzero, t.left_seg_pred = {}, {}, {}
 		for c := t.mi_col_start; c < t.mi_col_end; c += 8 {
 			decode_partition(t, r, c, vp9.BLOCK_64X64, T)
-			if overrun(&t.b) {t.err = .Invalid_Data; return}
+			if common.bool_overrun(&t.b) {t.err = .Invalid_Data; return}
 		}
 	}
 	_ = d
@@ -90,11 +91,11 @@ decode_partition :: proc(t: ^Tile, r, c, bsize: int, $T: typeid) {
 	switch {
 	case has_rows && has_cols:
 		tree := vp9.PARTITION_TREE
-		partition = read_tree(&t.b, tree[:], probs[:])
+		partition = common.bool_tree(&t.b, tree[:], probs[:])
 	case has_cols:
-		partition = read_bool(&t.b, probs[1]) == 1 ? vp9.PARTITION_SPLIT : vp9.PARTITION_HORZ
+		partition = common.bool_decode(&t.b, probs[1]) == 1 ? vp9.PARTITION_SPLIT : vp9.PARTITION_HORZ
 	case has_rows:
-		partition = read_bool(&t.b, probs[2]) == 1 ? vp9.PARTITION_SPLIT : vp9.PARTITION_VERT
+		partition = common.bool_decode(&t.b, probs[2]) == 1 ? vp9.PARTITION_SPLIT : vp9.PARTITION_VERT
 	case:
 		partition = vp9.PARTITION_SPLIT
 	}
@@ -183,7 +184,7 @@ intra_frame_mode_info :: proc(t: ^Tile) {
 	tree := vp9.INTRA_MODE_TREE
 	if seg.enabled && seg.update_map {
 		segment_tree := vp9.SEGMENT_TREE
-		b.segment_id = read_tree(&t.b, segment_tree[:], seg.tree_probs[:])
+		b.segment_id = common.bool_tree(&t.b, segment_tree[:], seg.tree_probs[:])
 	}
 	read_skip(t)
 	read_tx_size(t, true)
@@ -193,7 +194,7 @@ intra_frame_mode_info :: proc(t: ^Tile) {
 	if b.mi_size >= vp9.BLOCK_8X8 {
 		above := above_cell != nil ? int(above_cell.modes[0]) : vp9.DC_PRED
 		left := left_cell != nil ? int(left_cell.modes[0]) : vp9.DC_PRED
-		b.y_mode = read_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
+		b.y_mode = common.bool_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
 		b.sub_modes = b.y_mode
 	} else {
 		w4, h4 := int(vp9.NUM_4X4_BLOCKS_WIDE_LOOKUP[b.mi_size]), int(vp9.NUM_4X4_BLOCKS_HIGH_LOOKUP[b.mi_size])
@@ -202,13 +203,13 @@ intra_frame_mode_info :: proc(t: ^Tile) {
 			for idx := 0; idx < 2; idx += w4 {
 				above := idy > 0 ? b.sub_modes[idx] : above_cell != nil ? int(above_cell.modes[idx]) : vp9.DC_PRED
 				left := idx > 0 ? b.sub_modes[idy * 2] : left_cell != nil ? int(left_cell.modes[idy]) : vp9.DC_PRED
-				mode = read_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
+				mode = common.bool_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
 				for y2 in 0 ..< h4 do for x2 in 0 ..< w4 do b.sub_modes[(idy + y2) * 2 + idx + x2] = mode
 			}
 		}
 		b.y_mode = mode
 	}
-	b.uv_mode = read_tree(&t.b, tree[:], vp9.KF_UV_MODE_PROBS[b.y_mode][:])
+	b.uv_mode = common.bool_tree(&t.b, tree[:], vp9.KF_UV_MODE_PROBS[b.y_mode][:])
 }
 
 @(private)
@@ -222,7 +223,7 @@ read_skip :: proc(t: ^Tile) {
 	ctx := 0
 	if b.avail_u && d.above_context[b.mi_col].skip do ctx += 1
 	if b.avail_l && t.left_context[b.mi_row & 7].skip do ctx += 1
-	v := read_bool(&t.b, d.probs.skip[ctx])
+	v := common.bool_decode(&t.b, d.probs.skip[ctx])
 	t.counts.skip[ctx][v] += 1
 	b.skip = v == 1
 }
@@ -252,13 +253,13 @@ read_tx_size :: proc(t: ^Tile, allow_select: bool) {
 	switch max_tx {
 	case vp9.TX_32X32:
 		tree := vp9.TX_SIZE_32_TREE
-		b.tx_size = read_tree(&t.b, tree[:], probs)
+		b.tx_size = common.bool_tree(&t.b, tree[:], probs)
 	case vp9.TX_16X16:
 		tree := vp9.TX_SIZE_16_TREE
-		b.tx_size = read_tree(&t.b, tree[:], probs)
+		b.tx_size = common.bool_tree(&t.b, tree[:], probs)
 	case:
 		tree := vp9.TX_SIZE_8_TREE
-		b.tx_size = read_tree(&t.b, tree[:], probs)
+		b.tx_size = common.bool_tree(&t.b, tree[:], probs)
 	}
 	t.counts.tx_size[max_tx][ctx][b.tx_size] += 1
 }
@@ -307,12 +308,12 @@ inter_segment_id :: proc(t: ^Tile) {
 	}
 	segment_tree := vp9.SEGMENT_TREE
 	if !seg.temporal_update {
-		b.segment_id = read_tree(&t.b, segment_tree[:], seg.tree_probs[:])
+		b.segment_id = common.bool_tree(&t.b, segment_tree[:], seg.tree_probs[:])
 		return
 	}
 	ctx := int(t.left_seg_pred[b.mi_row & 7]) + int(d.above_seg_pred[b.mi_col])
-	pred := read_bool(&t.b, seg.pred_probs[ctx])
-	b.segment_id = pred == 1 ? predicted : read_tree(&t.b, segment_tree[:], seg.tree_probs[:])
+	pred := common.bool_decode(&t.b, seg.pred_probs[ctx])
+	b.segment_id = pred == 1 ? predicted : common.bool_tree(&t.b, segment_tree[:], seg.tree_probs[:])
 	for i in 0 ..< bw do d.above_seg_pred[b.mi_col + i] = u8(pred)
 	for i in 0 ..< bh do t.left_seg_pred[(b.mi_row + i) & 7] = u8(pred)
 }
@@ -333,7 +334,7 @@ read_is_inter :: proc(t: ^Tile) {
 	case b.avail_u || b.avail_l:
 		ctx = 2 * int(b.avail_u ? b.above_intra : b.left_intra)
 	}
-	v := read_bool(&t.b, d.probs.is_inter[ctx])
+	v := common.bool_decode(&t.b, d.probs.is_inter[ctx])
 	t.counts.is_inter[ctx][v] += 1
 	b.is_inter = v == 1
 }
@@ -346,7 +347,7 @@ intra_block_mode_info :: proc(t: ^Tile) {
 	b.ref_frame = {vp9.INTRA_FRAME, vp9.NONE}
 	if b.mi_size >= vp9.BLOCK_8X8 {
 		ctx := int(vp9.SIZE_GROUP_LOOKUP[b.mi_size])
-		b.y_mode = read_tree(&t.b, tree[:], d.probs.y_mode[ctx][:])
+		b.y_mode = common.bool_tree(&t.b, tree[:], d.probs.y_mode[ctx][:])
 		t.counts.intra_mode[ctx][b.y_mode] += 1
 		b.sub_modes = b.y_mode
 	} else {
@@ -354,14 +355,14 @@ intra_block_mode_info :: proc(t: ^Tile) {
 		mode: int
 		for idy := 0; idy < 2; idy += h4 {
 			for idx := 0; idx < 2; idx += w4 {
-				mode = read_tree(&t.b, tree[:], d.probs.y_mode[0][:])
+				mode = common.bool_tree(&t.b, tree[:], d.probs.y_mode[0][:])
 				t.counts.intra_mode[0][mode] += 1
 				for y2 in 0 ..< h4 do for x2 in 0 ..< w4 do b.sub_modes[(idy + y2) * 2 + idx + x2] = mode
 			}
 		}
 		b.y_mode = mode
 	}
-	b.uv_mode = read_tree(&t.b, tree[:], d.probs.uv_mode[b.y_mode][:])
+	b.uv_mode = common.bool_tree(&t.b, tree[:], d.probs.uv_mode[b.y_mode][:])
 	t.counts.uv_mode[b.y_mode][b.uv_mode] += 1
 }
 
@@ -385,7 +386,7 @@ inter_block_mode_info :: proc(t: ^Tile) {
 		b.y_mode = vp9.ZEROMV
 	} else if b.mi_size >= vp9.BLOCK_8X8 {
 		ctx := b.mode_context[b.ref_frame[0]]
-		mode := read_tree(&t.b, inter_mode_tree[:], d.probs.inter_mode[ctx][:])
+		mode := common.bool_tree(&t.b, inter_mode_tree[:], d.probs.inter_mode[ctx][:])
 		t.counts.inter_mode[ctx][mode] += 1
 		b.y_mode = vp9.NEARESTMV + mode
 	}
@@ -402,7 +403,7 @@ inter_block_mode_info :: proc(t: ^Tile) {
 			ctx = left
 		}
 		tree := vp9.INTERP_FILTER_TREE
-		b.interp_filter = read_tree(&t.b, tree[:], d.probs.interp_filter[ctx][:])
+		b.interp_filter = common.bool_tree(&t.b, tree[:], d.probs.interp_filter[ctx][:])
 		t.counts.interp_filter[ctx][b.interp_filter] += 1
 	} else {
 		b.interp_filter = h.interp_filter
@@ -412,7 +413,7 @@ inter_block_mode_info :: proc(t: ^Tile) {
 		for idy := 0; idy < 2; idy += h4 {
 			for idx := 0; idx < 2; idx += w4 {
 				ctx := b.mode_context[b.ref_frame[0]]
-				mode := read_tree(&t.b, inter_mode_tree[:], d.probs.inter_mode[ctx][:])
+				mode := common.bool_tree(&t.b, inter_mode_tree[:], d.probs.inter_mode[ctx][:])
 				t.counts.inter_mode[ctx][mode] += 1
 				b.y_mode = vp9.NEARESTMV + mode
 				if b.y_mode == vp9.NEARESTMV || b.y_mode == vp9.NEARMV {
@@ -444,23 +445,23 @@ read_ref_frames :: proc(t: ^Tile) {
 	comp_mode := h.reference_mode
 	if h.reference_mode == vp9.REFERENCE_MODE_SELECT {
 		ctx := comp_mode_ctx(t)
-		comp_mode = read_bool(&t.b, d.probs.comp_mode[ctx])
+		comp_mode = common.bool_decode(&t.b, d.probs.comp_mode[ctx])
 		t.counts.comp_mode[ctx][comp_mode] += 1
 	}
 	if comp_mode == vp9.COMPOUND_REFERENCE {
 		idx := int(h.sign_bias[h.comp_fixed_ref])
 		ctx := comp_ref_ctx(t)
-		comp_ref := read_bool(&t.b, d.probs.comp_ref[ctx])
+		comp_ref := common.bool_decode(&t.b, d.probs.comp_ref[ctx])
 		t.counts.comp_ref[ctx][comp_ref] += 1
 		b.ref_frame[idx] = h.comp_fixed_ref
 		b.ref_frame[1 - idx] = h.comp_var_ref[comp_ref]
 	} else {
 		ctx := single_ref_p1_ctx(t)
-		p1 := read_bool(&t.b, d.probs.single_ref[ctx][0])
+		p1 := common.bool_decode(&t.b, d.probs.single_ref[ctx][0])
 		t.counts.single_ref[ctx][0][p1] += 1
 		if p1 == 1 {
 			ctx2 := single_ref_p2_ctx(t)
-			p2 := read_bool(&t.b, d.probs.single_ref[ctx2][1])
+			p2 := common.bool_decode(&t.b, d.probs.single_ref[ctx2][1])
 			t.counts.single_ref[ctx2][1][p2] += 1
 			b.ref_frame[0] = p2 == 1 ? vp9.ALTREF_FRAME : vp9.GOLDEN_FRAME
 		} else {
@@ -659,7 +660,7 @@ read_mv :: proc(t: ^Tile, ref: int) {
 	b := &t.blk
 	use_hp := d.h.allow_high_precision_mv && use_mv_hp(b.best_mv[ref])
 	tree := vp9.MV_JOINT_TREE
-	joint := read_tree(&t.b, tree[:], d.probs.mv_joint[:])
+	joint := common.bool_tree(&t.b, tree[:], d.probs.mv_joint[:])
 	t.counts.mv_joint[joint] += 1
 	diff: [2]int
 	if joint == vp9.MV_JOINT_HZVNZ || joint == vp9.MV_JOINT_HNZVNZ do diff[0] = read_mv_component(t, 0, use_hp)
@@ -671,31 +672,31 @@ read_mv :: proc(t: ^Tile, ref: int) {
 read_mv_component :: proc(t: ^Tile, comp: int, use_hp: bool) -> int {
 	p := &t.d.probs
 	c := &t.counts
-	sign := read_bool(&t.b, p.mv_sign[comp])
+	sign := common.bool_decode(&t.b, p.mv_sign[comp])
 	c.mv_sign[comp][sign] += 1
 	class_tree, fr_tree := vp9.MV_CLASS_TREE, vp9.MV_FR_TREE
-	class := read_tree(&t.b, class_tree[:], p.mv_class[comp][:])
+	class := common.bool_tree(&t.b, class_tree[:], p.mv_class[comp][:])
 	c.mv_class[comp][class] += 1
 	mag: int
 	if class == 0 {
-		bit := read_bool(&t.b, p.mv_class0_bit[comp])
+		bit := common.bool_decode(&t.b, p.mv_class0_bit[comp])
 		c.mv_class0_bit[comp][bit] += 1
-		fr := read_tree(&t.b, fr_tree[:], p.mv_class0_fr[comp][bit][:])
+		fr := common.bool_tree(&t.b, fr_tree[:], p.mv_class0_fr[comp][bit][:])
 		c.mv_class0_fr[comp][bit][fr] += 1
-		hp := use_hp ? read_bool(&t.b, p.mv_class0_hp[comp]) : 1
+		hp := use_hp ? common.bool_decode(&t.b, p.mv_class0_hp[comp]) : 1
 		c.mv_class0_hp[comp][hp] += 1
 		mag = (bit << 3 | fr << 1 | hp) + 1
 	} else {
 		bits := 0
 		for i in 0 ..< class {
-			bit := read_bool(&t.b, p.mv_bits[comp][i])
+			bit := common.bool_decode(&t.b, p.mv_bits[comp][i])
 			c.mv_bits[comp][i][bit] += 1
 			bits |= bit << uint(i)
 		}
 		mag = vp9.CLASS0_SIZE << uint(class + 2)
-		fr := read_tree(&t.b, fr_tree[:], p.mv_fr[comp][:])
+		fr := common.bool_tree(&t.b, fr_tree[:], p.mv_fr[comp][:])
 		c.mv_fr[comp][fr] += 1
-		hp := use_hp ? read_bool(&t.b, p.mv_hp[comp]) : 1
+		hp := use_hp ? common.bool_decode(&t.b, p.mv_hp[comp]) : 1
 		c.mv_hp[comp][hp] += 1
 		mag += (bits << 3 | fr << 1 | hp) + 1
 	}
@@ -1006,14 +1007,14 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 		pr := &probs[e.band][ctx]
 		band := int(e.band)
 		if check_eob {
-			more := read_bool(&t.b, pr[0])
+			more := common.bool_decode(&t.b, pr[0])
 			counts_more[band][ctx][more] += 1
 			if more == 0 do break
 		}
 		token: int
-		if read_bool(&t.b, pr[1]) == 0 {
+		if common.bool_decode(&t.b, pr[1]) == 0 {
 			token = vp9.ZERO_TOKEN
-		} else if read_bool(&t.b, pr[2]) == 0 {
+		} else if common.bool_decode(&t.b, pr[2]) == 0 {
 			token = vp9.ONE_TOKEN
 		} else {
 			token = read_large_token(&t.b, pr[2])
@@ -1026,7 +1027,7 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 		}
 		coef := read_coef(&t.b, token, bit_depth)
 		value := (i32(coef) * (c == 0 ? dc : ac)) >> shift
-		coefs[pos] = read_bool(&t.b, 128) == 1 ? -value : value
+		coefs[pos] = common.bool_decode(&t.b, 128) == 1 ? -value : value
 		max_row = max(max_row, int(e.row) + 1)
 		check_eob = true
 	}
@@ -1036,25 +1037,25 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 // Tokens TWO_TOKEN and up: the tree below node 2, with Pareto-derived
 // probabilities from the band's third coefficient probability.
 @(private)
-read_large_token :: proc(b: ^Bool_Decoder, prob: u8) -> int {
+read_large_token :: proc(b: ^common.Bool_Decoder, prob: u8) -> int {
 	pareto := vp9.pareto_row(prob)
 	tree := vp9.TOKEN_TREE
 	n := 4 // node 2 of the token tree
 	for {
-		n = int(tree[n + read_bool(b, pareto[(n >> 1) - 2])])
+		n = int(tree[n + common.bool_decode(b, pareto[(n >> 1) - 2])])
 		if n <= 0 do return -n
 	}
 }
 
 @(private)
-read_coef :: #force_inline proc(b: ^Bool_Decoder, token, bit_depth: int) -> int {
+read_coef :: #force_inline proc(b: ^common.Bool_Decoder, token, bit_depth: int) -> int {
 	extra := &vp9.EXTRA_BITS[token]
 	cat, count := int(extra[0]), int(extra[1])
 	coef := int(extra[2])
 	if token == vp9.DCT_VAL_CAT6 {
-		for e in 0 ..< bit_depth - 8 do coef += read_bool(b, 255) << uint(5 + bit_depth - e)
+		for e in 0 ..< bit_depth - 8 do coef += common.bool_decode(b, 255) << uint(5 + bit_depth - e)
 	}
-	for e in 0 ..< count do coef += read_bool(b, vp9.CAT_PROBS[cat][e]) << uint(count - 1 - e)
+	for e in 0 ..< count do coef += common.bool_decode(b, vp9.CAT_PROBS[cat][e]) << uint(count - 1 - e)
 	return coef
 }
 

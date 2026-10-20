@@ -204,10 +204,10 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 	// Probabilities: the frame context, then the compressed header's updates.
 	d.probs = d.contexts[h.frame_context_idx]
 	d.counts = {}
-	b: Bool_Decoder
+	b: common.Bool_Decoder
 	if !init_bool(&b, data[h.uncompressed_size:][:h.compressed_size]) do return .Invalid_Data
 	compressed_header(d, &b)
-	if overrun(&b) do return .Invalid_Data
+	if common.bool_overrun(&b) do return .Invalid_Data
 
 	decode_tiles(d, data[h.uncompressed_size + h.compressed_size:]) or_return
 	if d.loop_filter.level != 0 do apply_loop_filter(d)
@@ -458,4 +458,12 @@ Edge_Context :: struct {
 	tx_size:       u8,
 	interp_filter: u8,
 	skip:          bool,
+}
+
+// A VP9 bool decoder starts with a marker bit that must be zero (9.2.1).
+@(private)
+init_bool :: proc(b: ^common.Bool_Decoder, data: []u8) -> bool {
+	if len(data) < 1 do return false
+	common.bool_start(b, data)
+	return common.bool_decode(b, 128) == 0
 }

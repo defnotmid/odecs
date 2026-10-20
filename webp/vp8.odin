@@ -1,5 +1,6 @@
 package webp
 
+import common "../common"
 import "base:intrinsics"
 
 // VP8 key frames (RFC 6386), WebP's lossy format: macroblocks of 16x16 luma
@@ -11,76 +12,16 @@ import "base:intrinsics"
 // Written from RFC 6386 and libwebp 1.6.0 (BSD-3-Clause), whose tables
 // tables.odin copies.
 
-// The boolean entropy decoder (RFC 6386 7). The range is kept minus one, and
-// up to 56 bits are buffered ahead of the 8-bit window, which starts `bits`
-// bits up. Past the end it reads zeros: a truncated partition decodes as
-// zeros, like a damaged frame would.
+// The boolean entropy decoder (RFC 6386 7) is common's, shared with VP9;
+// these read it as VP8 does: bits as bools, and n-bit values with a sign.
 @(private)
-Bool_Decoder :: struct {
-	data:  []u8,
-	at:    int,
-	value: u64,
-	range: u32, // 0..254: range - 1
-	bits:  int,
-}
+get_bit :: #force_inline proc(br: ^common.Bool_Decoder, prob: u8) -> bool {return common.bool_decode(br, prob) == 1}
 
 @(private)
-bool_init :: proc(br: ^Bool_Decoder, data: []u8) {
-	br^ = {data = data, range = 254, bits = -8}
-	bool_load(br)
-}
+get_value :: #force_inline proc(br: ^common.Bool_Decoder, bits: int) -> int {return common.bool_literal(br, bits)}
 
 @(private)
-bool_load :: proc(br: ^Bool_Decoder) {
-	if br.at + 7 <= len(br.data) {
-		v: u64
-		for b in br.data[br.at:][:7] do v = v << 8 | u64(b)
-		br.at += 7
-		br.value = br.value << 56 | v
-		br.bits += 56
-	} else {
-		b: u64
-		if br.at < len(br.data) {
-			b = u64(br.data[br.at])
-			br.at += 1
-		}
-		br.value = br.value << 8 | b
-		br.bits += 8
-	}
-}
-
-@(private)
-get_bit :: #force_inline proc(br: ^Bool_Decoder, prob: u8) -> bool {
-	if br.bits < 0 do bool_load(br)
-	range := br.range
-	split := (range * u32(prob)) >> 8
-	value := u32(br.value >> uint(br.bits))
-	bit := value > split
-	// Selects, not a branch: coefficient bits are unpredictable.
-	taken := u64(split + 1) << uint(br.bits)
-	br.value -= bit ? taken : 0
-	range = bit ? range - split : split + 1
-	shift := 7 - int(log2_floor(range)) // back to [128, 255]
-	range <<= uint(shift)
-	br.bits -= shift
-	br.range = range - 1
-	return bit
-}
-
-@(private)
-log2_floor :: #force_inline proc(x: u32) -> u32 {
-	return 31 - intrinsics.count_leading_zeros(x)
-}
-
-@(private)
-get_value :: proc(br: ^Bool_Decoder, bits: int) -> int {
-	v := 0
-	for i := bits - 1; i >= 0; i -= 1 do v |= int(get_bit(br, 128)) << uint(i)
-	return v
-}
-
-@(private)
-get_signed_value :: proc(br: ^Bool_Decoder, bits: int) -> int {
+get_signed_value :: proc(br: ^common.Bool_Decoder, bits: int) -> int {
 	v := get_value(br, bits)
 	return get_bit(br, 128) ? -v : v
 }
@@ -146,7 +87,7 @@ Vp8 :: struct {
 	probs:         [4][8][3][11]u8,
 	skip_prob:     u8,
 	use_skip:      bool,
-	parts:         [8]Bool_Decoder,
+	parts:         [8]common.Bool_Decoder,
 	part_count:    int,
 	strengths:     [4][2]Filter_Strength,
 	// Per macroblock, for the filter pass (row-major).
@@ -192,8 +133,8 @@ decode_vp8 :: proc(data: []u8, allocator := context.allocator) -> (out: Yuv, err
 	if first_size > len(rest) do return {}, .Invalid
 	d.mb_w, d.mb_h = (d.width + 15) >> 4, (d.height + 15) >> 4
 
-	br: Bool_Decoder
-	bool_init(&br, rest[:first_size])
+	br: common.Bool_Decoder
+	common.bool_start(&br, rest[:first_size])
 	get_bit(&br, 128) // colour space
 	get_bit(&br, 128) // clamping type
 	parse_segments(&br, &d.segments)
@@ -271,7 +212,7 @@ destroy_yuv :: proc(f: ^Yuv, allocator := context.allocator) {
 }
 
 @(private)
-parse_segments :: proc(br: ^Bool_Decoder, s: ^Segment_Header) {
+parse_segments :: proc(br: ^common.Bool_Decoder, s: ^Segment_Header) {
 	s^ = {absolute = true, tree_probs = {255, 255, 255}}
 	s.enabled = get_bit(br, 128)
 	if !s.enabled do return
@@ -285,7 +226,7 @@ parse_segments :: proc(br: ^Bool_Decoder, s: ^Segment_Header) {
 }
 
 @(private)
-parse_filter :: proc(br: ^Bool_Decoder, f: ^Filter_Header) {
+parse_filter :: proc(br: ^common.Bool_Decoder, f: ^Filter_Header) {
 	f.simple = get_bit(br, 128)
 	f.level = get_value(br, 6)
 	f.sharpness = get_value(br, 3)
@@ -299,7 +240,7 @@ parse_filter :: proc(br: ^Bool_Decoder, f: ^Filter_Header) {
 // The token partitions: 1, 2, 4 or 8, their sizes (but the last's) in 3
 // bytes each ahead of them. Rows use them in turn.
 @(private)
-parse_partitions :: proc(d: ^Vp8, br: ^Bool_Decoder, data: []u8) -> Error {
+parse_partitions :: proc(d: ^Vp8, br: ^common.Bool_Decoder, data: []u8) -> Error {
 	d.part_count = 1 << uint(get_value(br, 2))
 	sizes := (d.part_count - 1) * 3
 	if len(data) < sizes do return .Invalid
@@ -307,18 +248,18 @@ parse_partitions :: proc(d: ^Vp8, br: ^Bool_Decoder, data: []u8) -> Error {
 	for p in 0 ..< d.part_count - 1 {
 		size := int(data[3 * p]) | int(data[3 * p + 1]) << 8 | int(data[3 * p + 2]) << 16
 		size = min(size, len(data) - at)
-		bool_init(&d.parts[p], data[at:][:size])
+		common.bool_start(&d.parts[p], data[at:][:size])
 		at += size
 	}
 	if at >= len(data) do return .Invalid
-	bool_init(&d.parts[d.part_count - 1], data[at:])
+	common.bool_start(&d.parts[d.part_count - 1], data[at:])
 	return .None
 }
 
 @(private)
-parse_quant :: proc(br: ^Bool_Decoder, d: ^Vp8) {
+parse_quant :: proc(br: ^common.Bool_Decoder, d: ^Vp8) {
 	base := get_value(br, 7)
-	delta :: proc(br: ^Bool_Decoder) -> int {return get_bit(br, 128) ? get_signed_value(br, 4) : 0}
+	delta :: proc(br: ^common.Bool_Decoder) -> int {return get_bit(br, 128) ? get_signed_value(br, 4) : 0}
 	y1_dc, y2_dc, y2_ac, uv_dc, uv_ac := delta(br), delta(br), delta(br), delta(br), delta(br)
 	for &q, s in d.quant {
 		qi := base
@@ -370,7 +311,7 @@ filter_strengths :: proc(d: ^Vp8) {
 // Segment, skip flag and intra modes (RFC 6386 11), from the first
 // partition.
 @(private)
-parse_modes :: proc(d: ^Vp8, br: ^Bool_Decoder, mb: ^Macroblock, mb_x: int, left: ^[4]u8) {
+parse_modes :: proc(d: ^Vp8, br: ^common.Bool_Decoder, mb: ^Macroblock, mb_x: int, left: ^[4]u8) {
 	mb.segment = 0
 	if d.segments.update_map {
 		p := &d.segments.tree_probs
@@ -414,7 +355,7 @@ parse_modes :: proc(d: ^Vp8, br: ^Bool_Decoder, mb: ^Macroblock, mb_x: int, left
 // dequantized into out in raster order; returns one past the last position
 // read (0 when the block has no coefficients).
 @(private)
-get_coeffs :: #force_inline proc(br: ^Bool_Decoder, probs: ^[8][3][11]u8, ctx: int, dq: [2]i32, first: int, out: []i16) -> int {
+get_coeffs :: #force_inline proc(br: ^common.Bool_Decoder, probs: ^[8][3][11]u8, ctx: int, dq: [2]i32, first: int, out: []i16) -> int {
 	n := first
 	p := &probs[BANDS[n]][ctx]
 	#no_bounds_check for ; n < 16; n += 1 {
@@ -440,7 +381,7 @@ get_coeffs :: #force_inline proc(br: ^Bool_Decoder, probs: ^[8][3][11]u8, ctx: i
 }
 
 @(private)
-large_value :: #force_inline proc(br: ^Bool_Decoder, p: ^[11]u8) -> int #no_bounds_check {
+large_value :: #force_inline proc(br: ^common.Bool_Decoder, p: ^[11]u8) -> int #no_bounds_check {
 	@(static, rodata)
 	CAT := [4][]u8{{173, 148, 140}, {176, 155, 140, 135}, {180, 157, 141, 134, 130}, {254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129}}
 	if !get_bit(br, p[3]) {
@@ -465,7 +406,7 @@ large_value :: #force_inline proc(br: ^Bool_Decoder, p: ^[11]u8) -> int #no_boun
 // state is a local meanwhile: nothing else can reach it, so it stays in
 // registers while the coefficients are stored.
 @(private)
-parse_residuals :: proc(d: ^Vp8, tokens: ^Bool_Decoder, mb: ^Macroblock, mb_x: int, nz_left, nz_dc_left: ^u8) -> bool {
+parse_residuals :: proc(d: ^Vp8, tokens: ^common.Bool_Decoder, mb: ^Macroblock, mb_x: int, nz_left, nz_dc_left: ^u8) -> bool {
 	local := tokens^
 	defer tokens^ = local
 	br := &local

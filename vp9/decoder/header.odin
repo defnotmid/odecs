@@ -1,6 +1,7 @@
 package vp9_decoder
 
 import vp9 ".."
+import common "../../common"
 
 // Per-frame syntax from the uncompressed and compressed headers.
 @(private)
@@ -286,14 +287,14 @@ setup_past_independence :: proc(d: ^Decoder) {
 // ---- Compressed header (section 6.3) --------------------------------------------
 
 @(private)
-compressed_header :: proc(d: ^Decoder, b: ^Bool_Decoder) {
+compressed_header :: proc(d: ^Decoder, b: ^common.Bool_Decoder) {
 	h := &d.h
 	p := &d.probs
 	if h.lossless {
 		h.tx_mode = vp9.ONLY_4X4
 	} else {
-		h.tx_mode = read_literal(b, 2)
-		if h.tx_mode == vp9.ALLOW_32X32 do h.tx_mode += read_literal(b, 1)
+		h.tx_mode = common.bool_literal(b, 2)
+		if h.tx_mode == vp9.ALLOW_32X32 do h.tx_mode += common.bool_literal(b, 1)
 	}
 	if h.tx_mode == vp9.TX_MODE_SELECT {
 		for i in 0 ..< vp9.TX_SIZE_CONTEXTS do for j in 0 ..< 1 do diff_update(b, &p.tx[vp9.TX_8X8][i][j])
@@ -302,7 +303,7 @@ compressed_header :: proc(d: ^Decoder, b: ^Bool_Decoder) {
 	}
 	max_tx := int(vp9.TX_MODE_TO_BIGGEST_TX_SIZE[h.tx_mode])
 	for tx in 0 ..= max_tx {
-		if read_literal(b, 1) == 0 do continue
+		if common.bool_literal(b, 1) == 0 do continue
 		for i in 0 ..< 2 do for j in 0 ..< 2 do for k in 0 ..< 6 {
 			for l in 0 ..< (k == 0 ? 3 : 6) do for m in 0 ..< 3 do diff_update(b, &p.coef[tx][i][j][k][l][m])
 		}
@@ -319,8 +320,8 @@ compressed_header :: proc(d: ^Decoder, b: ^Bool_Decoder) {
 	for i in 1 ..< 3 do if h.sign_bias[i + 1] != h.sign_bias[1] do compound_allowed = true
 	h.reference_mode = vp9.SINGLE_REFERENCE
 	if compound_allowed {
-		if read_literal(b, 1) == 1 {
-			h.reference_mode = read_literal(b, 1) == 1 ? vp9.REFERENCE_MODE_SELECT : vp9.COMPOUND_REFERENCE
+		if common.bool_literal(b, 1) == 1 {
+			h.reference_mode = common.bool_literal(b, 1) == 1 ? vp9.REFERENCE_MODE_SELECT : vp9.COMPOUND_REFERENCE
 		}
 		switch {
 		case h.sign_bias[vp9.LAST_FRAME] == h.sign_bias[vp9.GOLDEN_FRAME]:
@@ -363,8 +364,8 @@ compressed_header :: proc(d: ^Decoder, b: ^Bool_Decoder) {
 }
 
 @(private)
-diff_update :: proc(b: ^Bool_Decoder, prob: ^u8) {
-	if read_bool(b, 252) == 0 do return
+diff_update :: proc(b: ^common.Bool_Decoder, prob: ^u8) {
+	if common.bool_decode(b, 252) == 0 do return
 	delta := decode_term_subexp(b)
 	m := int(prob^)
 	v := int(vp9.INV_MAP_TABLE[min(delta, 254)])
@@ -378,13 +379,13 @@ diff_update :: proc(b: ^Bool_Decoder, prob: ^u8) {
 }
 
 @(private)
-decode_term_subexp :: proc(b: ^Bool_Decoder) -> int {
-	if read_literal(b, 1) == 0 do return read_literal(b, 4)
-	if read_literal(b, 1) == 0 do return read_literal(b, 4) + 16
-	if read_literal(b, 1) == 0 do return read_literal(b, 5) + 32
-	v := read_literal(b, 7)
+decode_term_subexp :: proc(b: ^common.Bool_Decoder) -> int {
+	if common.bool_literal(b, 1) == 0 do return common.bool_literal(b, 4)
+	if common.bool_literal(b, 1) == 0 do return common.bool_literal(b, 4) + 16
+	if common.bool_literal(b, 1) == 0 do return common.bool_literal(b, 5) + 32
+	v := common.bool_literal(b, 7)
 	if v < 65 do return v + 64
-	return (v << 1) - 1 + read_literal(b, 1)
+	return (v << 1) - 1 + common.bool_literal(b, 1)
 }
 
 @(private)
@@ -395,6 +396,6 @@ inv_recenter_nonneg :: proc(v, m: int) -> int {
 }
 
 @(private)
-mv_update :: proc(b: ^Bool_Decoder, prob: ^u8) {
-	if read_bool(b, 252) == 1 do prob^ = u8(read_literal(b, 7) << 1 | 1)
+mv_update :: proc(b: ^common.Bool_Decoder, prob: ^u8) {
+	if common.bool_decode(b, 252) == 1 do prob^ = u8(common.bool_literal(b, 7) << 1 | 1)
 }
