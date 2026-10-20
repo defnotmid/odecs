@@ -24,7 +24,8 @@ Audio:
 - `mp3`: MPEG-1/2/2.5 Layer III decoding ([README](mp3/README.md)).
 
 Images:
-- `image`: one decode path for PNG, BMP, TGA, QOI, GIF and WebP to RGBA8, matching stb_image, and PNG writing.
+- `image`: one decode path for PNG, JPEG, BMP, TGA, QOI, GIF and WebP to RGBA8, and PNG writing.
+- `jpeg`: baseline and progressive JPEG, identical to libjpeg-turbo and as fast ([README](jpeg/README.md)).
 - `gif`: GIF decoding, the first frame or the animation composited as browsers show it ([README](gif/README.md)).
 - `bmp`: BMP decoding by stb_image's rules ([README](bmp/README.md)).
 - `png/encoder`: PNG writing ([README](png/README.md)).
@@ -133,8 +134,9 @@ Vulkan Video.
 
 Some packages are ported from permissively licensed projects (libopus,
 libwebp, Apple ALAC, minimp3, PDMP3, gen2brain/h265, oxideav-h265, Kvazaar,
-OpenH264). Their notices are kept beside the code (each package's `LICENSE-*.txt`) and
-[PROVENANCE.md](PROVENANCE.md) records what came from where. The reference
+OpenH264). Their notices are kept beside the code (each package's
+`LICENSE-*.txt`) and [PROVENANCE.md](PROVENANCE.md) records what came from
+where. The reference
 sources themselves are never committed: `bash tools/fetch_third_party.sh`
 fetches them at the commits pinned in
 [THIRD_PARTY_REFERENCES.md](THIRD_PARTY_REFERENCES.md). They and the `tests/`

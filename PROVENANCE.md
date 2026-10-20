@@ -3,9 +3,9 @@
 odecs is MIT licensed. This file records what each package was written from,
 and what it was ported from, with each source's license. Everything ported
 is under a license compatible with MIT (MIT, BSD-2-Clause, BSD-3-Clause,
-Apache-2.0, CC0, public domain), and the notices those licenses require are
-kept beside the code. No code from copyleft projects (FFmpeg, x264, x265) is
-in odecs; they are used only as binaries to make fixtures and check output.
+Apache-2.0, CC0, public domain), and the notices those licenses require
+are kept beside the code. No code from copyleft projects (FFmpeg, x264, x265)
+is in odecs; they are used only as binaries to make fixtures and check output.
 
 The reference sources are pinned in
 [THIRD_PARTY_REFERENCES.md](THIRD_PARTY_REFERENCES.md) and fetched by
@@ -71,6 +71,21 @@ port of minimp3. `tools/tables` copies minimp3's Huffman,
 scalefactor-band and partition tables and PDMP3's synthesis window. The
 hybrid filterbank and polyphase synthesis follow the standard's definitions
 as PDMP3 implements them; their cosine tables and windows are computed.
+
+### JPEG
+
+`jpeg` is our own decoder, written from ITU-T T.81 (baseline and
+progressive, Huffman coding). Its IDCT is the Loeffler, Ligtenberg and
+Moschytz factorisation with 13-bit fixed-point constants. libjpeg-turbo is
+the oracle and the speed to meet. Where T.81 leaves room, odecs follows its
+behaviour, so the output is identical to libjpeg-turbo at its defaults:
+- the IDCT's rounding;
+- the alternating rounding of fancy upsampling;
+- the YCbCr constants;
+- the colour space chosen from JFIF, Adobe and the component IDs.
+
+No libjpeg-turbo code is used. The Huffman lookup tables follow the approach
+stb_image takes (public domain).
 
 ### H.265
 

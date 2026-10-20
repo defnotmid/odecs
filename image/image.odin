@@ -1,14 +1,16 @@
 // The suite's one image path: the format from the first bytes, decoded to
 // RGBA8 straight alpha, rows top-down, the bytes as stored (no gamma or
-// colour profile applied, no EXIF orientation), matching stb_image. PNG, TGA
-// and QOI go through Odin's core:image; BMP, WebP, JPEG and GIF through odecs'
-// own decoders (core:image's BMP drops alpha).
+// colour profile applied, no EXIF orientation), as stb_image gives them; JPEG
+// as libjpeg-turbo decodes it. PNG, TGA and QOI go through Odin's core:image;
+// BMP, WebP, JPEG and GIF through odecs' own decoders (core:image's BMP drops
+// alpha).
 // Writing is PNG (png/encoder).
 package odecs_image
 
 import bmp "../bmp"
 import common "../common"
 import gif "../gif"
+import jpeg "../jpeg"
 import png_encoder "../png/encoder"
 import webp "../webp"
 import core_image "core:image"
@@ -75,7 +77,9 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 	case .Unknown:
 		return i, .Unsupported
 	case .JPEG:
-		return i, .Unsupported
+		ft, e := jpeg.get_features(data)
+		if e != .None do return i, e == .Unsupported ? .Unsupported : .Invalid
+		i.width, i.height = ft.width, ft.height
 	case .GIF:
 		ft, e := gif.get_features(data)
 		if e != .None do return i, .Invalid
@@ -101,8 +105,20 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 // allocated with `allocator`; free it with destroy_image.
 decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> (img: Image, err: Error) {
 	switch format := format_of(data); format {
-	case .Unknown, .JPEG:
+	case .Unknown:
 		return img, .Unsupported
+	case .JPEG:
+		j, e := jpeg.decode(data, allocator)
+		switch e {
+		case .None:
+			return {j.width, j.height, j.pixels}, .None
+		case .Unsupported:
+			return img, .Unsupported
+		case .Out_Of_Memory:
+			return img, .Out_Of_Memory
+		case .Invalid:
+		}
+		return img, .Invalid
 	case .GIF:
 		g, e := gif.decode(data, allocator)
 		if e != .None do return img, e == .Out_Of_Memory ? .Out_Of_Memory : .Invalid

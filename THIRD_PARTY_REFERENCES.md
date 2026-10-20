@@ -24,6 +24,7 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [Apple ALAC](https://github.com/macosforge/alac) | ported: `alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
 | [FFmpeg](https://github.com/FFmpeg/FFmpeg) n9.0.2 | oracle: decode reference and speed baseline (`tests/decode_benchmark.sh` builds it decoders-only, LGPL) | `third_party/ffmpeg` | `946fcce07b6dcd0331c8cc609192aeff5e1924f8` | 2026-09-18 | LGPL-2.1-or-later |
 | [libvpx](https://github.com/webmproject/libvpx) v1.17.0 | oracle: VP9 decode reference and speed baseline | `third_party/libvpx` | `6df3ec34557879fff673706f4a1d9fbd0f3a6f0e` | 2026-08-20 | BSD-3-Clause + patent grant |
+| [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 3.1.2 | oracle: JPEG decode reference and speed baseline; fixtures (its test images) | `third_party/libjpeg-turbo` | `4e151a4ad91001b3aa8c2ece2205c15f487ce320` | 2025-08-26 | IJG + BSD-3-Clause + zlib |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
@@ -54,3 +55,4 @@ against.
 | `third_party/ffmpeg/COPYING.LGPLv2.1` | `246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30` |
 | `third_party/libvpx/LICENSE` | `8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615` |
 | `third_party/libvpx/PATENTS` | `cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c` |
+| `third_party/libjpeg-turbo/LICENSE.md` | `2189dc45a8fe96204069f8124caa53a148dfdc193f50f584c6ca7849a6072872` |

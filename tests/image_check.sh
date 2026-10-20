@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Image gate: every fixture (tests/image_fixtures.sh) through odecs/image
-# against stb_image (tests/image_compare.odin: lossless formats identical),
+# against stb_image (tests/image_compare.odin: lossless formats identical,
+# JPEG at least 45 dB), every JPEG against libjpeg-turbo (identical),
 # every GIF animation frame against a browser's (Chromium's ImageDecoder,
 # when chromium is installed), and a fuzz pass over the fixtures.
-# Development only; stb and Chromium are oracles.
+# Development only; stb, libjpeg-turbo and Chromium are oracles.
 #   bash tests/image_check.sh [work-dir]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -12,9 +13,9 @@ fx=.work/image-fixtures
 mkdir -p "$work/frames"
 fail=0
 
-for p in bmp gif png/encoder wav webp; do odin test "$p" > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }; done
+for p in bmp gif jpeg png/encoder wav webp; do odin test "$p" > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }; done
 bash tests/image_fixtures.sh "$fx" > /dev/null
-files=$(ls "$fx"/*.{png,gif,bmp,tga,qoi,webp} 2>/dev/null)
+files=$(ls "$fx"/*.{png,jpg,gif,bmp,tga,qoi,webp} 2>/dev/null)
 
 echo "== against stb_image"
 # shellcheck disable=SC2086
@@ -54,6 +55,17 @@ HTML
 		k=$((k + 1))
 	done < <(chromium --headless=new --disable-gpu --virtual-time-budget=10000 --dump-dom "file://$PWD/$page" 2>/dev/null | grep -o 'FRAME:[A-Za-z0-9+/=]\+' | cut -d: -f2)
 }
+
+echo "== JPEG against libjpeg-turbo (identical)"
+if [ -d third_party/libjpeg-turbo ]; then
+	if [ ! -f .work/libjpeg-turbo/libturbojpeg.a ]; then
+		cmake -S third_party/libjpeg-turbo -B .work/libjpeg-turbo -DENABLE_SHARED=OFF -DCMAKE_BUILD_TYPE=Release > "$work/turbo.log" 2>&1
+		make -C .work/libjpeg-turbo -j8 turbojpeg-static >> "$work/turbo.log" 2>&1
+	fi
+	odin run tests/jpeg_compare.odin -file -o:speed -microarch:native -extra-linker-flags:-L.work/libjpeg-turbo -out:"$work/jpeg_compare" -- "$fx"/jpeg_*.jpg || fail=1
+else
+	echo "  skipped: bash tools/fetch_third_party.sh libjpeg-turbo"
+fi
 
 echo "== GIF animations against Chromium"
 if command -v chromium > /dev/null; then

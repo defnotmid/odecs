@@ -51,6 +51,22 @@ j jpeg_q100.jpg "$odd" -quality 100
 j jpeg_small.jpg "$src/small.png" -quality 70 2>/dev/null || cjpeg -quality 70 -outfile "$out/jpeg_small.jpg" <(magick "$src/small.png" ppm:-)
 m jpeg_cmyk.jpg "" "$src/odd.png" -colorspace CMYK -quality 90
 m jpeg_ycck.jpg "" "$src/odd.png" -colorspace CMYK -quality 90 -define jpeg:colorspace=ycck 2>/dev/null || true
+j jpeg_411.jpg "$ppm" -quality 85 -sample 4x1
+j jpeg_rgb.jpg "$odd" -quality 90 -rgb
+j jpeg_progressive_restart.jpg "$ppm" -quality 85 -progressive -restart 1
+j jpeg_arithmetic.jpg "$odd" -quality 85 -arithmetic
+j jpeg_optimized_odd.jpg "$odd" -quality 60 -optimize -sample 2x2
+# A true CMYK file (Adobe transform 0): ImageMagick writes YCCK, so the
+# transform byte (11 bytes into the Adobe segment's data) is set to 0.
+if [ ! -f "$out/jpeg_cmyk0.jpg" ]; then
+	cp "$out/jpeg_cmyk.jpg" "$out/jpeg_cmyk0.jpg"
+	at=$(grep -boa Adobe "$out/jpeg_cmyk0.jpg" | head -1 | cut -d: -f1)
+	printf '\x00' | dd of="$out/jpeg_cmyk0.jpg" bs=1 seek=$((at + 11)) conv=notrunc status=none
+fi
+# libjpeg-turbo's test images (tools/fetch_third_party.sh libjpeg-turbo).
+for f in testorig testimgint testimgari testorig12; do
+	[ -f "third_party/libjpeg-turbo/testimages/$f.jpg" ] && cp -n "third_party/libjpeg-turbo/testimages/$f.jpg" "$out/jpeg_lj_$f.jpg"
+done
 
 # GIF: static, interlaced, transparent, and animations with each disposal.
 m gif_static.gif "" "$src/odd.png" -colors 256

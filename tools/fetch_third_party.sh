@@ -24,6 +24,7 @@ refs=(
 	"alac         https://github.com/macosforge/alac.git               c38887c5c5e64a4b31108733bd79ca9b2496d987"
 	"ffmpeg       https://github.com/FFmpeg/FFmpeg.git                 946fcce07b6dcd0331c8cc609192aeff5e1924f8"
 	"libvpx       https://github.com/webmproject/libvpx.git            6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
+	"libjpeg-turbo https://github.com/libjpeg-turbo/libjpeg-turbo.git 4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 )
 
 fetch() { # name upstream commit
