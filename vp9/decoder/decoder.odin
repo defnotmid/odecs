@@ -56,6 +56,8 @@ Decoder :: struct {
 	cur:               ^Frame,
 	mi:                [dynamic]vp9.Mode_Info, // mi_rows x mi_cols, stride mi_cols
 	prev_mi:           [dynamic]vp9.Mode_Info, // the previous decoded frame's, for MV prediction
+	filter_cells:      [dynamic]vp9.Filter_Cell, // beside mi: what the loop filter reads
+	filter_levels:     vp9.Filter_Levels, // the current frame's, for filter_cells
 	prev_segment_ids:  [dynamic]u8,
 	above_partition:   [dynamic]u8,
 	above_nonzero:     [3][dynamic]u8,
@@ -98,6 +100,7 @@ destroy_decoder :: proc(d: ^Decoder) {
 	delete(d.tiles)
 	delete(d.mi)
 	delete(d.prev_mi)
+	delete(d.filter_cells)
 	delete(d.prev_segment_ids)
 	delete(d.above_partition)
 	for &a in d.above_nonzero do delete(a)
@@ -185,6 +188,7 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 	if h.width > 16384 || h.height > 16384 do return .Unsupported
 	allocate_frame(d) or_return
 	allocate_grids(d) or_return
+	d.filter_levels = vp9.filter_levels(&d.loop_filter, &d.segmentation)
 
 	// Probabilities: the frame context, then the compressed header's updates.
 	d.probs = d.contexts[h.frame_context_idx]
@@ -269,7 +273,7 @@ allocate_grids :: proc(d: ^Decoder) -> Error {
 	cells := h.mi_rows * h.mi_cols
 	if len(d.mi) != cells {
 		// A new size: previous motion vectors are not used (compute_image_size).
-		if resize(&d.mi, cells) != nil || resize(&d.prev_mi, cells) != nil || resize(&d.prev_segment_ids, cells) != nil do return .Out_Of_Memory
+		if resize(&d.mi, cells) != nil || resize(&d.filter_cells, cells) != nil || resize(&d.prev_mi, cells) != nil || resize(&d.prev_segment_ids, cells) != nil do return .Out_Of_Memory
 	}
 	if d.clear_segment_map {
 		for &s in d.prev_segment_ids do s = 0
@@ -302,15 +306,13 @@ Filter_Wave :: struct($T: typeid) {
 filter_frame :: proc(d: ^Decoder, $T: typeid) {
 	h := &d.h
 	f := vp9.Loop_Filter_Frame(T) {
-		mi        = d.mi[:],
-		mi_stride = h.mi_cols,
+		cells     = d.filter_cells[:],
 		mi_rows   = h.mi_rows,
 		mi_cols   = h.mi_cols,
 		ss_x      = d.ss_x,
 		ss_y      = d.ss_y,
 		bit_depth = d.bit_depth,
-		sharpness = d.loop_filter.sharpness,
-		levels    = vp9.filter_levels(&d.loop_filter, &d.segmentation),
+		limits    = vp9.filter_limits(d.loop_filter.sharpness),
 	}
 	for i in 0 ..< 3 {
 		f.planes[i] = plane(d.cur, i, T)

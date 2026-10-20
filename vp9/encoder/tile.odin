@@ -164,7 +164,11 @@ encode_block :: proc(t: ^Tile, r, c, size: int) {
 	}
 	m := vp9.Mode_Info{skip = !e.keyframe && !any_nonzero, mi_size = u8(size), tx_size = u8(tx), ref_frame = {e.keyframe ? vp9.INTRA_FRAME : vp9.LAST_FRAME, vp9.NONE}, y_mode = u8(mode), sub_modes = {u8(mode),u8(mode),u8(mode),u8(mode)}, sub_mvs = {{mv,mv,mv,mv}, {}}}
 	rows, cols := min(n8, e.mi_rows - r), min(n8, e.mi_cols - c)
-	for y in 0 ..< rows do for x in 0 ..< cols do e.mi[(r + y) * e.mi_cols + c + x] = m
+	cell := vp9.filter_cell(m, &e.filter_levels, 1, 1)
+	for y in 0 ..< rows do for x in 0 ..< cols {
+		e.mi[(r + y) * e.mi_cols + c + x] = m
+		e.filter_cells[(r + y) * e.mi_cols + c + x] = cell
+	}
 }
 
 @(private)

@@ -164,7 +164,11 @@ decode_block :: proc(t: ^Tile, r, c, subsize: int, $T: typeid) {
 	for i in 0 ..< 4 do m.sub_modes[i] = u8(b.sub_modes[i])
 	rows := min(int(vp9.NUM_8X8_BLOCKS_HIGH_LOOKUP[subsize]), h.mi_rows - r)
 	cols := min(int(vp9.NUM_8X8_BLOCKS_WIDE_LOOKUP[subsize]), h.mi_cols - c)
-	for y in 0 ..< rows do for x in 0 ..< cols do mi_at(d, r + y, c + x)^ = m
+	cell := vp9.filter_cell(m, &d.filter_levels, d.ss_x, d.ss_y)
+	for y in 0 ..< rows do for x in 0 ..< cols {
+		mi_at(d, r + y, c + x)^ = m
+		d.filter_cells[(r + y) * h.mi_cols + c + x] = cell
+	}
 }
 
 // ---- Mode info -----------------------------------------------------------------------

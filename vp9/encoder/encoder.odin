@@ -34,6 +34,8 @@ Encoder :: struct {
 	source: [3][]u8,
 	source_strides: [3]int,
 	mi: []vp9.Mode_Info,
+	filter_cells: []vp9.Filter_Cell, // beside mi: what the loop filter reads
+	filter_levels: vp9.Filter_Levels,
 	mi_cols, mi_rows, sb_cols, sb_rows: int,
 	probs: vp9.Probabilities,
 	forward: vp9.Forward_Transforms,
@@ -64,6 +66,9 @@ init_encoder :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
 	err: mem.Allocator_Error
 	e.mi, err = make([]vp9.Mode_Info, e.mi_cols * e.mi_rows)
 	if err != nil do return .Out_Of_Memory
+	e.filter_cells, err = make([]vp9.Filter_Cell, e.mi_cols * e.mi_rows)
+	if err != nil do return .Out_Of_Memory
+	e.filter_levels = encoder_filter_levels(e)
 	for p in 0 ..< 3 {
 		shift := p > 0 ? uint(1) : 0
 		aligned_w, aligned_h := e.sb_cols * 64 >> shift, e.sb_rows * 64 >> shift
@@ -165,7 +170,7 @@ destroy_encoder :: proc(e: ^Encoder) {
 		delete(t.b.data); delete(t.above_partition)
 		for a in t.above_nonzero do delete(a)
 	}
-	delete(e.tiles); delete(e.mi); delete(e.packet); delete(e.header.data)
+	delete(e.tiles); delete(e.mi); delete(e.filter_cells); delete(e.packet); delete(e.header.data)
 	e^ = {}
 }
 
