@@ -201,7 +201,7 @@ decode_slice :: proc(p: ^Picture, s: ^Slice) -> prores.Error {
 		blocks := mbs * (component == 0 ? 4 : chroma_blocks)
 		coeffs := coefficients[:blocks * 64]
 		intrinsics.mem_zero(raw_data(coeffs), len(coeffs) * size_of(i32))
-		r := init_reader(data[:sizes[component]])
+		r := common.bit_reader(data[:sizes[component]])
 		data = data[sizes[component]:]
 		decode_coefficients(&r, coeffs, uint(intrinsics.count_trailing_zeros(blocks)), p.scan) or_return
 		qmat := component == 0 ? p.luma_qmat : p.chroma_qmat
@@ -228,7 +228,7 @@ decode_slice :: proc(p: ^Picture, s: ^Slice) -> prores.Error {
 	}
 	if p.alpha_bits != 0 {
 		stride := p.strides[3]
-		r := init_reader(data[:sizes[3]])
+		r := common.bit_reader(data[:sizes[3]])
 		visible := min(16, p.rows - y)
 		decode_alpha(&r, p.planes[3][y * stride + x:], stride, mbs * 16, visible, p.alpha_bits, p.output.depth) or_return
 	}
@@ -237,59 +237,11 @@ decode_slice :: proc(p: ^Picture, s: ^Slice) -> prores.Error {
 
 // Big-endian bit cache: `cache` holds `count` unread bits MSB-first. Bytes
 // past the end read as zero; `left` going negative marks an overrun.
-@(private)
-Bit_Reader :: struct {
-	cache: u64,
-	count: int,
-	left:  int,
-	next:  int,
-	data:  []u8,
-}
-
-@(private)
-init_reader :: proc(data: []u8) -> Bit_Reader {
-	return {data = data, left = len(data) * 8}
-}
-
-@(private)
-refill :: #force_inline proc(r: ^Bit_Reader) {
-	if r.count > 56 do return
-	if r.next + 8 <= len(r.data) {
-		// Bits already cached past `count` are these same bits again.
-		v := u64(intrinsics.unaligned_load((^u64be)(raw_data(r.data[r.next:]))))
-		r.cache |= v >> uint(r.count)
-		r.next += (63 - r.count) >> 3
-		r.count |= 56
-		return
-	}
-	for r.count <= 56 {
-		b := r.next < len(r.data) ? r.data[r.next] : 0
-		r.cache |= u64(b) << uint(56 - r.count)
-		r.next += 1
-		r.count += 8
-	}
-}
-
-@(private)
-skip :: #force_inline proc(r: ^Bit_Reader, n: uint) {
-	r.cache <<= n
-	r.count -= int(n)
-	r.left -= int(n)
-}
-
-@(private)
-read :: #force_inline proc(r: ^Bit_Reader, n: uint) -> u32 {
-	refill(r)
-	v := u32(r.cache >> (64 - n)) if n > 0 else 0
-	skip(r, n)
-	return v
-}
-
 // One adaptive codeword: a Rice code with a short unary prefix, switching
 // to exp-Golomb for longer prefixes (codebook layout in prores.odin).
 @(private)
-read_codeword :: #force_inline proc(r: ^Bit_Reader, codebook: u8) -> u32 {
-	refill(r)
+read_codeword :: #force_inline proc(r: ^common.Bit_Reader, codebook: u8) -> u32 {
+	common.refill_bits(r)
 	switch_bits := u32(codebook & 3)
 	rice := uint(codebook >> 5)
 	exp_order := u32(codebook >> 2) & 7
@@ -301,20 +253,20 @@ read_codeword :: #force_inline proc(r: ^Bit_Reader, codebook: u8) -> u32 {
 			return 0
 		}
 		v := u32(r.cache >> (64 - n)) - 1 << exp_order + (switch_bits + 1) << rice
-		skip(r, uint(n))
+		common.skip_bits(r, int(n))
 		return v
 	}
-	skip(r, uint(q) + 1)
+	common.skip_bits(r, int(q) + 1)
 	if rice == 0 do return q
 	v := q << rice + u32(r.cache >> (64 - rice))
-	skip(r, rice)
+	common.skip_bits(r, int(rice))
 	return v
 }
 
 // Coefficients of one component of a slice, interleaved across its blocks:
 // every block's DC, then each scan position for every block in turn.
 @(private)
-decode_coefficients :: proc(r: ^Bit_Reader, out: []i32, log2_blocks: uint, scan: ^[64]u8) -> prores.Error {
+decode_coefficients :: proc(r: ^common.Bit_Reader, out: []i32, log2_blocks: uint, scan: ^[64]u8) -> prores.Error {
 	blocks := 1 << log2_blocks
 	// DC: the first absolutely, the rest as differences whose sign persists
 	// until a zero difference.
@@ -337,13 +289,13 @@ decode_coefficients :: proc(r: ^Bit_Reader, out: []i32, log2_blocks: uint, scan:
 	run, level: u32 = 4, 2
 	for {
 		if r.left <= 0 do break
-		refill(r)
+		common.refill_bits(r)
 		if r.left < 32 && r.cache >> uint(64 - r.left) == 0 do break
 		run = read_codeword(r, prores.RUN_CODEBOOKS[min(run, 15)])
 		pos += int(run) + 1
 		if pos >= limit do return .Invalid_Data
 		level = read_codeword(r, prores.LEVEL_CODEBOOKS[min(level, 9)]) + 1
-		negative := -i32(read(r, 1))
+		negative := -i32(common.read_bits(r, 1))
 		out[(pos & mask) << 6 + int(scan[pos >> log2_blocks])] = (i32(level) ~ negative) - negative
 	}
 	return r.left < 0 ? .Invalid_Data : .None
@@ -355,7 +307,7 @@ decode_coefficients :: proc(r: ^Bit_Reader, out: []i32, log2_blocks: uint, scan:
 // inside the picture (then only zero padding follows); the uncoded rows
 // below it repeat the last value.
 @(private)
-decode_alpha :: proc(r: ^Bit_Reader, dst: [^]u16, stride, width, visible_rows, bits: int, depth: uint) -> prores.Error {
+decode_alpha :: proc(r: ^common.Bit_Reader, dst: [^]u16, stride, width, visible_rows, bits: int, depth: uint) -> prores.Error {
 	mask := u32(1) << uint(bits) - 1
 	short := uint(bits == 16 ? 7 : 4)
 	total, visible := width * 16, width * visible_rows
@@ -368,19 +320,19 @@ decode_alpha :: proc(r: ^Bit_Reader, dst: [^]u16, stride, width, visible_rows, b
 	scaled :: #force_inline proc(v: u32, bits: int, depth: uint) -> u16 {
 		return bits == 16 ? u16(v >> (16 - depth)) : u16(v << (depth - 8) | v >> (16 - depth))
 	}
-	ended :: #force_inline proc(r: ^Bit_Reader, at, total, visible: int) -> bool {
+	ended :: #force_inline proc(r: ^common.Bit_Reader, at, total, visible: int) -> bool {
 		if at >= total do return true
 		if at < visible do return false
-		refill(r)
+		common.refill_bits(r)
 		return r.left <= 0 || r.left < 32 && r.cache >> uint(64 - r.left) == 0
 	}
 	outer: for !ended(r, at, total, visible) {
 		for {
 			step: u32
-			if read(r, 1) == 1 {
-				step = read(r, uint(bits))
+			if common.read_bits(r, 1) == 1 {
+				step = common.read_bits(r, bits)
 			} else {
-				v := read(r, short)
+				v := common.read_bits(r, int(short))
 				step = (v + 2) >> 1
 				if v & 1 != 0 do step = -step
 			}
@@ -388,10 +340,10 @@ decode_alpha :: proc(r: ^Bit_Reader, dst: [^]u16, stride, width, visible_rows, b
 			put(dst, stride, width, at, scaled(value, bits, depth))
 			at += 1
 			if ended(r, at, total, visible) do break outer
-			if read(r, 1) == 0 do break
+			if common.read_bits(r, 1) == 0 do break
 		}
-		run := int(read(r, 4))
-		if run == 0 do run = int(read(r, 11))
+		run := int(common.read_bits(r, 4))
+		if run == 0 do run = int(common.read_bits(r, 11))
 		v := scaled(value, bits, depth)
 		end := min(at + run, total)
 		for ; at < end; at += 1 do put(dst, stride, width, at, v)

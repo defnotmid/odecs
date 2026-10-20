@@ -16,6 +16,11 @@ Bit_Reader :: struct {
 	data:  []u8,
 }
 
+// A reader at the first bit of data.
+bit_reader :: #force_inline proc "contextless" (data: []u8) -> Bit_Reader {
+	return {data = data, left = len(data) * 8}
+}
+
 refill_bits :: #force_inline proc(r: ^Bit_Reader) {
 	if r.count > 56 do return
 	if r.next + 8 <= len(r.data) {
