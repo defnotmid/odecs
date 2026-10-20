@@ -13,6 +13,7 @@ import gif "../gif"
 import jpeg "../jpeg"
 import png_encoder "../png/encoder"
 import webp "../webp"
+import "base:runtime"
 import core_image "core:image"
 @(require) import "core:image/png"
 @(require) import "core:image/qoi"
@@ -93,8 +94,8 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 		if e != .None do return i, e == .Unsupported ? .Unsupported : .Invalid
 		i.width, i.height, i.has_alpha = b.width, b.height, b.has_alpha
 	case .PNG, .TGA, .QOI:
-		img, e := core_image.load_from_bytes(data, {.info})
-		defer if e == nil || i.format != .TGA do core_image.destroy(img) // see decode_core
+		img, e := core_image.load_from_bytes(data, {.info}, runtime.heap_allocator())
+		defer if e == nil || i.format != .TGA do core_image.destroy(img, runtime.heap_allocator()) // see decode_core
 		if e != nil do return i, .Invalid
 		i.width, i.height, i.has_alpha = img.width, img.height, img.channels == 2 || img.channels == 4
 	}
@@ -160,8 +161,11 @@ write_png :: png_encoder.write_file
 // the caller to free; TGA has freed it already and returns the pointer anyway.
 @(private)
 decode_core :: proc(data: []u8, format: Format, allocator := context.allocator) -> (img: Image, err: Error) {
-	src, e := core_image.load_from_bytes(data, {}, allocator)
-	defer if e == nil || format != .TGA do core_image.destroy(src, allocator)
+	// core:image's buffers are scratch: on the heap and freed here, so an
+	// arena given as `allocator` holds only the result.
+	scratch := runtime.heap_allocator()
+	src, e := core_image.load_from_bytes(data, {}, scratch)
+	defer if e == nil || format != .TGA do core_image.destroy(src, scratch)
 	if e != nil do return img, .Invalid
 	n := src.width * src.height
 	ch := src.channels
@@ -181,19 +185,16 @@ convert_samples :: proc(dst: []u8, src: []$S, channels: int) #no_bounds_check {
 	byte_of :: #force_inline proc "contextless" (v: S) -> u8 {
 		when S == u16 {return u8(v >> 8)} else {return u8(v)}
 	}
-	for i in 0 ..< len(dst) / 4 {
-		s := src[i * channels:]
-		r, g, b, a: u8
-		switch channels {
-		case 1:
-			r = byte_of(s[0]); g, b, a = r, r, 255
-		case 2:
-			r = byte_of(s[0]); g, b, a = r, r, byte_of(s[1])
-		case 3:
-			r, g, b, a = byte_of(s[0]), byte_of(s[1]), byte_of(s[2]), 255
-		case:
-			r, g, b, a = byte_of(s[0]), byte_of(s[1]), byte_of(s[2]), byte_of(s[3])
-		}
-		dst[i * 4], dst[i * 4 + 1], dst[i * 4 + 2], dst[i * 4 + 3] = r, g, b, a
+	// The layout is fixed for the image: one loop per channel count.
+	out := ([^][4]u8)(raw_data(dst))[:len(dst) / 4]
+	switch channels {
+	case 1:
+		for &p, i in out {v := byte_of(src[i]); p = {v, v, v, 255}}
+	case 2:
+		for &p, i in out {v := byte_of(src[i * 2]); p = {v, v, v, byte_of(src[i * 2 + 1])}}
+	case 3:
+		for &p, i in out do p = {byte_of(src[i * 3]), byte_of(src[i * 3 + 1]), byte_of(src[i * 3 + 2]), 255}
+	case:
+		for &p, i in out do p = {byte_of(src[i * 4]), byte_of(src[i * 4 + 1]), byte_of(src[i * 4 + 2]), byte_of(src[i * 4 + 3])}
 	}
 }
