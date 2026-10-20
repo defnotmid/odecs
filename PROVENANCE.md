@@ -87,6 +87,14 @@ behaviour, so the output is identical to libjpeg-turbo at its defaults:
 No libjpeg-turbo code is used. The Huffman lookup tables follow the approach
 stb_image takes (public domain).
 
+### Vorbis
+
+`vorbis` is our own decoder, written from the Vorbis I specification in
+libvorbis' `doc/` (the LaTeX sources). `vorbis/tables.odin` copies the
+specification's floor 1 inverse-dB table. libvorbis is the oracle and the
+speed to meet. No libvorbis code is used. The Ogg granule handling in
+`audio` follows the specification's Ogg encapsulation appendix.
+
 ### H.265
 
 The decoder began as a port of gen2brain/h265's `hevc/*.go` modules, cross-referenced with oxideav-h265.

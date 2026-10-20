@@ -22,6 +22,7 @@ Audio:
 - `flac`: FLAC decoding, 4 to 32 bits ([README](flac/README.md)).
 - `alac`: Apple Lossless (ALAC) decoding, 16/20/24/32-bit, 1 to 8 channels ([README](alac/README.md)).
 - `mp3`: MPEG-1/2/2.5 Layer III decoding ([README](mp3/README.md)).
+- `vorbis`: Vorbis I decoding ([README](vorbis/README.md)).
 
 Images:
 - `image`: one decode path for PNG, JPEG, BMP, TGA, QOI, GIF and WebP to RGBA8, and PNG writing.

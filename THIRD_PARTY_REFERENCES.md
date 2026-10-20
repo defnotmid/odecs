@@ -25,6 +25,8 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [FFmpeg](https://github.com/FFmpeg/FFmpeg) n9.0.2 | oracle: decode reference and speed baseline (`tests/decode_benchmark.sh` builds it decoders-only, LGPL) | `third_party/ffmpeg` | `946fcce07b6dcd0331c8cc609192aeff5e1924f8` | 2026-09-18 | LGPL-2.1-or-later |
 | [libvpx](https://github.com/webmproject/libvpx) v1.17.0 | oracle: VP9 decode reference and speed baseline | `third_party/libvpx` | `6df3ec34557879fff673706f4a1d9fbd0f3a6f0e` | 2026-08-20 | BSD-3-Clause + patent grant |
 | [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 3.1.2 | oracle: JPEG decode reference and speed baseline; fixtures (its test images) | `third_party/libjpeg-turbo` | `4e151a4ad91001b3aa8c2ece2205c15f487ce320` | 2025-08-26 | IJG + BSD-3-Clause + zlib |
+| [libvorbis](https://gitlab.xiph.org/xiph/vorbis) 1.3.7 | oracle: Vorbis decode reference and speed baseline; the Vorbis I specification (`doc/`) | `third_party/libvorbis` | `0657aee69dec8508a0011f47f3b69d7538e9d262` | 2020-07-03 | BSD-3-Clause |
+| [libogg](https://gitlab.xiph.org/xiph/ogg) 1.3.6 | builds the libvorbis oracle | `third_party/libogg` | `be05b13e98b048f0b5a0f5fa8ce514d56db5f822` | 2025-06-16 | BSD-3-Clause |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
@@ -56,3 +58,5 @@ against.
 | `third_party/libvpx/LICENSE` | `8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615` |
 | `third_party/libvpx/PATENTS` | `cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c` |
 | `third_party/libjpeg-turbo/LICENSE.md` | `2189dc45a8fe96204069f8124caa53a148dfdc193f50f584c6ca7849a6072872` |
+| `third_party/libvorbis/COPYING` | `ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a` |
+| `third_party/libogg/COPYING` | `d2ab5758336489da61c12cc5bb757da5339c4ae9001f9bb0562b4370249af814` |

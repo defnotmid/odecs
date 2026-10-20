@@ -25,6 +25,8 @@ refs=(
 	"ffmpeg       https://github.com/FFmpeg/FFmpeg.git                 946fcce07b6dcd0331c8cc609192aeff5e1924f8"
 	"libvpx       https://github.com/webmproject/libvpx.git            6df3ec34557879fff673706f4a1d9fbd0f3a6f0e"
 	"libjpeg-turbo https://github.com/libjpeg-turbo/libjpeg-turbo.git 4e151a4ad91001b3aa8c2ece2205c15f487ce320"
+	"libvorbis    https://gitlab.xiph.org/xiph/vorbis.git            0657aee69dec8508a0011f47f3b69d7538e9d262"
+	"libogg       https://gitlab.xiph.org/xiph/ogg.git               be05b13e98b048f0b5a0f5fa8ce514d56db5f822"
 )
 
 fetch() { # name upstream commit
