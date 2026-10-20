@@ -1,8 +1,8 @@
 package main
 
-import aac "../aac"
-import decoder "../aac/decoder"
-import encoder "../aac/encoder"
+import aac "../audio/aac"
+import decoder "../audio/aac/decoder"
+import encoder "../audio/aac/encoder"
 import common "../common"
 import "core:fmt"
 import "core:os"

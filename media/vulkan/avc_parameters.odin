@@ -1,6 +1,6 @@
 package media_vulkan
 
-import avc "../../h264"
+import avc "../../video/h264"
 import vk "vendor:vulkan"
 
 // Fill this in its final location: the Vulkan structs point into this storage.

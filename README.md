@@ -10,33 +10,33 @@ native codecs as the software path. MIT licensed ([LICENSE](LICENSE)).
 ## Packages
 
 Video:
-- `h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0 encoding and 4:2:0 or 4:2:2 decoding at 8 to 10 bits, with encoder checkpoints for editing ([README](h264/README.md)).
-- `h265/{encoder,decoder}`: H.265 Main, Main 10 and range extensions; HEVC with an alpha layer, encoded and decoded ([README](h265/README.md)).
-- `prores/decoder`: Apple ProRes 422 and 4444/XQ with alpha ([README](prores/README.md)).
-- `vp9/{encoder,decoder}`: VP9 decoding, profiles 0–3 with alpha streams; encoding, profile 0 with alpha ([README](vp9/README.md)).
-- `av1`: AV1 syntax for hardware decoding through Vulkan Video ([README](av1/README.md)).
+- `video/h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0 encoding and 4:2:0 or 4:2:2 decoding at 8 to 10 bits, with encoder checkpoints for editing ([README](video/h264/README.md)).
+- `video/h265/{encoder,decoder}`: H.265 Main, Main 10 and range extensions; HEVC with an alpha layer, encoded and decoded ([README](video/h265/README.md)).
+- `video/prores/decoder`: Apple ProRes 422 and 4444/XQ with alpha ([README](video/prores/README.md)).
+- `video/vp9/{encoder,decoder}`: VP9 decoding, profiles 0–3 with alpha streams; encoding, profile 0 with alpha ([README](video/vp9/README.md)).
+- `video/av1`: AV1 syntax for hardware decoding through Vulkan Video ([README](video/av1/README.md)).
 
 Audio:
-- `aac/{encoder,decoder}`: AAC-LC, 1 to 8 channels ([README](aac/README.md)).
-- `opus`: Opus decoding (SILK, hybrid, CELT), with loss concealment, FEC, DTX and surround ([README](opus/README.md)).
-- `flac`: FLAC decoding, 4 to 32 bits ([README](flac/README.md)).
-- `alac`: Apple Lossless (ALAC) decoding, 16/20/24/32-bit, 1 to 8 channels ([README](alac/README.md)).
-- `mp3`: MPEG-1/2/2.5 Layer III decoding ([README](mp3/README.md)).
-- `vorbis`: Vorbis I decoding ([README](vorbis/README.md)).
+- `audio/aac/{encoder,decoder}`: AAC-LC, 1 to 8 channels ([README](audio/aac/README.md)).
+- `audio/opus`: Opus decoding (SILK, hybrid, CELT), with loss concealment, FEC, DTX and surround ([README](audio/opus/README.md)).
+- `audio/flac`: FLAC decoding, 4 to 32 bits ([README](audio/flac/README.md)).
+- `audio/alac`: Apple Lossless (ALAC) decoding, 16/20/24/32-bit, 1 to 8 channels ([README](audio/alac/README.md)).
+- `audio/mp3`: MPEG-1/2/2.5 Layer III decoding ([README](audio/mp3/README.md)).
+- `audio/vorbis`: Vorbis I decoding ([README](audio/vorbis/README.md)).
+- `audio/wav`: WAV, RF64 and RIFX reading; 16-bit PCM and float writing ([README](audio/wav/README.md)).
 
 Images:
 - `image`: one decode path for PNG, JPEG, BMP, TGA, QOI, GIF and WebP to RGBA8, and PNG writing.
-- `jpeg`: baseline and progressive JPEG, identical to libjpeg-turbo and as fast ([README](jpeg/README.md)).
-- `gif`: GIF decoding, the first frame or the animation composited as browsers show it ([README](gif/README.md)).
-- `bmp`: BMP decoding by stb_image's rules ([README](bmp/README.md)).
-- `png/encoder`: PNG writing ([README](png/README.md)).
-- `webp`: WebP lossy, lossless, alpha and animation to RGBA8 ([README](webp/README.md)).
+- `image/jpeg`: baseline and progressive JPEG, identical to libjpeg-turbo and as fast ([README](image/jpeg/README.md)).
+- `image/gif`: GIF decoding, the first frame or the animation composited as browsers show it ([README](image/gif/README.md)).
+- `image/bmp`: BMP decoding by stb_image's rules ([README](image/bmp/README.md)).
+- `image/png/encoder`: PNG writing ([README](image/png/README.md)).
+- `image/webp`: WebP lossy, lossless, alpha and animation to RGBA8 ([README](image/webp/README.md)).
 
 Containers:
-- `mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](mp4/README.md)).
-- `webm`: WebM/Matroska reading, and VP9 WebM writing with alpha ([README](webm/README.md)).
-- `ogg`: Ogg (for Ogg Opus and Ogg Vorbis) ([README](ogg/README.md)).
-- `wav`: WAV, RF64 and RIFX reading; 16-bit PCM and float writing ([README](wav/README.md)).
+- `container/mp4`: MP4/M4A/MOV reading (including fragmented `moof`/`traf`) and writing ([README](container/mp4/README.md)).
+- `container/webm`: WebM/Matroska reading, and VP9 WebM writing with alpha ([README](container/webm/README.md)).
+- `container/ogg`: Ogg (for Ogg Opus and Ogg Vorbis) ([README](container/ogg/README.md)).
 
 Putting them together:
 - `media`: one encode/decode API over the native codecs and the hardware ones, choosing what the machine supports ([README](media/README.md)).
@@ -86,7 +86,7 @@ Requirements:
 - The SPIR-V for the compute shaders is committed; `shaders/build.sh`
   rebuilds it with `slangc`.
 
-Unit tests run with `odin test`, for example `odin test vp9/encoder`.
+Unit tests run with `odin test`, for example `odin test video/vp9/encoder`.
 The `tests/` scripts compare odecs with reference decoders and encoders
 (FFmpeg, libvpx, libwebp and others); they are development tools and need
 those binaries installed.

@@ -8,10 +8,10 @@
 package alpha_compare
 
 import common "../common"
-import mp4 "../mp4"
-import webm "../webm"
-import prores "../prores/decoder"
-import vp9 "../vp9/decoder"
+import mp4 "../container/mp4"
+import webm "../container/webm"
+import prores "../video/prores/decoder"
+import vp9 "../video/vp9/decoder"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

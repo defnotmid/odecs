@@ -1,6 +1,6 @@
 package main
 
-import enc "../aac/encoder"
+import enc "../audio/aac/encoder"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

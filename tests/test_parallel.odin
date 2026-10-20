@@ -1,9 +1,9 @@
 package main
 
 import common "../common"
-import h264 "../h264"
-import avc_dec "../h264/decoder"
-import avc_enc "../h264/encoder"
+import h264 "../video/h264"
+import avc_dec "../video/h264/decoder"
+import avc_enc "../video/h264/encoder"
 import "core:fmt"
 import "core:math"
 import "core:os"

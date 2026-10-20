@@ -15,7 +15,7 @@ fail=0
 pass() { printf '  %-48s ok\n' "$1"; }
 bad() { printf '  %-48s FAIL\n' "$1"; fail=1; }
 
-odin test webm
+odin test container/webm
 odin test video -o:speed
 odin build tests/movie_equal.odin -file -o:speed -out:"$work/movie_equal"
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"

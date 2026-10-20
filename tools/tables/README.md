@@ -7,12 +7,12 @@ VP9's tables come from its specification's text.
 
 ```sh
 odin build tools/tables -out:.work/tables
-.work/tables opus > opus/tables.odin
-.work/tables silk > opus/silk_tables.odin
-.work/tables webp > webp/tables.odin
-.work/tables mp3  > mp3/tables.odin
-.work/tables h265 > h265/scan_tables.odin
-.work/tables vp9 .work/vp9-spec.txt > vp9/tables.odin
+.work/tables opus > audio/opus/tables.odin
+.work/tables silk > audio/opus/silk_tables.odin
+.work/tables webp > image/webp/tables.odin
+.work/tables mp3  > audio/mp3/tables.odin
+.work/tables h265 > video/h265/scan_tables.odin
+.work/tables vp9 .work/vp9-spec.txt > video/vp9/tables.odin
 ```
 
 The C generators take the `third_party` directory as an optional second

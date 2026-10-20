@@ -1,6 +1,6 @@
 package media_vulkan
 
-import avc "../../h264"
+import avc "../../video/h264"
 @(require) import "core:os"
 import "core:testing"
 

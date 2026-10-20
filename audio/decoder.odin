@@ -1,12 +1,12 @@
 package audio
 
-import aac "../aac"
-import aacd "../aac/decoder"
-import alac "../alac"
-import flac "../flac"
-import mp3 "../mp3"
-import opus "../opus"
-import vorbis "../vorbis"
+import aac "./aac"
+import aacd "./aac/decoder"
+import alac "./alac"
+import flac "./flac"
+import mp3 "./mp3"
+import opus "./opus"
+import vorbis "./vorbis"
 
 // The audio codecs' packet decoding, the one implementation: Reader decodes
 // through it, and so does media's native provider. A packet's PCM comes back

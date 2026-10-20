@@ -5,7 +5,7 @@
 // whole file in memory. Mixing down and resampling are the caller's.
 package audio
 
-import ogg "../ogg"
+import ogg "../container/ogg"
 import "base:intrinsics"
 import "core:bytes"
 

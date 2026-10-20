@@ -5,7 +5,7 @@
 //   taskset -c 23 /tmp/odecs-movie-timing [W H FRAMES]
 package movie_timing
 
-import mp4 "../mp4"
+import mp4 "../container/mp4"
 import media "../media"
 import native "../media/native"
 import video "../video"

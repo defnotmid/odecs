@@ -1,15 +1,15 @@
 package video
 
-import aac "../aac"
+import aac "../audio/aac"
 import audio "../audio"
 import "core:io"
-import mp4 "../mp4"
-import hevce "../h265/encoder"
+import mp4 "../container/mp4"
+import hevce "./h265/encoder"
 import media "../media"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
-import webm "../webm"
+import webm "../container/webm"
 
 Video_Codec :: enum u8 {
 	H264,

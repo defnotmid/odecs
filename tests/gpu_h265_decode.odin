@@ -1,7 +1,7 @@
 package main
 
 import vulkan "../media/vulkan"
-import h264 "../h264"
+import h264 "../video/h264"
 import "core:fmt"
 import "core:os"
 

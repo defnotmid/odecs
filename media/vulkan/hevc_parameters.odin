@@ -1,7 +1,7 @@
 package media_vulkan
 
-import shared "../../h265"
-import hevc "../../h265/decoder"
+import shared "../../video/h265"
+import hevc "../../video/h265/decoder"
 import vk "vendor:vulkan"
 
 // Stable backing storage for the pointers consumed by Vulkan session creation.

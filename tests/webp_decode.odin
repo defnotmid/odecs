@@ -7,7 +7,7 @@
 package main
 
 import "../common"
-import webp "../webp"
+import webp "../image/webp"
 import "core:fmt"
 import "core:math"
 import "core:os"

@@ -9,7 +9,7 @@
 //   /tmp/odecs-mp3-compare FILE [REF.pcm|REF.f32]
 package mp3_compare
 
-import mp3 "../mp3"
+import mp3 "../audio/mp3"
 import "core:fmt"
 import "core:math"
 import "core:os"

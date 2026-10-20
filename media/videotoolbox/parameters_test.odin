@@ -1,8 +1,8 @@
 package media_videotoolbox
 
-import avc "../../h264"
-import avcd "../../h264/decoder"
-import hevc "../../h265/decoder"
+import avc "../../video/h264"
+import avcd "../../video/h264/decoder"
+import hevc "../../video/h265/decoder"
 import "core:slice"
 import "core:testing"
 

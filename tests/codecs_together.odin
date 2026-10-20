@@ -1,12 +1,12 @@
 // Compile gate: native codecs and both common providers coexist.
 // odin check tests/codecs_together.odin -file
 package main
-import aacd "../aac/decoder"
-import aace "../aac/encoder"
-import h264d "../h264/decoder"
-import h264e "../h264/encoder"
-import h265d "../h265/decoder"
-import h265e "../h265/encoder"
+import aacd "../audio/aac/decoder"
+import aace "../audio/aac/encoder"
+import h264d "../video/h264/decoder"
+import h264e "../video/h264/encoder"
+import h265d "../video/h265/decoder"
+import h265e "../video/h265/encoder"
 import media "../media"
 import native "../media/native"
 import vulkan "../media/vulkan"

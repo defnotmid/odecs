@@ -1,6 +1,6 @@
 package main
 
-import avc_dec "../h264/decoder"
+import avc_dec "../video/h264/decoder"
 import "core:fmt"
 import "core:os"
 import "core:time"

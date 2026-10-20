@@ -18,10 +18,10 @@ platforms, so it can be listed everywhere.
 | ProRes decode | 422 Proxy/LT/Standard/HQ (10-bit), 4444/XQ (12-bit) with alpha, interlaced | Unsupported | Unsupported |
 | VP9 decode | Profiles 0–3, 8/10/12-bit, 4:2:0/4:2:2/4:4:4/sRGB, alpha stream | Unsupported | Unsupported |
 | FLAC decode | RFC 9639: 4–32-bit, 1–8 channels, every subframe type and stereo mode | Unsupported | Unsupported |
-| ALAC decode | 16/20/24/32-bit, 1–8 channels (MPEG/AAC canonical order); see [`alac`](../alac/README.md) | Unsupported | Unsupported |
+| ALAC decode | 16/20/24/32-bit, 1–8 channels (MPEG/AAC canonical order); see [`alac`](../audio/alac/README.md) | Unsupported | Unsupported |
 | MP3 decode | MPEG-1/2/2.5 Layer III, mono/stereo (Layers I/II and free format refused) | Unsupported | Unsupported |
-| Opus decode | SILK, hybrid and CELT at 48 kHz, DTX, multistream up to 255 channels (Opus mapping order); see [`opus`](../opus/README.md) | Unsupported | Unsupported |
-| AV1 decode | Unsupported (hardware only) | Main 4:2:0, 8/10-bit, host output; see [`av1`](../av1/README.md) | Unsupported |
+| Opus decode | SILK, hybrid and CELT at 48 kHz, DTX, multistream up to 255 channels (Opus mapping order); see [`opus`](../audio/opus/README.md) | Unsupported | Unsupported |
+| AV1 decode | Unsupported (hardware only) | Main 4:2:0, 8/10-bit, host output; see [`av1`](../video/av1/README.md) | Unsupported |
 
 Hardware capabilities depend on the actual device, driver, dimensions, profile,
 bit depth, formats and queue operations. Driver support is separate from
@@ -207,7 +207,7 @@ filter waves. Neither codec has an encoder.
 
 `decode` accepts complete NAL units or complete Annex-B units/streams, and AAC
 ADTS, raw AAC or LOAS packets. Packet fragments, container demuxing and muxing
-are outside this layer: [`mp4`](../mp4/README.md)
+are outside this layer: [`mp4`](../container/mp4/README.md)
 muxes/demuxes MP4, and [`video`](../video/README.md) joins both for
 RGBA/PCM files. POC describes codec picture order; video timestamps, time
 bases and source/edit metadata belong to the caller. Do not treat POC as a
@@ -226,7 +226,7 @@ Set `Config.frame_samples` to 960 or 1024; zero resolves to 1024. Configure a
 standard sample rate and 1..8 channels before opening. Output follows canonical
 AAC front/side/back/LFE element order, with left/right within each CPE. Standard
 eight-channel configuration 7 is wide 7.1; seven channels use a PCE. See the
-[native AAC API](../aac/README.md) for each standard layout and further tools.
+[native AAC API](../audio/aac/README.md) for each standard layout and further tools.
 
 `Config.audio_transport` selects encoder `ADTS`, `Raw` or `LOAS` framing.
 ADTS encoding with N=960 returns `Unsupported` during admission; Raw/LOAS can

@@ -1,7 +1,7 @@
 package media_native
 
 import media ".."
-import avcd "../../h264/decoder"
+import avcd "../../video/h264/decoder"
 import "base:runtime"
 import "core:mem"
 import "core:testing"

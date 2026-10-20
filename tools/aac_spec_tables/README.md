@@ -16,7 +16,7 @@ malformed extraction fails; it never fills a missing value from current code.
 odin build tools/aac_spec_tables -out:.work/aac-lc-complete/aac-spec-tables
 .work/aac-lc-complete/aac-spec-tables \
   .work/aac-lc-complete/ISO14496-3.txt \
-  aac/tables.odin \
+  audio/aac/tables.odin \
   .work/aac-lc-complete/normative-tables.odin
 sha256sum .work/aac-lc-complete/ISO14496-3.pdf \
   .work/aac-lc-complete/ISO14496-3.txt \

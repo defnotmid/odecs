@@ -1,17 +1,17 @@
 package media_native
 
 import media ".."
-import aac "../../aac"
+import aac "../../audio/aac"
 import audio "../../audio"
-import aace "../../aac/encoder"
+import aace "../../audio/aac/encoder"
 import common "../../common"
-import avcd "../../h264/decoder"
-import avce "../../h264/encoder"
-import hevcd "../../h265/decoder"
-import hevce "../../h265/encoder"
-import proresd "../../prores/decoder"
-import vp9d "../../vp9/decoder"
-import vp9e "../../vp9/encoder"
+import avcd "../../video/h264/decoder"
+import avce "../../video/h264/encoder"
+import hevcd "../../video/h265/decoder"
+import hevce "../../video/h265/encoder"
+import proresd "../../video/prores/decoder"
+import vp9d "../../video/vp9/decoder"
+import vp9e "../../video/vp9/encoder"
 
 // The binding is read at probe/open. Each session snapshots its geometry and
 // borrows only the caller's persistent pool until close. Calls remain serial

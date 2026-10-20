@@ -9,8 +9,8 @@
 //   fuzz VECTOR.bit FILE.opus SURROUND.opus [ROUNDS]
 package main
 
-import ogg "../ogg"
-import opus "../opus"
+import ogg "../container/ogg"
+import opus "../audio/opus"
 import "core:bytes"
 import "core:fmt"
 import "core:io"

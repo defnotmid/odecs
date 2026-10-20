@@ -17,7 +17,7 @@ the driver; decoding through this package does not run the native pixel decoder.
 | H.264 decode | Baseline/Main/High, progressive 8-bit 4:2:0, admitted native syntax |
 | HEVC encode | Main 8-bit / Main10 10-bit, progressive 4:2:0, constant QP, IDR/P pictures |
 | HEVC decode | Main 8-bit / Main10 8 or 10-bit, progressive 4:2:0, admitted native syntax |
-| AV1 decode | Main 8 or 10-bit 4:2:0, host output; syntax from `av1`; see [its scope](../../av1/README.md) |
+| AV1 decode | Main 8 or 10-bit 4:2:0, host output; syntax from `av1`; see [its scope](../../video/av1/README.md) |
 
 Host decode keeps `DECODE_DEPTH` (3; `-define:ODECS_DECODE_DEPTH=n`) pictures
 in flight, each with its own output image, bitstream and readback buffers.

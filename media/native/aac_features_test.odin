@@ -1,9 +1,9 @@
 package media_native
 
 import media ".."
-import aac "../../aac"
-import aacd "../../aac/decoder"
-import aace "../../aac/encoder"
+import aac "../../audio/aac"
+import aacd "../../audio/aac/decoder"
+import aace "../../audio/aac/encoder"
 import "core:mem"
 import "core:slice"
 import "core:testing"

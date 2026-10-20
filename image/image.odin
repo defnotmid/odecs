@@ -7,12 +7,12 @@
 // Writing is PNG (png/encoder).
 package odecs_image
 
-import bmp "../bmp"
+import bmp "./bmp"
 import common "../common"
-import gif "../gif"
-import jpeg "../jpeg"
-import png_encoder "../png/encoder"
-import webp "../webp"
+import gif "./gif"
+import jpeg "./jpeg"
+import png_encoder "./png/encoder"
+import webp "./webp"
 import "base:intrinsics"
 import "base:runtime"
 import core_image "core:image"

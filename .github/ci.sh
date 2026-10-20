@@ -43,20 +43,20 @@ imports() {
 		echo "$p"
 		for f in "$p"/*.odin; do
 			case "$f" in *_test.odin) continue ;; esac
-			for rel in $(grep -oE '^(@\(require\) )?import( [a-z_0-9]+)? "\.\.[^"]*"' "$f" | grep -oE '"[^"]+"' | tr -d '"'); do
+			for rel in $(grep -oE '^(@\(require\) )?import( [a-z_0-9]+)? "\.\.?(/[^"]*)?"' "$f" | grep -oE '"[^"]+"' | tr -d '"'); do
 				queue+=("$(normal "$p/$rel")")
 			done
 		done
 	done
 }
 
-# The facades stay apart: audio links no media or video code, and image no
-# audio, media or video code.
+# The families stay apart: audio links no media, video or image code, and image
+# no audio, video, media or container code.
 layers() {
 	local bad
-	bad=$(imports audio | grep -E '^(media|video|image|h264|h265|vp9|prores|av1)(/|$)')
+	bad=$(imports audio | grep -E '^(media|video|image)(/|$)')
 	[ -z "$bad" ] || { echo "audio imports: $bad"; return 1; }
-	bad=$(imports image | grep -E '^(media|video|audio|h264|h265|vp9|prores|av1|aac|flac|mp3|opus|vorbis|alac)(/|$)')
+	bad=$(imports image | grep -E '^(media|video|audio|container)(/|$)')
 	[ -z "$bad" ] || { echo "image imports: $bad"; return 1; }
 }
 

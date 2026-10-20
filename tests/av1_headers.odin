@@ -4,7 +4,7 @@ package main
 // trace_headers element names, one "name value" per line and "frame" before
 // each header, for tests/av1_check.sh to compare with the trace.
 
-import av1 "../av1"
+import av1 "../video/av1"
 import "core:fmt"
 import "core:os"
 

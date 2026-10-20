@@ -1,6 +1,6 @@
 package media_vulkan
 
-import hevc "../../h265/decoder"
+import hevc "../../video/h265/decoder"
 import "core:slice"
 import vk "vendor:vulkan"
 

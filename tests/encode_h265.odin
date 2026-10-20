@@ -1,7 +1,7 @@
 package main
 
 import common "../common"
-import h265 "../h265/encoder"
+import h265 "../video/h265/encoder"
 import "core:fmt"
 import "core:os"
 import "core:strconv"

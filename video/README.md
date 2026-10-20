@@ -1,7 +1,7 @@
 # Video: RGBA and PCM to and from MP4 and WebM
 
 `video` is a thin layer over [`media`](../media/README.md) and
-the [MP4](../mp4/README.md) and [WebM](../webm/README.md)
+the [MP4](../container/mp4/README.md) and [WebM](../container/webm/README.md)
 containers. It takes RGBA8 frames and interleaved `f32` PCM and writes an MP4
 with H.264/H.265 and AAC-LC tracks, or a VP9 WebM. It also reads such files
 (and many others) back as RGBA8 frames and PCM. Everything is native Odin.
@@ -72,7 +72,7 @@ video.destroy(&w)
   (`base_q_idx = 5 * qp`, video only: audio is `Unsupported`). With
   `transparency = .Straight` the alpha travels as a second VP9 stream in
   BlockAdditional 1, which Chrome, Firefox and Edge composite. Files are
-  still several times larger than libvpx's (see `vp9/encoder`).
+  still several times larger than libvpx's (see `video/vp9/encoder`).
 - **Transparency:** `transparency = .Premultiplied` or `.Straight` keeps alpha
   as an H.265 auxiliary alpha layer (native encoder; Annex F, laid out as
   Apple's VideoToolbox encoder writes it), which Safari, QuickTime and
@@ -120,7 +120,7 @@ video.close_reader(&r)
 - **Inputs:** MP4, `.m4a` and QuickTime `.mov` (including fragmented
   `moof`/`traf`; H.264, H.265, ProRes, AV1; AAC-LC, ALAC, FLAC, MP3, Opus or
   PCM audio) and WebM/Matroska `.webm`/`.mkv` (VP9, H.264, H.265, AV1; AAC-LC,
-  FLAC, MP3, Opus (every mode, surround included; see [`opus`](../opus/README.md)) or
+  FLAC, MP3, Opus (every mode, surround included; see [`opus`](../audio/opus/README.md)) or
   PCM or Vorbis audio), and
   audio-only WAV, Ogg Opus or Vorbis (`.opus`, `.ogg`), native `.flac`
   (which seeks with its seek table and bisection, never reading the whole

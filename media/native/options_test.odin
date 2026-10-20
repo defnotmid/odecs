@@ -2,7 +2,7 @@ package media_native
 
 import media ".."
 import common "../../common"
-import avce "../../h264/encoder"
+import avce "../../video/h264/encoder"
 import "core:slice"
 import "core:testing"
 

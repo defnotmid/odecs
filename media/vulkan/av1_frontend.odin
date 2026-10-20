@@ -1,6 +1,6 @@
 package media_vulkan
 
-import av1 "../../av1"
+import av1 "../../video/av1"
 import vk "vendor:vulkan"
 
 AV1_Decoder_Config :: struct {

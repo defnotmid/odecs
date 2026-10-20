@@ -15,13 +15,13 @@ The reference sources are pinned in
 
 | Package | Source | License | Notice |
 | --- | --- | --- | --- |
-| `opus` | libopus 1.6.1 | BSD-3-Clause | `opus/LICENSE-libopus.txt` |
-| `webp` | libwebp 1.6.0 | BSD-3-Clause, with Google's patent grant | `webp/LICENSE-libwebp.txt` |
-| `h265/decoder`, `h265` | gen2brain/h265 (Go) | MIT | `h265/LICENSE-gen2brain-h265.txt` |
-| `h265/decoder`, `h265` | OxideAV oxideav-h265 (Rust), cross-reference | MIT | `h265/LICENSE-oxideav-h265.txt` |
-| `h265/encoder`, `h265` | Kvazaar | BSD-3-Clause | `h265/LICENSE-kvazaar.txt` |
-| `h264/decoder` | OpenH264 (CABAC tables) | BSD-2-Clause | `h264/decoder/LICENSE-openh264.txt` |
-| `alac` | Apple Lossless Audio Codec | Apache-2.0 | `alac/LICENSE-alac.txt` |
+| `opus` | libopus 1.6.1 | BSD-3-Clause | `audio/opus/LICENSE-libopus.txt` |
+| `webp` | libwebp 1.6.0 | BSD-3-Clause, with Google's patent grant | `image/webp/LICENSE-libwebp.txt` |
+| `video/h265/decoder`, `h265` | gen2brain/h265 (Go) | MIT | `video/h265/LICENSE-gen2brain-h265.txt` |
+| `video/h265/decoder`, `h265` | OxideAV oxideav-h265 (Rust), cross-reference | MIT | `video/h265/LICENSE-oxideav-h265.txt` |
+| `video/h265/encoder`, `h265` | Kvazaar | BSD-3-Clause | `video/h265/LICENSE-kvazaar.txt` |
+| `video/h264/decoder` | OpenH264 (CABAC tables) | BSD-2-Clause | `video/h264/decoder/LICENSE-openh264.txt` |
+| `alac` | Apple Lossless Audio Codec | Apache-2.0 | `audio/alac/LICENSE-alac.txt` |
 | `mp3` | minimp3; PDMP3 | CC0 1.0; public domain (Unlicense) | none required |
 
 ### Opus
@@ -90,7 +90,7 @@ stb_image takes (public domain).
 ### Vorbis
 
 `vorbis` is our own decoder, written from the Vorbis I specification in
-libvorbis' `doc/` (the LaTeX sources). `vorbis/tables.odin` copies the
+libvorbis' `doc/` (the LaTeX sources). `audio/vorbis/tables.odin` copies the
 specification's floor 1 inverse-dB table. libvorbis is the oracle and the
 speed to meet. No libvorbis code is used. The Ogg granule handling in
 `audio` follows the specification's Ogg encapsulation appendix.
@@ -98,29 +98,29 @@ speed to meet. No libvorbis code is used. The Ogg granule handling in
 ### H.265
 
 The decoder began as a port of gen2brain/h265's `hevc/*.go` modules, cross-referenced with oxideav-h265.
-- **gen2brain/h265 ports:** the source comments name them in `h265/scaling.odin` and in these files of `h265/decoder`:
+- **gen2brain/h265 ports:** the source comments name them in `video/h265/scaling.odin` and in these files of `video/h265/decoder`:
   - `cabac`, `ctu`, `deblock`, `dpb`, `getbits`, `headers`, `inter`, `interpred`, `intrapred`, `mvpred`, `nal`, `residual`, `sao`, `scaling` and `slice`;
   - `cabac_tables.odin`, generated from `hevc/cabac_tables.go`.
-- **oxideav-h265 cross-references:** many of the same files point to its modules for spec-section structure, and `h265/transform.odin` names its `src/transform.rs` for the range-extension equations.
-- **Encoder:** `h265/encoder/inter.odin`'s `scale_mv` is ported from the decoder.
+- **oxideav-h265 cross-references:** many of the same files point to its modules for spec-section structure, and `video/h265/transform.odin` names its `src/transform.rs` for the range-extension equations.
+- **Encoder:** `video/h265/encoder/inter.odin`'s `scale_mv` is ported from the decoder.
 
 The encoder follows Kvazaar in:
-- `h265/encoder/cabac.odin`: a port of `cabac.c`;
-- `h265/encoder/sao.odin`: its SAO decisions (`sao.c`, `sao_shared_generics.h`);
-- `h265/encoder/tables.odin`: context constants (`context.c`, `encoderstate.h`) and reference-pixel counts;
-- `h265/scan_tables.odin`: generated from `tables.c` and `tables.h` by `tools/tables`;
-- design references in `h265/encoder/inter.odin` (interpolation filters, motion search), `h265/encoder/simd.odin` (transform shifts) and `h265/transform.odin` (scaling-list quantization).
+- `video/h265/encoder/cabac.odin`: a port of `cabac.c`;
+- `video/h265/encoder/sao.odin`: its SAO decisions (`sao.c`, `sao_shared_generics.h`);
+- `video/h265/encoder/tables.odin`: context constants (`context.c`, `encoderstate.h`) and reference-pixel counts;
+- `video/h265/scan_tables.odin`: generated from `tables.c` and `tables.h` by `tools/tables`;
+- design references in `video/h265/encoder/inter.odin` (interpolation filters, motion search), `video/h265/encoder/simd.odin` (transform shifts) and `video/h265/transform.odin` (scaling-list quantization).
 
 Tests derived from these projects:
-- `h265/decoder/cabac_test.odin` ports gen2brain's `cabac_test.go`;
-- `h265/decoder/rext_test.odin` cites equations as OxideAV and gen2brain do;
-- `h265/encoder/cabac_golden_test.odin` and `ipol_test.odin` use goldens generated with Kvazaar.
+- `video/h265/decoder/cabac_test.odin` ports gen2brain's `cabac_test.go`;
+- `video/h265/decoder/rext_test.odin` cites equations as OxideAV and gen2brain do;
+- `video/h265/encoder/cabac_golden_test.odin` and `ipol_test.odin` use goldens generated with Kvazaar.
 
 HEVC alpha layers follow H.265 Annex F.
 
 ### H.264
 
-`h264/decoder/cabac_tables.odin` holds the normative CABAC,
+`video/h264/decoder/cabac_tables.odin` holds the normative CABAC,
 normalization and default scaling tables, transcribed via OpenH264. The rest
 of `h264` was written from the H.264 specification. `tests/test_decode.odin`,
 `tests/test_zhling.odin`, `tests/vectors.sh` and the viewer use OpenH264's
@@ -128,9 +128,9 @@ reference streams as fixtures.
 
 ## Written from specifications
 
-- **AAC:** `aac/tables.odin` is generated from ISO/IEC 14496-3:2001 by `tools/aac_spec_tables/main.odin`, which checks 12 codebooks (1,362 symbols), 26 SWB arrays, 52 rate tables and 26 TNS limits. Inputs and reproduction are in `tools/aac_spec_tables/README.md`. (An earlier table transcription from OxideAV's oxideav-aac was replaced by it.)
+- **AAC:** `audio/aac/tables.odin` is generated from ISO/IEC 14496-3:2001 by `tools/aac_spec_tables/main.odin`, which checks 12 codebooks (1,362 symbols), 26 SWB arrays, 52 rate tables and 26 TNS limits. Inputs and reproduction are in `tools/aac_spec_tables/README.md`. (An earlier table transcription from OxideAV's oxideav-aac was replaced by it.)
 - **ProRes:** SMPTE RDD 36.
-- **VP9:** the *VP9 Bitstream & Decoding Process Specification* v0.7 (2017-02-22, SHA-256 `92a5bc772d11572c2f119680998ee202e249d075469515fe43bbb7febb51b963`). Its 82 tables are generated from the document's text (`pdftotext -layout`) by `tools/tables`. Three places where the text is wrong or incomplete are listed in `vp9/README.md`. `vp9/encoder` inverts the normative syntax/bool subdivision and reconstructs with the shared decoder primitives. `vp9/forward.odin` prepares fixed-point DCT/ADST analysis bases from the normative synthesis constants and reverses the lossless WHT lifting steps; these are our own implementations, not libvpx ports. `webm/writer.odin` follows Matroska/WebM EBML and the VP9 BlockAdditional alpha mapping. No third-party source was ported for the encoder or the writer; FFmpeg, libvpx and Chromium are binary test oracles only.
+- **VP9:** the *VP9 Bitstream & Decoding Process Specification* v0.7 (2017-02-22, SHA-256 `92a5bc772d11572c2f119680998ee202e249d075469515fe43bbb7febb51b963`). Its 82 tables are generated from the document's text (`pdftotext -layout`) by `tools/tables`. Three places where the text is wrong or incomplete are listed in `video/vp9/README.md`. `video/vp9/encoder` inverts the normative syntax/bool subdivision and reconstructs with the shared decoder primitives. `video/vp9/forward.odin` prepares fixed-point DCT/ADST analysis bases from the normative synthesis constants and reverses the lossless WHT lifting steps; these are our own implementations, not libvpx ports. `container/webm/writer.odin` follows Matroska/WebM EBML and the VP9 BlockAdditional alpha mapping. No third-party source was ported for the encoder or the writer; FFmpeg, libvpx and Chromium are binary test oracles only.
 - **AV1:** the *AV1 Bitstream & Decoding Process Specification* 1.0.0 with Errata 1 (SHA-256 `ec44e9fc42c4e5851faa879a1818dcb9014d834bbdd9420ccca7dcea05a3abe9`), and Vulkan's `VK_KHR_video_decode_av1` chapter.
 - **VideoToolbox:** Apple's CoreMedia, CoreVideo and VideoToolbox headers and documentation; `media/videotoolbox` declares the few functions it calls.
 - **FLAC:** RFC 9639 (SHA-256 `8906404937771aba300e1f7810534efbb8ef722a5a9970e11beaee858c966a13`). Its unit tests embed the RFC's appendix D example files.
@@ -155,6 +155,6 @@ notices are in `demo/LICENSES/`. Its larger inputs are not committed.
 ## Runtime boundaries
 
 - The codec packages use only this repository's code and Odin's `core`/`base` libraries.
-- `media/vulkan` and `h264/encoder/compute_device.odin` load the system Vulkan loader at runtime through Odin's `vendor:vulkan` bindings.
+- `media/vulkan` and `video/h264/encoder/compute_device.odin` load the system Vulkan loader at runtime through Odin's `vendor:vulkan` bindings.
 - The viewer uses `vendor:sdl3`.
 - `shaders/build.sh` compiles the Slang shaders to the SPIR-V that is embedded in the code.

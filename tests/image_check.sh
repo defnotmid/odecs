@@ -13,7 +13,7 @@ fx=.work/image-fixtures
 mkdir -p "$work/frames"
 fail=0
 
-for p in bmp gif jpeg png/encoder wav webp; do odin test "$p" > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }; done
+for p in image/bmp image/gif image/jpeg image/png/encoder audio/wav image/webp; do odin test "$p" > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }; done
 bash tests/image_fixtures.sh "$fx" > /dev/null
 files=$(ls "$fx"/*.{png,jpg,gif,bmp,tga,qoi,webp} 2>/dev/null)
 

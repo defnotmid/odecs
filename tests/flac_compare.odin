@@ -8,7 +8,7 @@
 //   /tmp/odecs-flac-compare FILE.flac [ORACLE.f32|-]
 package flac_compare
 
-import flac "../flac"
+import flac "../audio/flac"
 import "core:crypto/legacy/md5"
 import "core:fmt"
 import "core:math/rand"

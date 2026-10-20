@@ -1,7 +1,7 @@
 package main
 
 import common "../common"
-import avc "../h264"
+import avc "../video/h264"
 import media "../media"
 import native "../media/native"
 import "core:fmt"

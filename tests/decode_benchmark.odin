@@ -7,15 +7,15 @@
 //   decode_benchmark FILE video|audio|image
 package decode_benchmark
 
-import flac "../flac"
+import flac "../audio/flac"
 import media "../media"
 import native "../media/native"
 import video "../video"
-import mp3 "../mp3"
-import mp4 "../mp4"
-import ogg "../ogg"
-import webm "../webm"
-import webp "../webp"
+import mp3 "../audio/mp3"
+import mp4 "../container/mp4"
+import ogg "../container/ogg"
+import webm "../container/webm"
+import webp "../image/webp"
 import "core:fmt"
 import "core:os"
 import "core:slice"

@@ -1,6 +1,6 @@
 package media_videotoolbox
 
-import hevc "../../h265/decoder"
+import hevc "../../video/h265/decoder"
 
 // Syntax, POC and reference picture sets come from the native HEVC parser,
 // and output follows the bumping process of H.265 C.5.2 over a DPB of

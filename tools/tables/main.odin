@@ -22,12 +22,12 @@ Generator :: struct {
 }
 
 GENERATORS := [?]Generator {
-	{"opus", opus_tables, "third_party", "opus/tables.odin"},
-	{"silk", silk_tables, "third_party", "opus/silk_tables.odin"},
-	{"webp", webp_tables, "third_party", "webp/tables.odin"},
-	{"mp3", mp3_tables, "third_party", "mp3/tables.odin"},
-	{"h265", h265_tables, "third_party", "h265/scan_tables.odin"},
-	{"vp9", vp9_tables, "", "vp9/tables.odin"},
+	{"opus", opus_tables, "third_party", "audio/opus/tables.odin"},
+	{"silk", silk_tables, "third_party", "audio/opus/silk_tables.odin"},
+	{"webp", webp_tables, "third_party", "image/webp/tables.odin"},
+	{"mp3", mp3_tables, "third_party", "audio/mp3/tables.odin"},
+	{"h265", h265_tables, "third_party", "video/h265/scan_tables.odin"},
+	{"vp9", vp9_tables, "", "video/vp9/tables.odin"},
 }
 
 main :: proc() {

@@ -1,9 +1,9 @@
 // Native encoder + muxer oracle harness. No reference library is linked.
 package vp9_encode_check
 
-import encoder "../vp9/encoder"
-import decoder "../vp9/decoder"
-import webm "../webm"
+import encoder "../video/vp9/encoder"
+import decoder "../video/vp9/decoder"
+import webm "../container/webm"
 import common "../common"
 import video "../video"
 import "core:fmt"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vorbis gate: odin test vorbis, every fixture (tests/vorbis_fixtures.sh)
+# Vorbis gate: odin test audio/vorbis, every fixture (tests/vorbis_fixtures.sh)
 # through odecs/audio against libvorbis (tests/vorbis_compare.odin: the same
 # frame count, SNR at least 90 dB), and a fuzz pass. libvorbis and libogg are
 # built from the pinned sources (tools/fetch_third_party.sh libvorbis libogg)
@@ -13,7 +13,7 @@ oracle=$PWD/.work/vorbis-oracle
 mkdir -p "$work"
 fail=0
 
-odin test vorbis > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }
+odin test audio/vorbis > "$work/test.log" 2>&1 || { cat "$work/test.log"; fail=1; }
 bash tests/vorbis_fixtures.sh "$fx" > /dev/null
 
 if [ ! -f "$oracle/lib/libvorbisfile.a" ]; then

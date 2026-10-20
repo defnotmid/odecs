@@ -6,7 +6,7 @@
 //   fuzz ROUNDS FILE.webp...
 package main
 
-import webp "../webp"
+import webp "../image/webp"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"

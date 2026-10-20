@@ -7,7 +7,7 @@
 //   /tmp/odecs-image-fuzz ITERATIONS FIXTURE...
 package image_fuzz
 
-import gif "../gif"
+import gif "../image/gif"
 import image "../image"
 import "core:fmt"
 import "core:math/rand"

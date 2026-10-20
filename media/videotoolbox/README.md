@@ -41,7 +41,7 @@ both decoded by odecs' native decoders and FFmpeg; QP 18, 30 and 40 give
 
 ## How it works
 
-- **Our parsers lead.** The native parsers (`h264/decoder`, `h265/decoder`) split the stream into pictures and derive POC and reference marking. Display order is the H.264 decoder's output queue, and H.265's bumping process (C.5.2) over a DPB of picture descriptions. VideoToolbox gets one whole picture at a time, as length-prefixed NAL units, and keeps its own references.
+- **Our parsers lead.** The native parsers (`video/h264/decoder`, `video/h265/decoder`) split the stream into pictures and derive POC and reference marking. Display order is the H.264 decoder's output queue, and H.265's bumping process (C.5.2) over a DPB of picture descriptions. VideoToolbox gets one whole picture at a time, as length-prefixed NAL units, and keeps its own references.
 - **Synchronous sessions.** Each picture is decoded synchronously, so pictures return in decode order. They are held, copied, until their turn.
 - **Output formats.** The session always asks for a documented layout, in the stream's range: NV12 at 8 bits, and P010-style `x420`/`xf20` at 10. A decoder's own format can differ between chips, and the M4's at 10 bits is a private packed one.
 - **Cropping.** VideoToolbox sizes its output to an SPS's cropping but takes it from the picture's top-left corner, ignoring left and top offsets. It is therefore given SPSs with cropping removed (`parameters.odin`) and returns whole coded pictures, which are cropped while they are copied.

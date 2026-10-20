@@ -4,9 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p .work/tmp .work/vp9-encode
 export TMPDIR="$PWD/.work/tmp"
-odin test vp9/encoder -vet -strict-style -out:.work/vp9-encode/encoder-test
-odin test webm -vet -strict-style -out:.work/vp9-encode/webm-test
-odin test vp9 -vet -strict-style -out:.work/vp9-encode/shared-test
+odin test video/vp9/encoder -vet -strict-style -out:.work/vp9-encode/encoder-test
+odin test container/webm -vet -strict-style -out:.work/vp9-encode/webm-test
+odin test video/vp9 -vet -strict-style -out:.work/vp9-encode/shared-test
 odin build tests/vp9_encode_check.odin -file -o:speed -vet -strict-style -out:.work/vp9-encode/check
 for size in '1 1' '7 5' '17 19' '64 64' '65 67' '257 73' '1025 67'; do
 	read -r w h <<< "$size"

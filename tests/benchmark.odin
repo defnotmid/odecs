@@ -1,6 +1,6 @@
 package main
 import common "../common"
-import avc_enc "../h264/encoder"
+import avc_enc "../video/h264/encoder"
 import "core:fmt"
 import "core:mem"
 import "core:os"

@@ -5,7 +5,7 @@
 //   odin run tests/gif_animation_compare.odin -file -- REF_DIR file.gif...
 package gif_animation_compare
 
-import gif "../gif"
+import gif "../image/gif"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"

@@ -7,7 +7,7 @@
 //   webp_anim in.webp ref-folder
 package main
 
-import webp "../webp"
+import webp "../image/webp"
 import "core:fmt"
 import "core:math"
 import "core:os"

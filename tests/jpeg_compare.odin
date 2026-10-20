@@ -8,7 +8,7 @@
 //   odin run tests/jpeg_compare.odin -file -o:speed -extra-linker-flags:-L.work/libjpeg-turbo -- file...
 package jpeg_compare
 
-import jpeg "../jpeg"
+import jpeg "../image/jpeg"
 import "core:c"
 import "core:fmt"
 import "core:os"

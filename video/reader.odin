@@ -1,19 +1,19 @@
 package video
 
 import audio "../audio"
-import mp4 "../mp4"
-import webm "../webm"
-import av1 "../av1"
+import mp4 "../container/mp4"
+import webm "../container/webm"
+import av1 "./av1"
 import "base:intrinsics"
 import "core:io"
-import h264 "../h264"
-import avcd "../h264/decoder"
-import hevcd "../h265/decoder"
+import h264 "./h264"
+import avcd "./h264/decoder"
+import hevcd "./h265/decoder"
 import media "../media"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
-import prores "../prores"
+import prores "./prores"
 
 Reader_Config :: struct {
 	preference:          media.Preference, // Automatic decodes with Vulkan Video when admitted
