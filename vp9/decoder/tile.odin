@@ -1067,7 +1067,7 @@ reconstruct :: proc(t: ^Tile, dst: []$T, stride, tx, tx_type, rows: int) {
 	d := t.d
 	n := 4 << uint(tx)
 	coefs := t.coefs[:n * n]
-	vp9.inverse_transform(coefs, uint(tx + 2), tx_type, d.h.lossless, rows)
+	vp9.inverse_transform(coefs, uint(tx + 2), tx_type, d.h.lossless, rows, d.bit_depth)
 	max_value := i32(1) << uint(d.bit_depth) - 1
 	for i in 0 ..< n {
 		row := dst[i * stride:][:n]

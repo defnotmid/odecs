@@ -20,12 +20,29 @@ init_forward_transforms :: proc(f: ^Forward_Transforms) {
 		for k in 0 ..< n do for x in 0 ..< n / 2 {
 			assert(f.basis[tx][0][k][n - 1 - x] == (k & 1 == 0 ? 1 : -1) * f.basis[tx][0][k][x])
 		}
-		if tx == TX_32X32 do continue // VP9 does not define a 32-point ADST.
-		for k in 0 ..< n {
-			v: [32]i32
-			v[k] = 16384
-			iadst(&v, uint(tx + 2))
-			for x in 0 ..< n do f.basis[tx][1][k][x] = v[x]
+	}
+	// VP9 does not define a 32-point ADST.
+	adst_basis(f, TX_4X4, 2)
+	adst_basis(f, TX_8X8, 3)
+	adst_basis(f, TX_16X16, 4)
+}
+
+// ADST basis row k is the inverse ADST of 16384 at sample k, taken in lane k.
+@(private)
+adst_basis :: proc(f: ^Forward_Transforms, tx: int, $n: uint) {
+	N :: 1 << n
+	L :: min(N, 8)
+	for kb := 0; kb < N; kb += L {
+		t: [32]#simd[L]i64
+		for x in 0 ..< N {
+			lanes: [L]i64
+			if x >= kb && x < kb + L do lanes[x - kb] = 16384
+			t[x] = simd.from_array(lanes)
+		}
+		iadst(&t, n)
+		for x in 0 ..< N {
+			lanes := simd.to_array(t[x])
+			for l in 0 ..< L do f.basis[tx][1][kb + l][x] = i32(lanes[l])
 		}
 	}
 }
