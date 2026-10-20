@@ -31,6 +31,12 @@ jobs:
           curl -fsSL "https://github.com/odin-lang/Odin/releases/download/$ODIN_RELEASE/odin-linux-amd64-$ODIN_RELEASE.tar.gz" |
             tar xz --strip-components=1 -C "$RUNNER_TEMP/odin"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+      # The image and audio comparison programs link stb_image and miniaudio
+      # (development oracles); Odin's Linux release ships their sources only.
+      - name: Build Odin's vendor stb and miniaudio
+        run: |
+          (cd "$RUNNER_TEMP/odin/vendor/stb/src" && bash build_stb.sh)
+          (cd "$RUNNER_TEMP/odin/vendor/miniaudio/src" && bash build_miniaudio.sh)
       - run: bash .github/ci.sh check --programs
       - run: bash .github/ci.sh test
 
