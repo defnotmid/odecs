@@ -64,7 +64,8 @@ motion_cost :: proc(t: ^Tile, r, c, size: int, mv, predictor: vp9.Mv) -> i64 {
 	}
 	pred: [32 * 32]u8 = ---
 	reference := bordered_reference(e, 0)
-	vp9.predict_inter_block(&reference, (BORDER + x) * 16 + int(mv[1]) * 2, (BORDER + y) * 16 + int(mv[0]) * 2, 16, 16, n, n, vp9.EIGHTTAP, 8, pred[:], n)
+	block := vp9.Inter_Block(u8){&reference, (BORDER + x) * 16 + int(mv[1]) * 2, (BORDER + y) * 16 + int(mv[0]) * 2, 16, 16, n, n, vp9.EIGHTTAP, 8, &pred[0], n}
+	vp9.predict_inter_block(&block)
 	return i64(block_sad(n, source, e.source_strides[0], &pred[0], n)) + motion_penalty(e, mv, predictor)
 }
 

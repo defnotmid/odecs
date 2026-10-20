@@ -19,29 +19,42 @@ MAX_STEP :: 32
 @(private)
 MAX_SOURCE :: ((64 - 1) * MAX_STEP + 15) / 16 + 8
 
-// Predicts a w x h block whose top-left sample maps to (x, y) in 1/16
-// reference samples, stepping step_x/step_y per output sample (16 when the
-// reference has the frame's size). Writes clipped samples to dst.
-predict_inter_block :: proc(ref: ^Ref_Plane($T), x, y, step_x, step_y, w, h, filter, bit_depth: int, dst: []T, dst_stride: int) #no_bounds_check {
-	max_value := i32(1) << uint(bit_depth) - 1
-	kernels := &SUBPEL_FILTERS[filter]
-	rows := (((h - 1) * step_y + 15) >> 4) + 8
-	cols := (((w - 1) * step_x + 15) >> 4) + 8
+// One block to predict from one reference: where its top-left sample maps in
+// the reference in 1/16 samples, the reference step per predicted sample (16
+// when the reference has the frame's size), its size and filter, and where
+// the clipped samples go. Passed by pointer: as arguments its slices stalled
+// on store forwarding at every call.
+Inter_Block :: struct($T: typeid) {
+	ref:                     ^Ref_Plane(T),
+	x, y:                    int,
+	step_x, step_y:          int,
+	w, h, filter, bit_depth: int,
+	dst:                     [^]T,
+	dst_stride:              int,
+}
+
+predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
+	ref := b.ref
+	x, y, w, h := b.x, b.y, b.w, b.h
+	max_value := i32(1) << uint(b.bit_depth) - 1
+	kernels := &SUBPEL_FILTERS[b.filter]
+	rows := (((h - 1) * b.step_y + 15) >> 4) + 8
+	cols := (((w - 1) * b.step_x + 15) >> 4) + 8
 	x0, y0 := (x >> 4) - 3, (y >> 4) - 3
 	// Direct reads when the whole footprint is inside the reference.
-	src := ref.data
+	src := raw_data(ref.data)
 	src_stride := ref.stride
 	origin := y0 * ref.stride + x0
 	local: [MAX_SOURCE * MAX_SOURCE]T = ---
 	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
 		edge_copy(local[:], MAX_SOURCE, ref, x0, y0, cols, rows)
-		src, src_stride, origin = local[:], MAX_SOURCE, 0
+		src, src_stride, origin = raw_data(local[:]), MAX_SOURCE, 0
 	}
-	if step_x == 16 && step_y == 16 {
+	if b.step_x == 16 && b.step_y == 16 {
 		if w >= 8 {
-			predict_unscaled(src, src_stride, origin, x & 15, y & 15, w, h, kernels, max_value, dst, dst_stride, 8)
+			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 8)
 		} else {
-			predict_unscaled(src, src_stride, origin, x & 15, y & 15, w, h, kernels, max_value, dst, dst_stride, 4)
+			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 4)
 		}
 		return
 	}
@@ -49,19 +62,19 @@ predict_inter_block :: proc(ref: ^Ref_Plane($T), x, y, step_x, step_y, w, h, fil
 	for r in 0 ..< rows {
 		line := src[origin + r * src_stride:]
 		for c in 0 ..< w {
-			p := (x & 15) + step_x * c
+			p := (x & 15) + b.step_x * c
 			k := &kernels[p & 15]
-			taps := line[p >> 4:][:8]
+			taps := line[p >> 4:]
 			s: i32
 			for t in 0 ..< 8 do s += i32(k[t]) * i32(taps[t])
 			intermediate[r * 64 + c] = clamp((s + 64) >> 7, 0, max_value)
 		}
 	}
 	for r in 0 ..< h {
-		p := (y & 15) + step_y * r
+		p := (y & 15) + b.step_y * r
 		k := &kernels[p & 15]
 		base := (p >> 4) * 64
-		out := dst[r * dst_stride:][:w]
+		out := b.dst[r * b.dst_stride:]
 		for c in 0 ..< w {
 			s: i32
 			for t in 0 ..< 8 do s += i32(k[t]) * intermediate[base + t * 64 + c]
@@ -74,17 +87,19 @@ predict_inter_block :: proc(ref: ^Ref_Plane($T), x, y, step_x, step_y, w, h, fil
 // to N columns at a time. A zero phase is the identity kernel, so that pass
 // is skipped (exactly: (128 * s + 64) >> 7 == s).
 @(private)
-predict_unscaled :: proc(src: []$T, stride, origin, fx, fy, w, h: int, kernels: ^[16][8]i16, max_value: i32, dst: []T, dst_stride: int, $N: int) #no_bounds_check {
+predict_unscaled :: proc(b: ^Inter_Block($T), src: [^]T, stride, origin: int, kernels: ^[16][8]i16, max_value: i32, $N: int) #no_bounds_check {
 	V :: #simd[N]i32
 	U :: #simd[N]u32
-	load :: #force_inline proc(src: []$T, at: int) -> V {return V(intrinsics.unaligned_load((^#simd[N]T)(&src[at])))}
+	load :: #force_inline proc(src: [^]$T, at: int) -> V {return V(intrinsics.unaligned_load((^#simd[N]T)(&src[at])))}
 	round :: #force_inline proc(acc: V, max_value: i32) -> V {return simd.clamp(simd.shr(acc + 64, U(7)), V(0), V(max_value))}
-	put :: #force_inline proc(dst: []$T, at: int, v: V) {intrinsics.unaligned_store((^#simd[N]T)(&dst[at]), (#simd[N]T)(v))}
+	put :: #force_inline proc(dst: [^]$T, at: int, v: V) {intrinsics.unaligned_store((^#simd[N]T)(&dst[at]), (#simd[N]T)(v))}
+	fx, fy, w, h := b.x & 15, b.y & 15, b.w, b.h
+	dst, dst_stride := b.dst, b.dst_stride
 	kx, ky := &kernels[fx], &kernels[fy]
 	base := origin + 3 * stride + 3 // the block's own top-left sample
 	switch {
 	case fx == 0 && fy == 0:
-		for r in 0 ..< h do copy(dst[r * dst_stride:][:w], src[base + r * stride:][:w])
+		for r in 0 ..< h do intrinsics.mem_copy_non_overlapping(&dst[r * dst_stride], &src[base + r * stride], w * size_of(T))
 	case fy == 0:
 		for r in 0 ..< h do for c := 0; c < w; c += N {
 			at := base + r * stride + c - 3

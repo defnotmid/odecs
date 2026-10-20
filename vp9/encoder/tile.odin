@@ -122,7 +122,8 @@ encode_block :: proc(t: ^Tile, r, c, size: int) {
 		source, source_stride := e.source[p], e.source_strides[p]
 		if !e.keyframe {
 			reference := bordered_reference(e, p)
-			vp9.predict_inter_block(&reference, (BORDER + base_x) * 16 + (int(mv[1]) * 2 >> shift), (BORDER + base_y) * 16 + (int(mv[0]) * 2 >> shift), 16, 16, region, region, vp9.EIGHTTAP, 8, frame[base_y * stride + base_x:], stride)
+			block := vp9.Inter_Block(u8){&reference, (BORDER + base_x) * 16 + (int(mv[1]) * 2 >> shift), (BORDER + base_y) * 16 + (int(mv[0]) * 2 >> shift), 16, 16, region, region, vp9.EIGHTTAP, 8, &frame[base_y * stride + base_x], stride}
+			vp9.predict_inter_block(&block)
 		}
 		for y := 0; y < region; y += n {for x := 0; x < region; x += n {
 			sx, sy := base_x + x, base_y + y

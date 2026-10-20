@@ -1101,11 +1101,13 @@ predict_inter :: proc(t: ^Tile, p, x, y, w, h, block_idx: int, $T: typeid) {
 			last_x = ((ref.width + sub_x) >> uint(sub_x)) - 1,
 			last_y = ((ref.height + sub_y) >> uint(sub_y)) - 1,
 		}
+		block := vp9.Inter_Block(T){&source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, &frame[y * stride + x], stride}
 		if list == 0 {
-			vp9.predict_inter_block(&source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, frame[y * stride + x:], stride)
+			vp9.predict_inter_block(&block)
 		} else {
 			second := ([^]T)(&t.scratch)[:64 * 64]
-			vp9.predict_inter_block(&source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, second, 64)
+			block.dst, block.dst_stride = raw_data(second), 64
+			vp9.predict_inter_block(&block)
 			vp9.average_into(frame[y * stride + x:], stride, second, 64, w, h)
 		}
 	}
