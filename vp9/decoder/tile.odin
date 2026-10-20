@@ -20,6 +20,7 @@ Tile :: struct {
 	left_partition: [8]u8,
 	left_nonzero:   [3][16]u8,
 	left_seg_pred:  [8]u8,
+	left_context:   [8]Edge_Context, // per row of the superblock row: the block on the left's right edge
 	blk:            Block,
 	coefs:          [32 * 32]i32,
 	token_cache:    [32 * 32]u8,
@@ -68,11 +69,6 @@ decode_tile :: proc(t: ^Tile, $T: typeid) {
 		}
 	}
 	_ = d
-}
-
-@(private)
-mi_at :: #force_inline proc(d: ^Decoder, r, c: int) -> ^vp9.Mode_Info {
-	return &d.mi[r * d.h.mi_cols + c]
 }
 
 @(private)
@@ -151,24 +147,33 @@ decode_block :: proc(t: ^Tile, r, c, subsize: int, $T: typeid) {
 	}
 	residual(t, T)
 	if b.is_inter && subsize >= vp9.BLOCK_8X8 && b.eob_total == 0 do b.skip = true
+	// What later blocks, the next frame and the loop filter read of this one,
+	// each in the grid of its reader.
+	ref_frame := [2]i8{i8(b.ref_frame[0]), i8(b.ref_frame[1])}
 	m := vp9.Mode_Info {
-		ref_frame     = {i8(b.ref_frame[0]), i8(b.ref_frame[1])},
-		mi_size       = u8(subsize),
-		tx_size       = u8(b.tx_size),
-		y_mode        = u8(b.y_mode),
-		interp_filter = u8(b.interp_filter),
-		segment_id    = u8(b.segment_id),
-		skip          = b.skip,
-		sub_mvs       = b.block_mvs,
+		ref_frame = ref_frame,
+		mi_size   = u8(subsize),
+		tx_size   = u8(b.tx_size),
+		y_mode    = u8(b.y_mode),
+		segment_id = u8(b.segment_id),
+		skip      = b.skip,
 	}
-	for i in 0 ..< 4 do m.sub_modes[i] = u8(b.sub_modes[i])
+	filtering := vp9.filter_cell(m, &d.filter_levels, d.ss_x, d.ss_y)
+	motion := Motion{{b.block_mvs[0][3], b.block_mvs[1][3]}, ref_frame, u8(b.y_mode), subsize < vp9.BLOCK_8X8}
+	edge := Edge_Context{ref_frame, {}, u8(b.tx_size), u8(b.interp_filter), b.skip}
 	rows := min(int(vp9.NUM_8X8_BLOCKS_HIGH_LOOKUP[subsize]), h.mi_rows - r)
 	cols := min(int(vp9.NUM_8X8_BLOCKS_WIDE_LOOKUP[subsize]), h.mi_cols - c)
-	cell := vp9.filter_cell(m, &d.filter_levels, d.ss_x, d.ss_y)
 	for y in 0 ..< rows do for x in 0 ..< cols {
-		mi_at(d, r + y, c + x)^ = m
-		d.filter_cells[(r + y) * h.mi_cols + c + x] = cell
+		cell := (r + y) * h.mi_cols + c + x
+		d.motion[cell] = motion
+		d.segment_ids[cell] = u8(b.segment_id)
+		d.filter_cells[cell] = filtering
 	}
+	if motion.sub8x8 do d.sub_mvs[r * h.mi_cols + c] = b.block_mvs
+	edge.modes = {u8(b.sub_modes[2]), u8(b.sub_modes[3])}
+	for x in 0 ..< cols do d.above_context[c + x] = edge
+	edge.modes = {u8(b.sub_modes[1]), u8(b.sub_modes[3])}
+	for y in 0 ..< rows do t.left_context[(r + y) & 7] = edge
 }
 
 // ---- Mode info -----------------------------------------------------------------------
@@ -186,11 +191,11 @@ intra_frame_mode_info :: proc(t: ^Tile) {
 	read_skip(t)
 	read_tx_size(t, true)
 	b.ref_frame = {vp9.INTRA_FRAME, vp9.NONE}
-	above_cell := b.avail_u ? mi_at(d, b.mi_row - 1, b.mi_col) : nil
-	left_cell := b.avail_l ? mi_at(d, b.mi_row, b.mi_col - 1) : nil
+	above_cell := b.avail_u ? &d.above_context[b.mi_col] : nil
+	left_cell := b.avail_l ? &t.left_context[b.mi_row & 7] : nil
 	if b.mi_size >= vp9.BLOCK_8X8 {
-		above := above_cell != nil ? int(above_cell.sub_modes[2]) : vp9.DC_PRED
-		left := left_cell != nil ? int(left_cell.sub_modes[1]) : vp9.DC_PRED
+		above := above_cell != nil ? int(above_cell.modes[0]) : vp9.DC_PRED
+		left := left_cell != nil ? int(left_cell.modes[0]) : vp9.DC_PRED
 		b.y_mode = read_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
 		b.sub_modes = b.y_mode
 	} else {
@@ -198,8 +203,8 @@ intra_frame_mode_info :: proc(t: ^Tile) {
 		mode: int
 		for idy := 0; idy < 2; idy += h4 {
 			for idx := 0; idx < 2; idx += w4 {
-				above := idy > 0 ? b.sub_modes[idx] : above_cell != nil ? int(above_cell.sub_modes[2 + idx]) : vp9.DC_PRED
-				left := idx > 0 ? b.sub_modes[idy * 2] : left_cell != nil ? int(left_cell.sub_modes[1 + idy * 2]) : vp9.DC_PRED
+				above := idy > 0 ? b.sub_modes[idx] : above_cell != nil ? int(above_cell.modes[idx]) : vp9.DC_PRED
+				left := idx > 0 ? b.sub_modes[idy * 2] : left_cell != nil ? int(left_cell.modes[idy]) : vp9.DC_PRED
 				mode = read_tree(&t.b, tree[:], vp9.KF_Y_MODE_PROBS[above][left][:])
 				for y2 in 0 ..< h4 do for x2 in 0 ..< w4 do b.sub_modes[(idy + y2) * 2 + idx + x2] = mode
 			}
@@ -218,8 +223,8 @@ read_skip :: proc(t: ^Tile) {
 		return
 	}
 	ctx := 0
-	if b.avail_u && mi_at(d, b.mi_row - 1, b.mi_col).skip do ctx += 1
-	if b.avail_l && mi_at(d, b.mi_row, b.mi_col - 1).skip do ctx += 1
+	if b.avail_u && d.above_context[b.mi_col].skip do ctx += 1
+	if b.avail_l && t.left_context[b.mi_row & 7].skip do ctx += 1
 	v := read_bool(&t.b, d.probs.skip[ctx])
 	t.counts.skip[ctx][v] += 1
 	b.skip = v == 1
@@ -236,11 +241,11 @@ read_tx_size :: proc(t: ^Tile, allow_select: bool) {
 	}
 	above, left := max_tx, max_tx
 	if b.avail_u {
-		m := mi_at(d, b.mi_row - 1, b.mi_col)
+		m := &d.above_context[b.mi_col]
 		if !m.skip do above = int(m.tx_size)
 	}
 	if b.avail_l {
-		m := mi_at(d, b.mi_row, b.mi_col - 1)
+		m := &t.left_context[b.mi_row & 7]
 		if !m.skip do left = int(m.tx_size)
 	}
 	if !b.avail_l do left = above
@@ -267,11 +272,11 @@ inter_frame_mode_info :: proc(t: ^Tile) {
 	b := &t.blk
 	b.left_ref, b.above_ref = {vp9.INTRA_FRAME, vp9.NONE}, {vp9.INTRA_FRAME, vp9.NONE}
 	if b.avail_l {
-		m := mi_at(d, b.mi_row, b.mi_col - 1)
+		m := &t.left_context[b.mi_row & 7]
 		b.left_ref = {int(m.ref_frame[0]), int(m.ref_frame[1])}
 	}
 	if b.avail_u {
-		m := mi_at(d, b.mi_row - 1, b.mi_col)
+		m := &d.above_context[b.mi_col]
 		b.above_ref = {int(m.ref_frame[0]), int(m.ref_frame[1])}
 	}
 	b.left_intra, b.above_intra = b.left_ref[0] <= vp9.INTRA_FRAME, b.above_ref[0] <= vp9.INTRA_FRAME
@@ -386,8 +391,8 @@ inter_block_mode_info :: proc(t: ^Tile) {
 		b.y_mode = vp9.NEARESTMV + mode
 	}
 	if h.interp_filter == vp9.SWITCHABLE {
-		left := b.avail_l && b.left_ref[0] > vp9.INTRA_FRAME ? int(mi_at(d, b.mi_row, b.mi_col - 1).interp_filter) : 3
-		above := b.avail_u && b.above_ref[0] > vp9.INTRA_FRAME ? int(mi_at(d, b.mi_row - 1, b.mi_col).interp_filter) : 3
+		left := b.avail_l && b.left_ref[0] > vp9.INTRA_FRAME ? int(t.left_context[b.mi_row & 7].interp_filter) : 3
+		above := b.avail_u && b.above_ref[0] > vp9.INTRA_FRAME ? int(d.above_context[b.mi_col].interp_filter) : 3
 		ctx := 3
 		switch {
 		case left == above:
@@ -732,9 +737,9 @@ add_mv_ref_list :: #force_inline proc(b: ^Block, list: int) {
 @(private)
 get_block_mv :: #force_inline proc(t: ^Tile, r, c, list: int, use_prev: bool) {
 	b := &t.blk
-	grid := use_prev ? &t.d.prev_mi : &t.d.mi
+	grid := use_prev ? &t.d.prev_motion : &t.d.motion
 	m := &grid[r * t.d.h.mi_cols + c]
-	b.candidate_mv[list] = m.sub_mvs[list][3]
+	b.candidate_mv[list] = m.mv[list]
 	b.candidate_frame[list] = int(m.ref_frame[list])
 }
 
@@ -783,13 +788,18 @@ find_mv_refs :: proc(t: ^Tile, ref_frame, block: int) {
 	for i in 0 ..< 2 {
 		r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
 		if !is_inside(t, r, c) do continue
-		m := mi_at(d, r, c)
+		cell := r * d.h.mi_cols + c
+		m := &d.motion[cell]
 		different_ref_found = true
 		context_counter += int(vp9.MODE_2_COUNTER[m.y_mode])
 		for j in 0 ..< 2 {
 			if int(m.ref_frame[j]) == ref_frame {
-				idx := block >= 0 ? int(vp9.IDX_N_COLUMN_TO_SUBBLOCK[block][search[i][1] == 0 ? 1 : 0]) : 3
-				b.candidate_mv[j] = m.sub_mvs[j][idx]
+				if block >= 0 && m.sub8x8 {
+					idx := int(vp9.IDX_N_COLUMN_TO_SUBBLOCK[block][search[i][1] == 0 ? 1 : 0])
+					b.candidate_mv[j] = d.sub_mvs[cell][j][idx]
+				} else {
+					b.candidate_mv[j] = m.mv[j] // every sub-block of an 8x8 or larger block
+				}
 				add_mv_ref_list(b, j)
 				break
 			}
@@ -1038,8 +1048,8 @@ reconstruct :: proc(t: ^Tile, dst: []$T, stride, tx, tx_type, rows: int) {
 	d := t.d
 	n := 4 << uint(tx)
 	coefs := t.coefs[:n * n]
-	vp9.inverse_transform(coefs, uint(tx + 2), tx_type, d.h.lossless, rows, d.bit_depth)
 	max_value := i32(1) << uint(d.bit_depth) - 1
+	vp9.inverse_transform(coefs, uint(tx + 2), tx_type, d.h.lossless, rows, d.bit_depth)
 	for i in 0 ..< n {
 		row := dst[i * stride:][:n]
 		res := coefs[i * n:][:n]

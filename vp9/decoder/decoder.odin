@@ -54,12 +54,16 @@ Decoder :: struct {
 	// Current frame.
 	h:                 Header,
 	cur:               ^Frame,
-	mi:                [dynamic]vp9.Mode_Info, // mi_rows x mi_cols, stride mi_cols
-	prev_mi:           [dynamic]vp9.Mode_Info, // the previous decoded frame's, for MV prediction
-	filter_cells:      [dynamic]vp9.Filter_Cell, // beside mi: what the loop filter reads
+	// Per 8x8 cell, mi_rows x mi_cols, each grid holding what one reader needs.
+	motion:            [dynamic]Motion, // for motion vector prediction
+	prev_motion:       [dynamic]Motion, // the previous decoded frame's
+	sub_mvs:           [dynamic][2][4]vp9.Mv, // written by blocks below 8x8 only (Motion.sub8x8)
+	segment_ids:       [dynamic]u8,
+	filter_cells:      [dynamic]vp9.Filter_Cell, // for the loop filter
 	filter_levels:     vp9.Filter_Levels, // the current frame's, for filter_cells
 	ref_scales:        [3]Ref_Scale, // LAST, GOLDEN and ALTREF against the current frame
 	prev_segment_ids:  [dynamic]u8,
+	above_context:     [dynamic]Edge_Context, // per 8x8 column: the block above's bottom edge
 	above_partition:   [dynamic]u8,
 	above_nonzero:     [3][dynamic]u8,
 	above_seg_pred:    [dynamic]u8,
@@ -99,8 +103,11 @@ destroy_decoder :: proc(d: ^Decoder) {
 	for t in d.tiles do free(t)
 	delete(d.frames)
 	delete(d.tiles)
-	delete(d.mi)
-	delete(d.prev_mi)
+	delete(d.motion)
+	delete(d.prev_motion)
+	delete(d.sub_mvs)
+	delete(d.segment_ids)
+	delete(d.above_context)
 	delete(d.filter_cells)
 	delete(d.prev_segment_ids)
 	delete(d.above_partition)
@@ -220,7 +227,7 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 	// Segmentation map, references and motion vectors for the next frame.
 	seg := &d.segmentation
 	if seg.enabled && seg.update_map {
-		for &m, i in d.mi do d.prev_segment_ids[i] = m.segment_id
+		d.segment_ids, d.prev_segment_ids = d.prev_segment_ids, d.segment_ids
 	}
 	for i in 0 ..< vp9.NUM_REF_FRAMES {
 		if h.refresh_frame_flags >> uint(i) & 1 == 0 do continue
@@ -228,7 +235,7 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 		d.refs[i] = d.cur
 		d.cur.refs += 1
 	}
-	d.mi, d.prev_mi = d.prev_mi, d.mi
+	d.motion, d.prev_motion = d.prev_motion, d.motion
 	d.last_show_frame = h.show_frame
 	if h.show_frame do d.shown = d.cur
 	return .None
@@ -275,15 +282,16 @@ allocate_frame :: proc(d: ^Decoder) -> Error {
 allocate_grids :: proc(d: ^Decoder) -> Error {
 	h := &d.h
 	cells := h.mi_rows * h.mi_cols
-	if len(d.mi) != cells {
+	if len(d.motion) != cells {
 		// A new size: previous motion vectors are not used (compute_image_size).
-		if resize(&d.mi, cells) != nil || resize(&d.filter_cells, cells) != nil || resize(&d.prev_mi, cells) != nil || resize(&d.prev_segment_ids, cells) != nil do return .Out_Of_Memory
+		if resize(&d.motion, cells) != nil || resize(&d.prev_motion, cells) != nil || resize(&d.sub_mvs, cells) != nil || resize(&d.segment_ids, cells) != nil || resize(&d.filter_cells, cells) != nil || resize(&d.prev_segment_ids, cells) != nil do return .Out_Of_Memory
 	}
 	if d.clear_segment_map {
 		for &s in d.prev_segment_ids do s = 0
 		d.clear_segment_map = false
 	}
 	cols8 := h.sb64_cols * 8
+	if resize(&d.above_context, cols8) != nil do return .Out_Of_Memory
 	if resize(&d.above_partition, cols8) != nil || resize(&d.above_seg_pred, cols8) != nil do return .Out_Of_Memory
 	for &a in d.above_nonzero do if resize(&a, cols8 * 2) != nil do return .Out_Of_Memory
 	return .None
@@ -425,4 +433,29 @@ ref_scale :: proc(ref: ^Frame, h: ^Header) -> (s: Ref_Scale) {
 	s.x, s.y = (ref.width << 14) / h.width, (ref.height << 14) / h.height
 	s.step_x, s.step_y = (16 * s.x) >> 14, (16 * s.y) >> 14
 	return
+}
+
+// What motion vector prediction reads of an 8x8 cell (6.4.21, 6.5.1): the
+// block's reference frames and motion vectors (its last sub-block's), and its
+// mode for the inter mode context. Blocks below 8x8 also keep their four
+// sub-block vectors in Decoder.sub_mvs.
+@(private)
+Motion :: struct {
+	mv:        [2]vp9.Mv,
+	ref_frame: [2]i8, // INTRA_FRAME (0) or LAST..ALTREF; [1] is NONE (-1) unless compound
+	y_mode:    u8,
+	sub8x8:    bool,
+}
+
+// What the next block's contexts read of the neighbouring block along one
+// edge (the spec's AboveX / LeftX): kept per 8x8 column above the current row
+// and per row of the tile's superblock row on the left, as the partition and
+// nonzero contexts are.
+@(private)
+Edge_Context :: struct {
+	ref_frame:     [2]i8,
+	modes:         [2]u8, // the sub-block modes along the edge: bottom row above, right column on the left
+	tx_size:       u8,
+	interp_filter: u8,
+	skip:          bool,
 }
