@@ -56,12 +56,16 @@ Tile columns of a tile row decode in parallel. The loop filter runs in
 anti-diagonal waves of superblocks: superblock (r, c) needs (r, c - 1) and
 (r - 1, c + 1), so all superblocks with equal `2r + c` are independent and
 each wave is one ordinary `Work_Pool` run. Motion compensation (8-tap
-filters, 8 or 4 lanes) and the loop filter (eight edge lines as `#simd`
-lanes, transposed for vertical edges) are vectorized.
+filters in native-width lanes) and the loop filter (sixteen edge lines as
+`#simd` lanes, transposed for vertical edges) are vectorized.
 
-1080p two-pass stream with four tile columns, frames in memory: 149 fps on
-one thread (FFmpeg: about 550), 386 fps with 8 threads. Multi-threaded
-results varied widely with other load on the machine.
+The decoder keeps what each later reader needs in its own record or grid,
+written once when a block is decoded: Motion cells for motion vector
+prediction (gathered once per block), above/left edge contexts, Filter_Cell
+records for the loop filter, per-frame reference scales. Transforms run as
+lanes with the size a compile-time constant, the loop filter in i16 lanes
+over pairs of 8x8 cells. Single-thread speed against FFmpeg is in the root
+README's "Decoding speed" table (1.60× at 8 bits, 1.38× at 10).
 
 ## Spec errata applied
 

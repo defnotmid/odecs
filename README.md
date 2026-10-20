@@ -92,10 +92,10 @@ at 2–3, and a repeat run agreed within about 2%.
 
 | Input | odecs ms | Reference ms | Ratio | Reference |
 | --- | --- | --- | --- | --- |
-| VP9 profile 0, 1080p, 162 frames | 2703 | 794 | 3.40 | FFmpeg `vp9` (libvpx: 842 ms, 3.19) |
-| VP9 profile 2, 10-bit | 2988 | 998 | 2.99 | FFmpeg `vp9` (libvpx: 1222 ms, 2.45) |
 | AAC-LC, 128 kb/s stereo, 320 s | 140 | 78 | 1.80 | FFmpeg `aac` |
 | FLAC, 16-bit stereo, 320 s | 228 | 138 | 1.66 | FFmpeg `flac` |
+| VP9 profile 0, 1080p, 162 frames | 1271 | 796 | 1.60 | FFmpeg `vp9` (libvpx: 880 ms, 1.44) |
+| VP9 profile 2, 10-bit | 1385 | 1003 | 1.38 | FFmpeg `vp9` (libvpx: 1221 ms, 1.13) |
 | WebP lossy, 1920×1080 | 9.6 | 7.3 | 1.31 | libwebp |
 | H.264 High, 8-bit, 1080p, 162 frames | 1370 | 1059 | 1.29 | FFmpeg `h264` |
 | MP3, 192 kb/s stereo | 157 | 122 | 1.29 | FFmpeg `mp3float` |
@@ -113,7 +113,8 @@ The video is OpenH264's 1080p fixture looped three times. The audio is the
 320 s of decoded RFC 8251 Opus test vectors. Both were encoded with x264,
 x265, libvpx, `prores_ks` and FFmpeg's audio encoders. H.264 High 10 4:2:0
 is missing: the native decoder fails on x264's B-pyramid with more than one
-reference frame. To rerun, use `tests/decode_benchmark.sh`.
+reference frame. To rerun, use `tests/decode_benchmark.sh`. The VP9 rows were
+measured again after its decoder was restructured (3.40× and 2.99× before).
 
 ## Platforms
 
