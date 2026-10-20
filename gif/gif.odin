@@ -10,6 +10,7 @@
 // The animation (animation.odin) is composited as browsers show it.
 package gif
 
+import "core:mem"
 import "core:slice"
 
 Error :: enum {
@@ -159,16 +160,28 @@ skip_sub_blocks :: proc(data: []u8, start: int) -> (at: int, err: Error) {
 
 // The first frame, as stb_image decodes it.
 decode :: proc(data: []u8, allocator := context.allocator) -> (img: Image, err: Error) {
+	ft := get_features(data) or_return
+	pixels, perr := make([]u8, ft.width * ft.height * 4, allocator)
+	if perr != nil do return img, .Out_Of_Memory
+	if err = decode_into(data, pixels); err != .None {
+		delete(pixels, allocator)
+		return {}, err
+	}
+	return {ft.width, ft.height, pixels}, .None
+}
+
+// The first frame into `pixels`, width * height * 4 bytes (from get_features).
+decode_into :: proc(data: []u8, pixels: []u8) -> Error {
 	p := parse(data, context.temp_allocator) or_return
 	defer delete(p.frames)
+	if len(pixels) < p.width * p.height * 4 do return .Invalid
 	f := &p.frames[0]
 	indices, ierr := make([]u8, f.width * f.height, context.temp_allocator)
-	if ierr != nil do return img, .Out_Of_Memory
+	if ierr != nil do return .Out_Of_Memory
 	defer delete(indices, context.temp_allocator)
 	decode_raster(data, f, indices) or_return
-	pixels, perr := make([]u8, p.width * p.height * 4, allocator)
-	if perr != nil do return img, .Out_Of_Memory
-	img = {p.width, p.height, pixels}
+	// A transparent canvas; the frame draws only its opaque pixels.
+	mem.zero_slice(pixels[:p.width * p.height * 4])
 	// As stb: where the first frame does not reach, the background colour (black
 	// without a global table), opaque. stb swaps its red and blue there; this
 	// writes the colour as the table gives it.
@@ -187,7 +200,7 @@ decode :: proc(data: []u8, allocator := context.allocator) -> (img: Image, err: 
 		}
 	}
 	draw(pixels, p.width, f, indices)
-	return img, .None
+	return .None
 }
 
 destroy_image :: proc(img: ^Image, allocator := context.allocator) {

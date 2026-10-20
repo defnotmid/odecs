@@ -134,23 +134,34 @@ default_masks :: proc(bpp: int) -> [4]u32 {
 // Decodes to tightly packed RGBA8, top-down rows, allocated with `allocator`.
 decode :: proc(data: []u8, allocator := context.allocator) -> (pixels: []u8, width, height: int, err: Error) {
 	h := parse(data) or_return
-	width, height = h.width, h.height
+	pixels = make([]u8, h.width * h.height * 4, allocator) or_else nil
+	if pixels == nil do return nil, 0, 0, .Out_Of_Memory
+	if err = decode_into(data, pixels); err != .None {
+		delete(pixels, allocator)
+		return nil, 0, 0, err
+	}
+	return pixels, h.width, h.height, .None
+}
+
+// Decodes into `pixels`, width * height * 4 bytes (from info); every pixel
+// is written.
+decode_into :: proc(data: []u8, pixels: []u8) -> Error {
+	h := parse(data) or_return
+	width, height := h.width, h.height
+	if len(pixels) < width * height * 4 do return .Invalid
 	palette_size: int
 	if h.header_size == 12 {
 		if h.bpp < 24 do palette_size = (h.offset - 14 - 24) / 3
 	} else if h.bpp < 16 {
 		palette_size = (h.offset - h.read) >> 2
 	}
-	if palette_size == 0 && h.offset != h.read do return nil, 0, 0, .Invalid
-	pixels = make([]u8, width * height * 4, allocator) or_else nil
-	if pixels == nil do return nil, 0, 0, .Out_Of_Memory
-	defer if err != .None {delete(pixels, allocator); pixels = nil}
+	if palette_size == 0 && h.offset != h.read do return .Invalid
 	c := Cursor{data = data, pos = h.read}
 	// Rows are stored bottom-up unless the height is negative.
 	row_of :: #force_inline proc(h: ^Header, j: int) -> int {return h.top_down ? j : h.height - 1 - j}
 	all_alpha: u32
 	if h.bpp < 16 {
-		if palette_size <= 0 || palette_size > 256 do return pixels, width, height, .Invalid
+		if palette_size <= 0 || palette_size > 256 do return .Invalid
 		palette: [256][4]u8
 		for i in 0 ..< palette_size {
 			b, g, r := u8(u8_at(&c)), u8(u8_at(&c)), u8(u8_at(&c))
@@ -167,7 +178,7 @@ decode :: proc(data: []u8, allocator := context.allocator) -> (pixels: []u8, wid
 		case 8:
 			row_bytes = width
 		case:
-			return pixels, width, height, .Invalid
+			return .Invalid
 		}
 		pad := -row_bytes & 3
 		for j in 0 ..< height {
@@ -200,10 +211,10 @@ decode :: proc(data: []u8, allocator := context.allocator) -> (pixels: []u8, wid
 		easy := h.bpp == 24 || h.bpp == 32 && h.masks == default_masks(32)
 		shifts, counts: [4]int
 		if !easy {
-			if h.masks.r == 0 || h.masks.g == 0 || h.masks.b == 0 do return pixels, width, height, .Invalid
+			if h.masks.r == 0 || h.masks.g == 0 || h.masks.b == 0 do return .Invalid
 			for m, k in h.masks {
 				shifts[k], counts[k] = high_bit(m) - 7, bit_count(m)
-				if counts[k] > 8 do return pixels, width, height, .Invalid
+				if counts[k] > 8 do return .Invalid
 			}
 		}
 		for j in 0 ..< height {
@@ -228,7 +239,7 @@ decode :: proc(data: []u8, allocator := context.allocator) -> (pixels: []u8, wid
 	}
 	// An alpha channel that is zero everywhere was never meant: opaque.
 	if all_alpha == 0 do for i := 3; i < len(pixels); i += 4 do pixels[i] = 255
-	return pixels, width, height, .None
+	return .None
 }
 
 // The value under a mask moved to 8 bits, its top bits replicated below it.

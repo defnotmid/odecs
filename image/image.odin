@@ -13,6 +13,7 @@ import gif "../gif"
 import jpeg "../jpeg"
 import png_encoder "../png/encoder"
 import webp "../webp"
+import "base:intrinsics"
 import "base:runtime"
 import core_image "core:image"
 @(require) import "core:image/png"
@@ -105,45 +106,49 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 // Decodes the image (an animation's first frame) to RGBA8 straight alpha,
 // allocated with `allocator`; free it with destroy_image.
 decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> (img: Image, err: Error) {
+	i := info(data) or_return
+	pixels, aerr := make([]u8, i.width * i.height * 4, allocator)
+	if aerr != nil do return img, .Out_Of_Memory
+	if err = decode_into(data, pixels, pool); err != .None {
+		delete(pixels, allocator)
+		return {}, err
+	}
+	return {i.width, i.height, pixels}, .None
+}
+
+// Decodes into `pixels`, width * height * 4 bytes the caller owns (sized
+// from info). Scratch comes from `allocator` and is freed before returning.
+decode_into :: proc(data: []u8, pixels: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> Error {
 	switch format := format_of(data); format {
 	case .Unknown:
-		return img, .Unsupported
+		return .Unsupported
 	case .JPEG:
-		j, e := jpeg.decode(data, allocator)
-		switch e {
-		case .None:
-			return {j.width, j.height, j.pixels}, .None
-		case .Unsupported:
-			return img, .Unsupported
-		case .Out_Of_Memory:
-			return img, .Out_Of_Memory
-		case .Invalid:
-		}
-		return img, .Invalid
+		return codec_error(jpeg.decode_into(data, pixels, allocator))
 	case .GIF:
-		g, e := gif.decode(data, allocator)
-		if e != .None do return img, e == .Out_Of_Memory ? .Out_Of_Memory : .Invalid
-		return {g.width, g.height, g.pixels}, .None
+		return codec_error(gif.decode_into(data, pixels))
 	case .WebP:
-		w, e := webp.decode(data, pool, allocator)
-		if e != .None do return img, .Invalid
-		return {w.width, w.height, w.pixels}, .None
+		return codec_error(webp.decode_into(data, pixels, pool, allocator))
 	case .BMP:
-		pixels, w, h, e := bmp.decode(data, allocator)
-		switch e {
-		case .None:
-			return {w, h, pixels}, .None
-		case .Unsupported:
-			return img, .Unsupported
-		case .Out_Of_Memory:
-			return img, .Out_Of_Memory
-		case .Invalid:
-		}
-		return img, .Invalid
+		return codec_error(bmp.decode_into(data, pixels))
 	case .PNG, .TGA, .QOI:
-		return decode_core(data, format, allocator)
+		return decode_core(data, format, pixels)
 	}
-	return img, .Unsupported
+	return .Unsupported
+}
+
+// A codec's error: each names its own Unsupported, Out_Of_Memory, and
+// Invalid (or its kinds of invalid).
+@(private)
+codec_error :: proc(e: $E) -> Error where intrinsics.type_is_enum(E) {
+	#partial switch e {
+	case .None:
+		return .None
+	case .Unsupported:
+		return .Unsupported
+	case .Out_Of_Memory:
+		return .Out_Of_Memory
+	}
+	return .Invalid
 }
 
 destroy_image :: proc(img: ^Image, allocator := context.allocator) {
@@ -160,24 +165,23 @@ write_png :: png_encoder.write_file
 // On failure core:image's PNG and QOI loaders return the half-built image for
 // the caller to free; TGA has freed it already and returns the pointer anyway.
 @(private)
-decode_core :: proc(data: []u8, format: Format, allocator := context.allocator) -> (img: Image, err: Error) {
-	// core:image's buffers are scratch: on the heap and freed here, so an
-	// arena given as `allocator` holds only the result.
+decode_core :: proc(data: []u8, format: Format, pixels: []u8) -> Error {
+	// core:image's buffers are scratch: on the heap and freed here, so the
+	// caller's memory holds only the result.
 	scratch := runtime.heap_allocator()
 	src, e := core_image.load_from_bytes(data, {}, scratch)
 	defer if e == nil || format != .TGA do core_image.destroy(src, scratch)
-	if e != nil do return img, .Invalid
+	if e != nil do return .Invalid
 	n := src.width * src.height
 	ch := src.channels
-	if ch < 1 || ch > 4 || src.depth != 8 && src.depth != 16 || len(src.pixels.buf) < n * ch * src.depth / 8 do return img, .Invalid
-	pixels, aerr := make([]u8, n * 4, allocator)
-	if aerr != nil do return img, .Out_Of_Memory
+	if ch < 1 || ch > 4 || src.depth != 8 && src.depth != 16 || len(src.pixels.buf) < n * ch * src.depth / 8 do return .Invalid
+	if len(pixels) < n * 4 do return .Invalid
 	if src.depth == 8 {
-		convert_samples(pixels, src.pixels.buf[:n * ch], ch)
+		convert_samples(pixels[:n * 4], src.pixels.buf[:n * ch], ch)
 	} else {
-		convert_samples(pixels, (transmute([]u16)src.pixels.buf[:])[:n * ch], ch)
+		convert_samples(pixels[:n * 4], (transmute([]u16)src.pixels.buf[:])[:n * ch], ch)
 	}
-	return {src.width, src.height, pixels}, .None
+	return .None
 }
 
 @(private)

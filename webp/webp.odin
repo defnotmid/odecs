@@ -175,24 +175,35 @@ get_features :: proc(data: []u8) -> (ft: Features, err: Error) {
 // `pool` (optional) converts rows in parallel.
 decode :: proc(data: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> (img: Image, err: Error) {
 	ft := get_features(data) or_return
+	pixels, perr := make([]u8, ft.width * ft.height * 4, allocator)
+	if perr != nil do return {}, .Out_Of_Memory
+	if err = decode_into(data, pixels, pool, allocator); err != .None {
+		delete(pixels, allocator)
+		return {}, err
+	}
+	return {ft.width, ft.height, pixels}, .None
+}
+
+// Decodes into `pixels`, width * height * 4 bytes (from get_features).
+// Scratch comes from `allocator` and is freed before returning.
+decode_into :: proc(data: []u8, pixels: []u8, pool: ^common.Work_Pool = nil, allocator := context.allocator) -> Error {
+	ft := get_features(data) or_return
+	if len(pixels) < ft.width * ft.height * 4 do return .Invalid
 	if ft.animated {
 		a: Animation
 		init_animation(&a, data, pool, allocator) or_return
 		defer destroy_animation(&a)
 		frame := next_frame(&a) or_return
-		img = {ft.width, ft.height, nil}
-		img.pixels, _ = make([]u8, len(frame.pixels), allocator)
-		if img.pixels == nil do return {}, .Out_Of_Memory
-		copy(img.pixels, frame.pixels)
-		return img, .None
+		copy(pixels, frame.pixels)
+		return .None
 	}
 	body := riff_body(data) or_return
 	rest := body
 	if first, _ := next_chunk(&rest); first.fourcc == "VP8X" do body = rest
 	f, found := find_frame(body)
-	if !found || !bitstream_size(&f) do return {}, .Invalid
-	if f.width != ft.width || f.height != ft.height do return {}, .Invalid
-	return decode_frame(&f, pool, allocator)
+	if !found || !bitstream_size(&f) do return .Invalid
+	if f.width != ft.width || f.height != ft.height do return .Invalid
+	return frame_into(&f, pixels, pool, allocator)
 }
 
 // A lossy still image's planes as decoded, before conversion to RGB: Y, U
@@ -223,11 +234,26 @@ destroy_image :: proc(img: ^Image, allocator := context.allocator) {
 
 @(private)
 decode_frame :: proc(f: ^Frame_Chunks, pool: ^common.Work_Pool, allocator: Allocator) -> (img: Image, err: Error) {
+	pixels, perr := make([]u8, f.width * f.height * 4, allocator)
+	if perr != nil do return {}, .Out_Of_Memory
+	if err = frame_into(f, pixels, pool, allocator); err != .None {
+		delete(pixels, allocator)
+		return {}, err
+	}
+	return {f.width, f.height, pixels}, .None
+}
+
+// A frame's RGBA into `pixels` (f.width * f.height * 4 bytes).
+@(private)
+frame_into :: proc(f: ^Frame_Chunks, pixels: []u8, pool: ^common.Work_Pool, allocator: Allocator) -> Error {
 	if f.lossless {
-		// ARGB words to RGBA bytes in place: the buffer becomes the image.
-		argb, w, h := decode_vp8l(f.bitstream, allocator) or_return
-		for &p in argb do p = p & 0xff00ff00 | (p >> 16) & 0xff | (p & 0xff) << 16
-		return {w, h, ([^]u8)(raw_data(argb))[:w * h * 4]}, .None
+		// Decoded into `pixels` as ARGB words, then made RGBA bytes in place.
+		out := ([^]u32)(raw_data(pixels))[:len(pixels) / 4]
+		argb, w, h := decode_vp8l(f.bitstream, allocator, out) or_return
+		if raw_data(argb) != raw_data(out) do delete(argb, allocator) // a size the header did not promise
+		if w * h > len(out) || raw_data(argb) != raw_data(out) do return .Invalid
+		for &p in out[:w * h] do p = p & 0xff00ff00 | (p >> 16) & 0xff | (p & 0xff) << 16
+		return .None
 	}
 	yuv := decode_vp8(f.bitstream, allocator) or_return
 	defer destroy_yuv(&yuv, allocator)
@@ -236,11 +262,9 @@ decode_frame :: proc(f: ^Frame_Chunks, pool: ^common.Work_Pool, allocator: Alloc
 		alpha = decode_alpha(f.alpha, yuv.width, yuv.height, allocator) or_return
 	}
 	defer delete(alpha, allocator)
-	img = {yuv.width, yuv.height, nil}
-	img.pixels, _ = make([]u8, yuv.width * yuv.height * 4, allocator)
-	if img.pixels == nil do return {}, .Out_Of_Memory
-	yuv_to_rgba(&yuv, alpha, img.pixels, pool)
-	return img, .None
+	if yuv.width * yuv.height * 4 > len(pixels) do return .Invalid
+	yuv_to_rgba(&yuv, alpha, pixels, pool)
+	return .None
 }
 
 // An ALPH chunk's plane (RFC 9649, "Alpha"): raw or lossless-compressed,

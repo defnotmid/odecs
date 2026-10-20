@@ -253,9 +253,10 @@ Transform :: struct {
 	data:  []u32, // block image or palette
 }
 
-// Decodes a VP8L bitstream (after the chunk header) into ARGB pixels.
+// Decodes a VP8L bitstream (after the chunk header) into ARGB pixels: into
+// `into` when it holds the image (argb is then `into`), else a new buffer.
 @(private)
-decode_vp8l :: proc(data: []u8, allocator: Allocator) -> (argb: []u32, width, height: int, err: Error) {
+decode_vp8l :: proc(data: []u8, allocator: Allocator, into: []u32 = nil) -> (argb: []u32, width, height: int, err: Error) {
 	if len(data) < 5 || data[0] != 0x2f do return nil, 0, 0, .Invalid
 	l := Lossless{br = {data = data[1:]}, allocator = allocator}
 	defer delete(l.scratch)
@@ -264,7 +265,7 @@ decode_vp8l :: proc(data: []u8, allocator: Allocator) -> (argb: []u32, width, he
 	height = int(read_bits(&l.br, 14)) + 1
 	read_bits(&l.br, 1) // alpha is used: a hint
 	if read_bits(&l.br, 3) != 0 do return nil, 0, 0, .Invalid
-	argb = decode_main_image(&l, width, height) or_return
+	argb = decode_main_image(&l, width, height, into) or_return
 	return argb, width, height, .None
 }
 
@@ -278,7 +279,7 @@ decode_vp8l_image :: proc(data: []u8, width, height: int, allocator: Allocator) 
 }
 
 @(private)
-decode_main_image :: proc(l: ^Lossless, width, height: int) -> (argb: []u32, err: Error) {
+decode_main_image :: proc(l: ^Lossless, width, height: int, into: []u32 = nil) -> (argb: []u32, err: Error) {
 	transforms: [4]Transform
 	count := 0
 	defer for t in transforms[:count] do delete(t.data, l.allocator)
@@ -310,7 +311,9 @@ decode_main_image :: proc(l: ^Lossless, width, height: int) -> (argb: []u32, err
 		case .Subtract_Green:
 		}
 	}
-	argb = decode_image(l, coded_width, height, true) or_return
+	// Into the caller's buffer, unless the image is colour-indexed (its packed
+	// pixels then unpack into it below).
+	argb = decode_image(l, coded_width, height, true, .Colour_Indexing in seen ? nil : into) or_return
 	// Undo the transforms, the last read first.
 	for i := count - 1; i >= 0; i -= 1 {
 		t := &transforms[i]
@@ -325,10 +328,14 @@ decode_main_image :: proc(l: ^Lossless, width, height: int) -> (argb: []u32, err
 				p = p & 0xff00ff00 | ((p & 0x00ff00ff) + (g << 16 | g)) & 0x00ff00ff
 			}
 		case .Colour_Indexing:
-			out, e := make([]u32, t.width * height, l.allocator)
-			if e != nil {
-				delete(argb, l.allocator)
-				return nil, .Out_Of_Memory
+			out := len(into) >= t.width * height ? into[:t.width * height] : nil
+			if out == nil {
+				e: runtime.Allocator_Error
+				out, e = make([]u32, t.width * height, l.allocator)
+				if e != nil {
+					delete(argb, l.allocator)
+					return nil, .Out_Of_Memory
+				}
 			}
 			unpack_indices(out, argb, t.width, height, t.data, t.bits)
 			delete(argb, l.allocator)
@@ -336,7 +343,7 @@ decode_main_image :: proc(l: ^Lossless, width, height: int) -> (argb: []u32, err
 		}
 	}
 	if overrun(&l.br) {
-		delete(argb, l.allocator)
+		if raw_data(argb) != raw_data(into) do delete(argb, l.allocator)
 		return nil, .Invalid
 	}
 	return argb, .None
@@ -350,7 +357,7 @@ subsample :: #force_inline proc(size: int, bits: uint) -> int {
 // An entropy-coded image: its colour cache, prefix codes (per block for the
 // main image), then the pixels.
 @(private)
-decode_image :: proc(l: ^Lossless, width, height: int, main: bool) -> (pixels: []u32, err: Error) {
+decode_image :: proc(l: ^Lossless, width, height: int, main: bool, into: []u32 = nil) -> (pixels: []u32, err: Error) {
 	codes: Codes
 	defer destroy_codes(&codes, l.allocator)
 	codes.entries.allocator = l.allocator
@@ -383,10 +390,16 @@ decode_image :: proc(l: ^Lossless, width, height: int, main: bool) -> (pixels: [
 		}
 		summarize_group(&codes, &group, literal_bits)
 	}
-	pixels, _ = make([]u32, width * height, l.allocator)
-	if pixels == nil do return nil, .Out_Of_Memory
+	// Into the caller's buffer when it is given, else a new one.
+	owned := len(into) < width * height
+	if owned {
+		pixels, _ = make([]u32, width * height, l.allocator)
+		if pixels == nil do return nil, .Out_Of_Memory
+	} else {
+		pixels = into[:width * height]
+	}
 	if e := decode_pixels(&l.br, &codes, pixels, width); e != .None {
-		delete(pixels, l.allocator)
+		if owned do delete(pixels, l.allocator)
 		return nil, e
 	}
 	return pixels, .None
