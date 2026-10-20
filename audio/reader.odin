@@ -39,8 +39,17 @@ Codec :: enum u8 {
 Info :: struct {
 	present:               bool, // a track read decodes
 	codec:                 Codec, // the first audio track's codec, decodable or not
-	sample_rate, channels: int,
+	sample_rate, channels: int, // channels as stored; read gives Reader.kept
 	samples:               i64, // presented samples per channel
+	loop:                  Maybe(Loop), // as the file states it: check it lies within samples
+}
+
+// A sample loop in frames, [start, end): end is exclusive. From WAV's first
+// smpl loop (whose end is inclusive, so end here is one past it), a FLAC
+// file's APPLICATION "riff" smpl chunk, or LOOPSTART and LOOPLENGTH in
+// Vorbis comments (Ogg Vorbis and Opus, native FLAC).
+Loop :: struct {
+	start, end: i64,
 }
 
 // A file opened for its audio: the container (whose other tracks a video
@@ -57,6 +66,7 @@ Reader :: struct {
 	mp3_file:     mp3.Reader,
 	ogg_file:     ogg.Reader,
 	track:        int, // the audio track in demux or webm, -1 when absent
+	kept:         int, // channels per frame read gives: the first ones in WAVE order
 	error_detail: string,
 	// The track's configuration.
 	header:       []u8, // owned: Ogg Opus's OpusHead, or Vorbis' headers Xiph-laced
@@ -77,23 +87,30 @@ Reader :: struct {
 	cursor:       int, // next packet to feed
 	next:         i64, // PCM index of the next sample to queue
 	end:          i64,
+	// A packet's PCM at the track's channel count, then the queue read
+	// copies from (kept channels, WAVE order), as f32 or i16: one type is
+	// queued at a time.
+	decoded:      [dynamic]f32,
+	decoded16:    [dynamic]i16,
 	pcm:          [dynamic]f32,
+	pcm16:        [dynamic]i16,
 	pcm_head:     int,
-	pcm_input:    [dynamic]f32, // one PCM chunk converted to f32
 }
 
-open :: proc(r: ^Reader, path: string) -> Error {
-	return open_file(r, path, {})
+// `channels` keeps the first channels of each frame, in WAVE order (2 gives
+// FL and FR), or all of them for 0.
+open :: proc(r: ^Reader, path: string, channels := 0) -> Error {
+	return open_file(r, path, {}, channels)
 }
 
 // Reads a stream with Read_At and Size; the reader borrows it until close.
-open_stream :: proc(r: ^Reader, stream: io.Stream) -> Error {
-	return open_file(r, "", stream)
+open_stream :: proc(r: ^Reader, stream: io.Stream, channels := 0) -> Error {
+	return open_file(r, "", stream, channels)
 }
 
 // Detects and opens the container, and describes the first audio track.
 @(private)
-open_file :: proc(r: ^Reader, path: string, stream: io.Stream) -> Error {
+open_file :: proc(r: ^Reader, path: string, stream: io.Stream, channels: int) -> Error {
 	if r == nil do return .Invalid_Config
 	r^ = {track = -1}
 	// EBML's magic number marks WebM/Matroska and RIFF-style WAVE marks WAV;
@@ -155,6 +172,7 @@ open_file :: proc(r: ^Reader, path: string, stream: io.Stream) -> Error {
 		for &t, i in r.demux.tracks do if t.kind == .Audio && len(t.samples) > 0 {r.track = i; break}
 	}
 	if r.track >= 0 do describe(r)
+	r.kept = common.kept_channels(r.channels, channels)
 	return .None
 }
 
@@ -169,38 +187,74 @@ close :: proc(r: ^Reader) {
 	ogg.close(&r.ogg_file)
 	delete(r.header)
 	delete(r.starts)
+	delete(r.decoded)
+	delete(r.decoded16)
 	delete(r.pcm)
-	delete(r.pcm_input)
+	delete(r.pcm16)
 	r^ = {}
 }
 
-// Fills out with interleaved f32 PCM from the current position and returns
-// the samples per channel written. Zero with End_Of_Stream means the
-// presented audio is exhausted.
-read :: proc(r: ^Reader, out: []f32) -> (samples: int, err: Error) {
+// Fills out with interleaved PCM from the current position, `kept`
+// channels per frame, and returns the frames written. Zero with
+// End_Of_Stream means the presented audio is exhausted. f32 is in [-1, 1];
+// i16 is converted from what the codec decodes: PCM by common.to_i16, FLAC
+// and ALAC from their integers (common.scale_i16), the lossy codecs from
+// f32 (common.to_i16). The types may be mixed, with the same samples.
+read :: proc(r: ^Reader, out: []$T) -> (samples: int, err: Error) where T == f32 || T == i16 {
 	if r == nil || !r.present do return 0, .Unsupported
-	ch := r.channels
+	// The lossy codecs queue their f32, which i16 rounds as it is copied.
+	when T == i16 {
+		if r.codec == .PCM || r.codec == .FLAC || r.codec == .ALAC do return read_queue(r, out, i16)
+	}
+	return read_queue(r, out, f32)
+}
+
+// Reads through the queue of type Q. Lossless frames queued as the other
+// type are read again: their frames decode alike from any start.
+@(private)
+read_queue :: proc(r: ^Reader, out: []$T, $Q: typeid) -> (samples: int, err: Error) {
+	ch := r.kept
+	_, queue := buffers(r, Q)
+	when Q == f32 {other := len(r.pcm16)} else {other := len(r.pcm)}
+	if pending := other - r.pcm_head; pending > 0 {
+		reset(r, r.next - i64(pending / ch)) or_return
+	}
 	want := len(out) / ch
 	got := 0
 	for got < want {
-		available := (len(r.pcm) - r.pcm_head) / ch
+		available := (len(queue) - r.pcm_head) / ch
 		if available > 0 {
 			n := min(available, want - got)
-			copy(out[got * ch:][:n * ch], r.pcm[r.pcm_head:][:n * ch])
+			dst, src := out[got * ch:][:n * ch], queue[r.pcm_head:][:n * ch]
+			when T == Q {
+				copy(dst, src)
+			} else {
+				for x, i in src do dst[i] = common.to_i16(x)
+			}
 			r.pcm_head += n * ch
 			got += n
 			continue
 		}
-		clear(&r.pcm)
+		clear(queue)
 		r.pcm_head = 0
 		if r.next >= r.end || r.open && exhausted(r) do break
 		if !r.open {
 			if e := reset(r, r.next); e != .None do return got, e
 		}
 		// Samples already copied are reported along with a later failure.
-		if e := advance(r); e != .None do return got, e
+		if e := advance(r, Q); e != .None do return got, e
 	}
 	return got, got == 0 ? .End_Of_Stream : .None
+}
+
+// The decode buffer and queue of one sample type.
+@(private)
+buffers :: proc(r: ^Reader, $T: typeid) -> (decoded, queue: ^[dynamic]T) {
+	when T == f32 {
+		return &r.decoded, &r.pcm
+	} else {
+		return &r.decoded16, &r.pcm16
+	}
 }
 
 // Moves the position to `seconds`; read continues from there.
@@ -264,6 +318,10 @@ describe :: proc(r: ^Reader) {
 		}
 		r.end = total
 		r.config = r.flac_file.stream_info[:]
+		if smpl, ok := r.flac_file.smpl.?; ok {
+			if l, lok := wav.smpl_loop(smpl[:]).?; lok do r.loop = Loop{l.start, l.end + 1}
+		}
+		if r.loop == nil do r.loop = comment_loop(r.flac_file.comments)
 	case .WAV:
 		f := r.wave.format
 		r.info = {
@@ -275,6 +333,7 @@ describe :: proc(r: ^Reader) {
 		}
 		r.end = r.wave.frames
 		r.pcm_sample = f.sample
+		if l, ok := r.wave.loop.?; ok do r.loop = Loop{l.start, l.end + 1}
 	case .MP4:
 		describe_mp4(r)
 	}
@@ -346,6 +405,9 @@ describe_ogg :: proc(r: ^Reader) {
 		sample_rate = 48000,
 		channels    = h.channels,
 	}
+	if tags, te := ogg.read_packet(f, 1); te == .None && len(tags) >= 8 && string(tags[:8]) == "OpusTags" {
+		r.loop = comment_loop(tags[8:])
+	}
 	r.config = r.header
 	r.delay = i64(h.pre_skip)
 	n := len(f.packets) - r.ogg_headers
@@ -400,6 +462,7 @@ describe_ogg_vorbis :: proc(r: ^Reader) {
 	if ie != .None || se != .None do return
 	r.sample_rate, r.channels = info.rate, info.channels
 	r.config = r.header
+	r.loop = vorbis_comment_loop(headers[1])
 	n := len(f.packets) - r.ogg_headers
 	r.starts = make([]i64, n)
 	produced: i64
@@ -486,7 +549,8 @@ describe_webm :: proc(r: ^Reader) {
 		}
 	case .Vorbis:
 		r.codec = .Vorbis
-		identification, _, setup, ok := vorbis.split_headers(t.codec_private)
+		identification, comments, setup, ok := vorbis.split_headers(t.codec_private)
+		r.loop = vorbis_comment_loop(comments)
 		info, ie := vorbis.read_identification(identification)
 		se: vorbis.Error
 		shape, se = vorbis.packet_shape(identification, setup)
@@ -582,6 +646,7 @@ reset :: proc(r: ^Reader, position: i64) -> Error {
 	r.open = true
 	r.next = position
 	clear(&r.pcm)
+	clear(&r.pcm16)
 	r.pcm_head = 0
 	if r.container == .FLAC {
 		r.done = false
@@ -697,37 +762,38 @@ read_packet :: proc(r: ^Reader, i: int) -> (data: []u8, sample_index: i64, err: 
 	return p.data, p.pts * i64(r.sample_rate) / i64(t.timescale), .None
 }
 
+// A packet's PCM (frames from sample index `first`) into the queue: the
+// kept channels in WAVE order, within the presented range.
 @(private)
-// A packet's PCM (frames from sample index `first`) into the queue, in WAVE
-// order, within the presented range.
-on_audio :: proc(r: ^Reader, samples: []f32, first: i64) {
-	ch := r.channels
+on_audio :: proc(r: ^Reader, samples: []$T, first: i64) {
+	ch, keep := r.channels, r.kept
+	_, queue := buffers(r, T)
 	frames := i64(len(samples) / ch)
 	// Time before the track's first sample (an empty edit) reads as silence,
 	// so PCM index zero is always time zero.
 	gap := min(first, r.end) - r.next
 	if gap > 0 {
-		resize(&r.pcm, len(r.pcm) + int(gap) * ch)
+		resize(queue, len(queue) + int(gap) * keep)
 		r.next += gap
 	}
 	lo := max(first, r.next)
 	hi := min(first + frames, r.end)
 	if hi <= lo do return
-	start := int(lo - first) * ch
-	src := samples[start:][:int(hi - lo) * ch]
-	if r.reorder {
-		base := len(r.pcm)
-		resize(&r.pcm, base + len(src))
-		dst := r.pcm[base:]
-		for i := 0; i < len(src); i += ch do for k in 0 ..< ch do dst[i + k] = src[i + int(r.order[k])]
+	n := int(hi - lo)
+	src := samples[int(lo - first) * ch:][:n * ch]
+	if r.reorder || keep < ch {
+		base := len(queue)
+		non_zero_resize(queue, base + n * keep)
+		dst := queue[base:]
+		for i in 0 ..< n do for k in 0 ..< keep do dst[i * keep + k] = src[i * ch + int(r.order[k])]
 	} else {
-		append(&r.pcm, ..src)
+		append(queue, ..src)
 	}
 	r.next = hi
 }
 
 @(private)
-advance :: proc(r: ^Reader) -> Error {
+advance :: proc(r: ^Reader, $T: typeid) -> Error {
 	if exhausted(r) do return .None
 	data: []u8
 	sample_index: i64
@@ -740,18 +806,20 @@ advance :: proc(r: ^Reader) -> Error {
 		data, sample_index = read_packet(r, r.cursor) or_return
 		r.cursor += 1
 	}
+	decoded, _ := buffers(r, T)
 	if r.codec == .PCM {
 		ch := r.channels
-		resize(&r.pcm_input, len(data) / common.SAMPLE_BYTES[r.pcm_sample])
-		frames := common.convert_pcm(data, r.pcm_sample, ch, r.pcm_input[:], ch)
-		on_audio(r, r.pcm_input[:frames * ch], sample_index)
+		non_zero_resize(decoded, len(data) / common.SAMPLE_BYTES[r.pcm_sample])
+		frames := common.convert_pcm(data, r.pcm_sample, ch, decoded[:], ch)
+		on_audio(r, decoded[:frames * ch], sample_index)
 		return .None
 	}
-	pcm, first, e := decode_packet(&r.decoder, data, r.codec == .AAC ? .Raw_AAC : .Frame, sample_index)
+	if cap(decoded) == 0 do reserve(decoded, r.decoder.max_frames * r.channels)
+	first, e := decode_packet(&r.decoder, data, r.codec == .AAC ? .Raw_AAC : .Frame, decoded, sample_index)
 	if e != .None {
 		r.error_detail = r.decoder.error_detail
 		return e
 	}
-	if len(pcm) > 0 do on_audio(r, pcm, first)
+	if len(decoded) > 0 do on_audio(r, decoded[:], first)
 	return .None
 }

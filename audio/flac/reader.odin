@@ -24,6 +24,11 @@ Reader :: struct {
 	variable:    bool, // blocking strategy, from the first frame
 	window:      [dynamic]u8,
 	window_at:   i64,
+	comments:    []u8, // owned: the VORBIS_COMMENT block's body, empty without one
+	// The first 60 bytes of a smpl chunk's body (its first loop) from an
+	// APPLICATION "riff" block, as flac --keep-foreign-metadata stores a
+	// WAV file's chunks.
+	smpl:        Maybe([60]u8),
 }
 
 // A frame's coded bytes, borrowed until the next call on the reader.
@@ -71,6 +76,7 @@ close :: proc(r: ^Reader) {
 	if r == nil do return
 	delete(r.seek_table)
 	delete(r.window)
+	delete(r.comments)
 	if r.file != nil do os.close(r.file)
 	r^ = {}
 }
@@ -177,6 +183,19 @@ parse_file :: proc(r: ^Reader) -> Error {
 				if s > 1 << 62 || offset > 1 << 62 do return .Invalid_Data
 				append(&r.seek_table, Seek_Point{i64(s), i64(offset), int(be(p[16:18]))})
 			}
+		case 2:
+			// "riff", then one RIFF chunk: id, little-endian size, body.
+			if size < 12 + 60 || r.smpl != nil do break
+			body := exact(r, at, 12 + 60) or_return
+			if string(body[:8]) != "riffsmpl" || u32(body[8]) | u32(body[9]) << 8 | u32(body[10]) << 16 | u32(body[11]) << 24 < 60 do break
+			chunk: [60]u8
+			copy(chunk[:], body[12:])
+			r.smpl = chunk
+		case 4:
+			if r.comments != nil do break
+			body := exact(r, at, int(size)) or_return
+			r.comments = make([]u8, size)
+			copy(r.comments, body)
 		}
 		if !have_info do return .Invalid_Data
 		at += size

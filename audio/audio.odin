@@ -42,30 +42,51 @@ info :: proc(data: []u8) -> (i: Info, err: Error) {
 	return r.info, r.track < 0 ? .Unsupported : .None
 }
 
-// The first audio track of a file in memory, whole: its sample count is
-// known at open, so the output is allocated once and filled.
-decode :: proc(data: []u8, allocator := context.allocator) -> (a: Audio, err: Error) {
+// The first audio track of a file in memory, whole, as f32: its sample
+// count is known at open, so the output is allocated once and filled.
+// `channels` keeps the first channels of each frame, as Reader does.
+decode :: proc(data: []u8, allocator := context.allocator, channels := 0) -> (a: Audio, err: Error) {
 	reader: bytes.Reader
 	bytes.reader_init(&reader, data)
 	r: Reader
-	open_stream(&r, bytes.reader_to_stream(&reader)) or_return
+	open_stream(&r, bytes.reader_to_stream(&reader), channels) or_return
 	defer close(&r)
 	if !r.present do return a, .Unsupported
-	total := int(r.samples) * r.channels
-	if total > MAX_SAMPLES do return a, .Unsupported
-	samples, aerr := make([]f32, total, allocator)
+	if r.samples > i64(MAX_SAMPLES / r.kept) do return a, .Unsupported
+	samples, aerr := make([]f32, int(r.samples) * r.kept, allocator)
 	if aerr != nil do return a, .Out_Of_Memory
-	got := 0
-	for got < int(r.samples) {
-		n, e := read(&r, samples[got * r.channels:])
-		got += n
-		if e == .End_Of_Stream do break
-		if e != .None {
-			delete(samples, allocator)
-			return a, e
-		}
+	frames, e := fill(&r, samples)
+	if e != .None {
+		delete(samples, allocator)
+		return a, e
 	}
-	return {rate = r.sample_rate, channels = r.channels, samples = samples[:got * r.channels]}, .None
+	return {rate = r.sample_rate, channels = r.kept, samples = samples[:frames * r.kept]}, .None
+}
+
+// The first audio track of a file in memory into out, as f32 or i16 (see
+// read), `channels` per frame as Reader keeps them: size out from info as
+// samples times the kept channels. Returns the frames written, fewer only
+// where the file holds fewer than it states.
+decode_into :: proc(data: []u8, out: []$T, channels := 0) -> (frames: int, err: Error) where T == f32 || T == i16 {
+	reader: bytes.Reader
+	bytes.reader_init(&reader, data)
+	r: Reader
+	open_stream(&r, bytes.reader_to_stream(&reader), channels) or_return
+	defer close(&r)
+	if !r.present do return 0, .Unsupported
+	return fill(&r, out)
+}
+
+// Reads until out is full or the audio ends.
+@(private)
+fill :: proc(r: ^Reader, out: []$T) -> (frames: int, err: Error) {
+	for frames < len(out) / r.kept {
+		n, e := read(r, out[frames * r.kept:])
+		frames += n
+		if e == .End_Of_Stream do break
+		if e != .None do return frames, e
+	}
+	return frames, .None
 }
 
 destroy_audio :: proc(a: ^Audio, allocator := context.allocator) {

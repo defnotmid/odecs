@@ -3,23 +3,26 @@ package audio
 import aac "./aac"
 import aacd "./aac/decoder"
 import alac "./alac"
+import common "../common"
 import flac "./flac"
 import mp3 "./mp3"
 import opus "./opus"
 import vorbis "./vorbis"
 
+_ :: common // used by decode_packet's i16 instances
+
 // The audio codecs' packet decoding, the one implementation: Reader decodes
-// through it, and so does media's native provider. A packet's PCM comes back
-// interleaved at the decoder's channel count, borrowed until the next call,
-// with the sample index of its first frame.
+// through it, and so does media's native provider. A packet's PCM goes into
+// the caller's buffer, interleaved at the decoder's channel count, with the
+// sample index of its first frame.
 Decoder :: struct {
 	codec:        Codec,
 	sample_rate:  int,
 	channels:     int,
 	error_detail: string,
+	max_frames:   int, // the most frames a packet decodes to (an output reservation)
 	next:         i64, // where an untimed packet's output starts
-	pcm:          [dynamic]f32,
-	frame:        []f32, // AAC: one access unit's output
+	pcm:          [dynamic]f32, // the lossy codecs' f32 output, read as i16
 	aac:          ^aacd.Decoder,
 	flac:         ^flac.Decoder,
 	mp3:          ^mp3.Decoder,
@@ -98,29 +101,27 @@ init_decoder :: proc(d: ^Decoder, codec: Codec, sample_rate, channels: int, extr
 		d.aac = new(aacd.Decoder)
 		if d.aac == nil do return .Out_Of_Memory
 		if aacd.init_decoder(d.aac, cfg) != .None do return .Invalid_Config
-		// An access unit can carry several frames (LATM); a packet's frames are
-		// decoded one after another into this buffer.
-		d.frame = make([]f32, 8 * 1024 * 64)
-		if d.frame == nil do return .Out_Of_Memory
+		// An access unit carries up to 64 frames (LATM).
+		d.max_frames = 64 * d.aac.frame_samples
 		d.next = -i64(d.aac.frame_samples) // AAC's first frame primes the overlap
 	case .FLAC:
 		info, _, _ := flac.parse_metadata(extradata)
 		d.flac = new(flac.Decoder)
 		flac.init_decoder(d.flac, info)
-		reserve(&d.pcm, max(info.max_block, 4096) * channels)
+		d.max_frames = max(info.max_block, 4096)
 	case .MP3:
 		d.mp3 = new(mp3.Decoder)
-		reserve(&d.pcm, 1152 * channels)
+		d.max_frames = 1152
 	case .Opus:
 		h, _ := opus.parse_head(extradata)
 		d.opus = new(opus.Multistream)
 		if opus.init_multistream(d.opus, h) != .None do return .Invalid_Config
-		reserve(&d.pcm, opus.MAX_FRAME_SAMPLES * channels)
+		d.max_frames = opus.MAX_FRAME_SAMPLES
 	case .ALAC:
 		cfg, _ := alac.parse_config(extradata)
 		d.alac = new(alac.Decoder)
 		if alac.init_decoder(d.alac, cfg) != .None do return .Invalid_Config
-		reserve(&d.pcm, cfg.frame_length * channels)
+		d.max_frames = cfg.frame_length
 	case .Vorbis:
 		identification, _, setup, _ := vorbis.split_headers(extradata)
 		d.vorbis = new(vorbis.Decoder)
@@ -132,7 +133,7 @@ init_decoder :: proc(d: ^Decoder, codec: Codec, sample_rate, channels: int, extr
 		case .Invalid, .Out_Of_Memory:
 			return .Invalid_Config
 		}
-		reserve(&d.pcm, vorbis.max_frames(d.vorbis) * channels)
+		d.max_frames = vorbis.max_frames(d.vorbis)
 	}
 	return .None
 }
@@ -145,36 +146,41 @@ destroy_decoder :: proc(d: ^Decoder) {
 	if d.alac != nil {alac.destroy_decoder(d.alac); free(d.alac)}
 	if d.vorbis != nil {vorbis.destroy_decoder(d.vorbis); free(d.vorbis)}
 	delete(d.pcm)
-	delete(d.frame)
 	d^ = {}
 }
 
-// Decodes one packet: its PCM, interleaved and borrowed until the next call
-// (empty for a packet that only primes), and the sample index of its first
-// frame (sample_index, or following on from the previous packet when
-// UNTIMED).
-decode_packet :: proc(d: ^Decoder, data: []u8, framing: Framing, sample_index: i64 = UNTIMED) -> (pcm: []f32, first: i64, err: Error) {
-	clear(&d.pcm)
+// Decodes one packet into out, interleaved at the decoder's channel count,
+// as f32 or i16 (empty for a packet that only primes), and returns the
+// sample index of its first frame (sample_index, or following on from the
+// previous packet when UNTIMED). out is the caller's, reserved for
+// max_frames * channels; it grows only for a packet holding more. FLAC and
+// ALAC convert their integer samples to either type directly (exact for
+// f32, common.scale_i16 for i16); the lossy codecs decode f32, which i16
+// rounds with common.to_i16.
+decode_packet :: proc(d: ^Decoder, data: []u8, framing: Framing, out: ^[dynamic]$T, sample_index: i64 = UNTIMED) -> (first: i64, err: Error) where T == f32 || T == i16 {
+	clear(out)
 	if sample_index != UNTIMED do d.next = sample_index
 	first = d.next
-	if d.codec != .AAC && framing != .Frame do return nil, first, .Invalid_Input
+	if d.codec != .AAC && framing != .Frame do return first, .Invalid_Input
 	ch := d.channels
+	// The lossy codecs' output: out itself for f32, else scratch converted at the end.
+	floats: ^[dynamic]f32
+	when T == f32 {
+		floats = out
+	} else {
+		floats = &d.pcm
+		clear(floats)
+	}
 	#partial switch d.codec {
 	case .AAC:
-		pos, out := 0, 0 // bytes read, frames decoded
 		n := d.aac.frame_samples
-		for pos < len(data) {
-			// Room for the largest access unit; a packet of very many grows it.
-			if len(d.frame) - out * ch < 64 * n * ch {
-				grown := make([]f32, 2 * len(d.frame))
-				if grown == nil do return nil, first, .Out_Of_Memory
-				copy(grown, d.frame[:out * ch])
-				delete(d.frame)
-				d.frame = grown
-			}
+		for pos := 0; pos < len(data); {
+			// Room for the largest access unit: 64 frames (LATM).
+			at := len(floats)
+			if non_zero_resize(floats, at + 64 * n * ch) != nil do return first, .Out_Of_Memory
 			consumed, samples: int
 			e: aac.Error
-			dst := d.frame[out * ch:]
+			dst := floats[at:]
 			switch framing {
 			case .ADTS:
 				consumed, samples, e = aacd.decode_adts_frame(d.aac, data[pos:], dst)
@@ -183,35 +189,34 @@ decode_packet :: proc(d: ^Decoder, data: []u8, framing: Framing, sample_index: i
 			case .Raw_AAC:
 				consumed, samples, e = aacd.decode_frame_prefix(d.aac, data[pos:], dst)
 			case .Frame:
-				return nil, first, .Invalid_Input
+				return first, .Invalid_Input
 			}
-			if e != .None do return nil, first, aac_error(d, e)
-			if consumed <= 0 || consumed > len(data) - pos || samples <= 0 || samples % n != 0 || samples > len(dst) / ch do return nil, first, .Codec_Error
-			out += samples
+			if e != .None do return first, aac_error(d, e)
+			if consumed <= 0 || consumed > len(data) - pos || samples <= 0 || samples % n != 0 || samples > len(dst) / ch do return first, .Codec_Error
+			non_zero_resize(floats, at + samples * ch)
 			pos += consumed
 		}
-		d.next = first + i64(out)
-		return d.frame[:out * ch], first, .None
 	case .FLAC:
 		f, _, e := flac.decode_frame(d.flac, data)
 		#partial switch e {
 		case .None:
 		case .Out_Of_Memory:
 			d.error_detail = "FLAC frame allocation failed"
-			return nil, first, .Codec_Error
+			return first, .Codec_Error
 		case:
 			d.error_detail = "invalid FLAC frame"
-			return nil, first, .Invalid_Input
+			return first, .Invalid_Input
 		}
 		h := f.header
 		if h.channels != ch || h.sample_rate != d.sample_rate {
 			d.error_detail = "FLAC frame changes the channel count or sample rate"
-			return nil, first, .Unsupported
+			return first, .Unsupported
 		}
-		resize(&d.pcm, h.block_size * ch)
-		flac.interleave_f32(f, d.pcm[:])
+		non_zero_resize(out, h.block_size * ch)
+		flac.interleave(f, out[:])
 		if sample_index == UNTIMED do first = flac.first_sample(h, d.flac.info)
-		d.next = first
+		d.next = first + i64(h.block_size)
+		return first, .None
 	case .MP3:
 		// At the decoder's channel count: a stream may switch between mono and
 		// stereo frames. A frame whose main data began in bytes not given (after
@@ -221,63 +226,69 @@ decode_packet :: proc(d: ^Decoder, data: []u8, framing: Framing, sample_index: i
 		case .None:
 		case .Unsupported:
 			d.error_detail = "MP3 frame uses unsupported syntax (Layer I/II or free format)"
-			return nil, first, .Unsupported
+			return first, .Unsupported
 		case:
 			d.error_detail = "invalid MP3 frame"
-			return nil, first, .Invalid_Input
+			return first, .Invalid_Input
 		}
 		h := f.header
 		if h.sample_rate != d.sample_rate {
 			d.error_detail = "MP3 frame changes the sample rate"
-			return nil, first, .Unsupported
+			return first, .Unsupported
 		}
 		n := h.samples
-		resize(&d.pcm, n * ch)
+		non_zero_resize(floats, n * ch)
 		switch {
 		case h.channels == ch:
-			for c in 0 ..< ch do for x, i in f.pcm[c] do d.pcm[i * ch + c] = x
+			for c in 0 ..< ch do for x, i in f.pcm[c] do floats[i * ch + c] = x
 		case h.channels == 1:
-			for x, i in f.pcm[0] do d.pcm[i * 2], d.pcm[i * 2 + 1] = x, x
+			for x, i in f.pcm[0] do floats[i * 2], floats[i * 2 + 1] = x, x
 		case:
-			for i in 0 ..< n do d.pcm[i] = 0.5 * (f.pcm[0][i] + f.pcm[1][i])
+			for i in 0 ..< n do floats[i] = 0.5 * (f.pcm[0][i] + f.pcm[1][i])
 		}
 	case .Opus:
-		resize(&d.pcm, opus.MAX_FRAME_SAMPLES * ch)
-		n, e := opus.decode_multistream(d.opus, data, d.pcm[:])
+		non_zero_resize(floats, opus.MAX_FRAME_SAMPLES * ch)
+		n, e := opus.decode_multistream(d.opus, data, floats[:])
 		if e != .None {
 			d.error_detail = "invalid Opus packet"
-			return nil, first, .Invalid_Input
+			return first, .Invalid_Input
 		}
-		resize(&d.pcm, n * ch)
+		non_zero_resize(floats, n * ch)
 	case .ALAC:
 		f, e := alac.decode_frame(d.alac, data)
 		switch e {
 		case .None:
 		case .Unsupported:
 			d.error_detail = "ALAC packet uses unsupported syntax"
-			return nil, first, .Unsupported
+			return first, .Unsupported
 		case .Out_Of_Memory:
-			return nil, first, .Codec_Error
+			return first, .Codec_Error
 		case .Invalid_Data:
 			d.error_detail = "invalid ALAC packet"
-			return nil, first, .Invalid_Input
+			return first, .Invalid_Input
 		}
-		resize(&d.pcm, f.samples * f.channels)
-		alac.interleave_f32(f, d.pcm[:])
+		non_zero_resize(out, f.samples * f.channels)
+		alac.interleave(f, out[:])
+		d.next = first + i64(f.samples)
+		return first, .None
 	case .Vorbis:
 		// The first packet returns nothing: it primes the overlap.
-		resize(&d.pcm, vorbis.max_frames(d.vorbis) * ch)
-		n, e := vorbis.decode_packet(d.vorbis, data, d.pcm[:])
+		non_zero_resize(floats, vorbis.max_frames(d.vorbis) * ch)
+		n, e := vorbis.decode_packet(d.vorbis, data, floats[:])
 		if e != .None {
 			d.error_detail = "invalid Vorbis packet"
-			return nil, first, .Invalid_Input
+			return first, .Invalid_Input
 		}
-		resize(&d.pcm, n * ch)
+		non_zero_resize(floats, n * ch)
 	case:
-		return nil, first, .Unsupported
+		return first, .Unsupported
 	}
-	d.next = first + i64(len(d.pcm) / ch)
-	return d.pcm[:], first, .None
+	when T == i16 {
+		non_zero_resize(out, len(floats))
+		for x, i in floats do out[i] = common.to_i16(x)
+	}
+	d.next = first + i64(len(floats) / ch)
+	return first, .None
 }
 
 @(private)

@@ -209,13 +209,19 @@ parse :: proc(r: ^Reader) -> Error {
 	return r.data_offset != 0 ? .None : .Invalid_Data
 }
 
-// The first loop of a smpl chunk (36 bytes, then 24 per loop); none when
-// the chunk states none, is cut off, or the loop runs backwards.
 @(private)
 parse_loop :: proc(r: ^Reader, body, size: i64, big: bool) -> Maybe(Loop) {
 	b: [60]u8
-	if size < 60 || read_at(r, b[:], body) != .None || u32_at(b[28:], big) == 0 do return nil
-	start, end := i64(u32_at(b[44:], big)), i64(u32_at(b[48:], big))
+	if size < 60 || read_at(r, b[:], body) != .None do return nil
+	return smpl_loop(b[:], big)
+}
+
+// The first loop of a smpl chunk's body (36 bytes, then 24 per loop), as
+// the chunk stores it (FLAC keeps one in an APPLICATION "riff" block); none
+// when the chunk states none, is cut off, or the loop runs backwards.
+smpl_loop :: proc(body: []u8, big := false) -> Maybe(Loop) {
+	if len(body) < 60 || u32_at(body[28:], big) == 0 do return nil
+	start, end := i64(u32_at(body[44:], big)), i64(u32_at(body[48:], big))
 	if start > end do return nil
 	return Loop{start, end}
 }

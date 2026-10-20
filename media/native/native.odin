@@ -178,7 +178,7 @@ State :: struct {
 	decoded:            [dynamic]^hevcd.Picture,
 	input:              []u16,
 	chroma_planes:      []u8, // NV12 input split into U then V
-	pcm:                []f32,
+	pcm:                [dynamic]f32, // decoded audio, reserved at open
 	audio_sample_index: i64,
 	nal_scratch:        hevcd.Nal_Scratch,
 	pool:               ^common.Work_Pool,
@@ -218,6 +218,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 				session.error_detail = s.audio_decoder.error_detail
 				return e == .Unsupported ? .Unsupported : .Invalid_Config
 			}
+			reserve(&s.pcm, s.audio_decoder.max_frames * config.channels)
 		}
 		return .None
 	}
@@ -491,7 +492,8 @@ decode_audio :: proc(session: ^media.Session, s: ^State, packet: media.Packet, r
 		if packet.sample_rate != session.config.sample_rate do return .Invalid_Input
 		index = packet.sample_index
 	}
-	pcm, first, err := audio.decode_packet(s.audio_decoder, packet.data, framing, index)
+	first, err := audio.decode_packet(s.audio_decoder, packet.data, framing, &s.pcm, index)
+	pcm := s.pcm[:]
 	switch err {
 	case .None:
 	case .Unsupported:
