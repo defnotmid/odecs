@@ -1,6 +1,6 @@
 # WAV
 
-Native WAV reading. `open` finds the format and data chunks and the first
+Native WAV reading and writing. `open` finds the format and data chunks and the first
 `smpl` loop; `read_frames` then reads interleaved frames straight from the
 file, so opening costs a few small reads whatever the length, and `read`
 converts them into a caller's `i16` or `f32` buffer. The package imports
@@ -15,6 +15,16 @@ loop, has_loop := r.loop.?                 // smpl: start and end frames, end in
 bytes, e := wav.read_frames(&r, first, count) // as stored, borrowed until the next read
 frames, re := wav.read(&r, first, pcm)     // pcm: []i16 or []f32, interleaved; optional leading-channel count
 wav.close(&r)
+```
+
+Writing takes interleaved `f32` samples and produces a canonical RIFF/WAVE file
+(a 16-byte `fmt ` chunk, then `data`), 16-bit PCM or 32-bit float, any channel
+count:
+
+```odin
+data, err := wav.encode(samples, 48000, 2, .S16)   // .S16: round(clamp(s, -1, 1) * 32767); .F32 as is
+err = wav.write_file("out.wav", samples, 48000, 2, .F32)
+n, e := wav.encode_into(dst, samples, 48000, 2, .S16) // dst holds wav.encoded_size(len(samples), .S16)
 ```
 
 - **Containers:** RIFF/WAVE, big-endian RIFX, and RF64/BW64 with 64-bit

@@ -2,6 +2,7 @@ package wav
 
 import common "../common"
 import "core:io"
+import "core:math"
 import "core:testing"
 
 @(private = "file")
@@ -212,4 +213,34 @@ rifx_loop_and_g711 :: proc(t: ^testing.T) {
 	close(&r)
 	testing.expect_value(t, open_bytes(&r, doc2[:]), Error.None)
 	testing.expect(t, r.loop == nil)
+}
+
+@(test)
+writer_round_trips :: proc(t: ^testing.T) {
+	samples := [8]f32{0, 0.5, -0.5, 1, -1, 1.5, -2, 0.25}
+	for format in Write_Format {
+		for channels in ([3]int{1, 2, 4}) {
+			data, err := encode(samples[:], 44100, channels, format)
+			defer delete(data)
+			testing.expect_value(t, err, Error.None)
+			testing.expect_value(t, len(data), encoded_size(len(samples), format))
+			r: Reader
+			testing.expect_value(t, open_bytes(&r, data), Error.None)
+			testing.expect_value(t, r.format.channels, channels)
+			testing.expect_value(t, r.format.sample_rate, 44100)
+			testing.expect_value(t, int(r.frames), len(samples) / channels)
+			out: [8]f32
+			frames, re := read(&r, 0, out[:])
+			testing.expect_value(t, re, Error.None)
+			testing.expect_value(t, frames * channels, len(samples))
+			for s, i in samples {
+				// read clamps float samples to [-1, 1].
+				want := format == .F32 ? clamp(s, -1, 1) : f32(math.round(clamp(s, -1, 1) * 32767)) / 32768
+				testing.expectf(t, out[i] == want, "%v x%d sample %d: %v, want %v", format, channels, i, out[i], want)
+			}
+			close(&r)
+		}
+	}
+	_, e := encode(samples[:3], 44100, 2, .S16)
+	testing.expect_value(t, e, Error.Invalid_Argument)
 }
