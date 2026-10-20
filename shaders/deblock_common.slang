@@ -1,4 +1,4 @@
-// Shared wire layout with Compute_MB / Compute_Params in codec/h264/compute.odin.
+// Shared wire layout with Compute_MB / Compute_Params in h264/encoder/compute.odin.
 struct DeblockMB {
     uint flags; // intra=1, transform8=2
     uint filter_idc, slice_num;
