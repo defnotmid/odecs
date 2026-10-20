@@ -1085,15 +1085,16 @@ predict_inter :: proc(t: ^Tile, p, x, y, w, h, block_idx: int, $T: typeid) {
 		row := clamp((2 * int(mv[0])) >> uint(sub_y), to_top - spel_top, to_bottom + spel_top - 16)
 		col := clamp((2 * int(mv[1])) >> uint(sub_x), to_left - spel_left, to_right + spel_left - 16)
 		// Reference position and step (8.5.2.3).
-		ref := d.refs[d.h.ref_frame_idx[b.ref_frame[list] - vp9.LAST_FRAME]]
-		x_scale := (ref.width << 14) / d.h.width
-		y_scale := (ref.height << 14) / d.h.height
+		slot := b.ref_frame[list] - vp9.LAST_FRAME
+		ref := d.refs[d.h.ref_frame_idx[slot]]
+		scale := &d.ref_scales[slot]
+		x_scale, y_scale := scale.x, scale.y
 		luma_x, luma_y := x << uint(sub_x), y << uint(sub_y)
 		frac_x := ((16 * luma_x * x_scale) >> 14) & 15
 		frac_y := ((16 * luma_y * y_scale) >> 14) & 15
 		start_x := ((x * x_scale) >> 14) << 4 + ((col * x_scale) >> 14) + frac_x
 		start_y := ((y * y_scale) >> 14) << 4 + ((row * y_scale) >> 14) + frac_y
-		step_x, step_y := (16 * x_scale) >> 14, (16 * y_scale) >> 14
+		step_x, step_y := scale.step_x, scale.step_y
 		source := vp9.Ref_Plane(T) {
 			data   = plane(ref, p, T),
 			stride = ref.strides[p],
@@ -1101,10 +1102,10 @@ predict_inter :: proc(t: ^Tile, p, x, y, w, h, block_idx: int, $T: typeid) {
 			last_y = ((ref.height + sub_y) >> uint(sub_y)) - 1,
 		}
 		if list == 0 {
-			vp9.predict_inter_block(source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, frame[y * stride + x:], stride)
+			vp9.predict_inter_block(&source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, frame[y * stride + x:], stride)
 		} else {
 			second := ([^]T)(&t.scratch)[:64 * 64]
-			vp9.predict_inter_block(source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, second, 64)
+			vp9.predict_inter_block(&source, start_x, start_y, step_x, step_y, w, h, b.interp_filter, d.bit_depth, second, 64)
 			vp9.average_into(frame[y * stride + x:], stride, second, 64, w, h)
 		}
 	}

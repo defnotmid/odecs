@@ -58,6 +58,7 @@ Decoder :: struct {
 	prev_mi:           [dynamic]vp9.Mode_Info, // the previous decoded frame's, for MV prediction
 	filter_cells:      [dynamic]vp9.Filter_Cell, // beside mi: what the loop filter reads
 	filter_levels:     vp9.Filter_Levels, // the current frame's, for filter_cells
+	ref_scales:        [3]Ref_Scale, // LAST, GOLDEN and ALTREF against the current frame
 	prev_segment_ids:  [dynamic]u8,
 	above_partition:   [dynamic]u8,
 	above_nonzero:     [3][dynamic]u8,
@@ -189,6 +190,9 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 	allocate_frame(d) or_return
 	allocate_grids(d) or_return
 	d.filter_levels = vp9.filter_levels(&d.loop_filter, &d.segmentation)
+	if !h.frame_is_intra do for i in 0 ..< 3 {
+		if ref := d.refs[h.ref_frame_idx[i]]; ref != nil do d.ref_scales[i] = ref_scale(ref, h)
+	}
 
 	// Probabilities: the frame context, then the compressed header's updates.
 	d.probs = d.contexts[h.frame_context_idx]
@@ -405,4 +409,20 @@ run_tiles :: proc(data: rawptr, first, end: int) {
 			decode_tile(t, u16)
 		}
 	}
+}
+
+// A reference's scale against the current frame in 1/16384 steps, and the
+// reference samples one predicted sample advances in 1/16 samples (8.5.2.3).
+// Fixed for the frame, so prediction does not divide per block.
+@(private)
+Ref_Scale :: struct {
+	x, y:           int,
+	step_x, step_y: int,
+}
+
+@(private)
+ref_scale :: proc(ref: ^Frame, h: ^Header) -> (s: Ref_Scale) {
+	s.x, s.y = (ref.width << 14) / h.width, (ref.height << 14) / h.height
+	s.step_x, s.step_y = (16 * s.x) >> 14, (16 * s.y) >> 14
+	return
 }

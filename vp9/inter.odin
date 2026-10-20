@@ -22,7 +22,7 @@ MAX_SOURCE :: ((64 - 1) * MAX_STEP + 15) / 16 + 8
 // Predicts a w x h block whose top-left sample maps to (x, y) in 1/16
 // reference samples, stepping step_x/step_y per output sample (16 when the
 // reference has the frame's size). Writes clipped samples to dst.
-predict_inter_block :: proc(ref: Ref_Plane($T), x, y, step_x, step_y, w, h, filter, bit_depth: int, dst: []T, dst_stride: int) {
+predict_inter_block :: proc(ref: ^Ref_Plane($T), x, y, step_x, step_y, w, h, filter, bit_depth: int, dst: []T, dst_stride: int) #no_bounds_check {
 	max_value := i32(1) << uint(bit_depth) - 1
 	kernels := &SUBPEL_FILTERS[filter]
 	rows := (((h - 1) * step_y + 15) >> 4) + 8
@@ -34,10 +34,7 @@ predict_inter_block :: proc(ref: Ref_Plane($T), x, y, step_x, step_y, w, h, filt
 	origin := y0 * ref.stride + x0
 	local: [MAX_SOURCE * MAX_SOURCE]T = ---
 	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
-		for r in 0 ..< rows {
-			line := ref.data[clamp(y0 + r, 0, ref.last_y) * ref.stride:]
-			for c in 0 ..< cols do local[r * MAX_SOURCE + c] = line[clamp(x0 + c, 0, ref.last_x)]
-		}
+		edge_copy(local[:], MAX_SOURCE, ref, x0, y0, cols, rows)
 		src, src_stride, origin = local[:], MAX_SOURCE, 0
 	}
 	if step_x == 16 && step_y == 16 {
@@ -131,3 +128,21 @@ average_into :: proc(dst: []$T, dst_stride: int, other: []T, other_stride, w, h:
 // Chroma motion vector for a sub-8x8 block (8.5.2.1).
 round_mv_q2 :: #force_inline proc "contextless" (v: i32) -> i32 {return (v < 0 ? v - 1 : v + 1) / 2}
 round_mv_q4 :: #force_inline proc "contextless" (v: i32) -> i32 {return (v < 0 ? v - 2 : v + 2) / 4}
+
+// Copies the cols x rows region at (x0, y0) out of a reference plane,
+// repeating edge samples where it falls outside, so the filters reading the
+// copy need no bounds checks: each row is a left fill, one copy and a right
+// fill.
+@(private)
+edge_copy :: proc(dst: []$T, dst_stride: int, ref: ^Ref_Plane(T), x0, y0, cols, rows: int) #no_bounds_check {
+	width := ref.last_x + 1
+	lo := clamp(-x0, 0, cols)
+	hi := clamp(width - x0, lo, cols)
+	for r in 0 ..< rows {
+		line := ref.data[clamp(y0 + r, 0, ref.last_y) * ref.stride:]
+		out := dst[r * dst_stride:][:cols]
+		for &v in out[:lo] do v = line[0]
+		copy(out[lo:hi], line[x0 + lo:x0 + hi])
+		for &v in out[hi:] do v = line[ref.last_x]
+	}
+}
