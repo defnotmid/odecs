@@ -159,7 +159,7 @@ round_trip :: proc(t: ^testing.T, codec: Video_Codec) {
 	testing.expect_value(t, r.video.fps_den, 1)
 	testing.expect_value(t, r.video.color, BT709_LIMITED)
 	testing.expect(t, abs(r.video.duration - f64(FRAMES) / FPS) < 1e-9)
-	testing.expect(t, r.demux.tracks[r.video_index].no_reordering)
+	testing.expect(t, r.audio.demux.tracks[r.video_index].no_reordering)
 
 	// Sequential playback.
 	for i in 0 ..< FRAMES {
@@ -517,7 +517,7 @@ test_audio_only_m4a_round_trip :: proc(t: ^testing.T) {
 	r: Reader
 	testing.expect_value(t, open_reader_stream(&r, mp4.memory_stream(&m)), Error.None)
 	defer close_reader(&r)
-	testing.expect_value(t, string(r.demux.major_brand[:]), "M4A ")
+	testing.expect_value(t, string(r.audio.demux.major_brand[:]), "M4A ")
 	testing.expect_value(t, r.video.frame_count, 0)
 	_, ve := next_frame(&r)
 	testing.expect_value(t, ve, Error.Unsupported)

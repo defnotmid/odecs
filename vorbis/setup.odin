@@ -21,6 +21,7 @@ Setup :: struct {
 	long_codes:   [dynamic]u32, // codes longer than fast_bits, left-justified, ascending per book
 	long_entries: [dynamic]u32, // entry << 6 | length, beside long_codes
 	values:       [dynamic]f32, // per book with a lookup: entries * dimensions
+	tables:       bool, // decode tables built; without them the structure is read only (packet_shape)
 }
 
 @(private)
@@ -30,6 +31,7 @@ FAST_BITS :: 10
 Codebook :: struct {
 	dimensions:  int,
 	entries:     int,
+	lookup:      int, // VQ lookup type, 0: none
 	values:      int, // offset in Setup.values, -1 without a lookup
 	fast:        int, // offset in Setup.fast
 	fast_bits:   int,
@@ -95,7 +97,8 @@ destroy_setup :: proc(s: ^Setup, allocator: mem.Allocator) {
 }
 
 @(private)
-read_setup :: proc(s: ^Setup, info: Info, packet: []u8, allocator: mem.Allocator) -> Error {
+read_setup :: proc(s: ^Setup, info: Info, packet: []u8, allocator: mem.Allocator, tables := true) -> Error {
+	s.tables = tables
 	if len(packet) < 7 || packet[0] != 5 || string(packet[1:7]) != "vorbis" do return .Invalid
 	s.fast.allocator = allocator
 	s.long_codes.allocator = allocator
@@ -165,10 +168,11 @@ read_codebook :: proc(s: ^Setup, c: ^Codebook, b: ^Bits) -> Error {
 		}
 	}
 	if b.overrun do return .Invalid
-	build_codes(s, c, lengths) or_return
+	if s.tables do build_codes(s, c, lengths) or_return
 	// The VQ lookup, unpacked to every entry's vector.
 	c.values = -1
 	lookup := read(b, 4)
+	c.lookup = int(lookup)
 	switch lookup {
 	case 0:
 	case 1, 2:
@@ -182,20 +186,10 @@ read_codebook :: proc(s: ^Setup, c: ^Codebook, b: ^Bits) -> Error {
 		defer delete(multiplicands, context.temp_allocator)
 		for &m in multiplicands do m = read(b, value_bits)
 		if b.overrun do return .Invalid
+		if !s.tables do return .None
 		c.values = len(s.values)
 		if resize(&s.values, len(s.values) + c.entries * c.dimensions) != nil do return .Out_Of_Memory
-		out := s.values[c.values:]
-		for e in 0 ..< c.entries {
-			last: f32
-			divisor := 1
-			for k in 0 ..< c.dimensions {
-				m := lookup == 1 ? multiplicands[e / divisor % count] : multiplicands[e * c.dimensions + k]
-				v := f32(m) * delta + minimum + last
-				out[e * c.dimensions + k] = v
-				if sequence do last = v
-				divisor *= count
-			}
-		}
+		unpack_vectors(s.values[c.values:][:c.entries * c.dimensions], multiplicands, c.dimensions, lookup == 1, minimum, delta, sequence)
 	case:
 		return .Invalid
 	}
@@ -237,7 +231,7 @@ lookup1_values :: proc(entries, dimensions: int) -> int {
 // Then the decode tables: codes up to fast_bits long fill a table indexed by
 // the next bits; longer ones are kept left-justified and sorted.
 @(private)
-build_codes :: proc(s: ^Setup, c: ^Codebook, lengths: []u8) -> Error {
+build_codes :: proc(s: ^Setup, c: ^Codebook, lengths: []u8) -> Error #no_bounds_check {
 	NONE :: 255
 	Node :: struct {
 		child: [2]i32, // 0: not split
@@ -418,7 +412,7 @@ read_residue :: proc(s: ^Setup, r: ^Residue, b: ^Bits) -> Error {
 			r.books[k][pass] = -1
 			if c >> uint(pass) & 1 == 0 do continue
 			book := int(read(b, 8))
-			if book >= len(s.books) || s.books[book].values < 0 do return .Invalid
+			if book >= len(s.books) || s.books[book].lookup == 0 do return .Invalid
 			r.books[k][pass] = i16(book)
 		}
 	}
@@ -457,4 +451,30 @@ read_mapping :: proc(s: ^Setup, m: ^Mapping, channels: int, b: ^Bits) -> Error {
 		if int(m.submap_floor[k]) >= len(s.floors) || int(m.submap_residue[k]) >= len(s.residues) do return .Invalid
 	}
 	return b.overrun ? .Invalid : .None
+}
+
+// Every entry's VQ vector. Type 1 (a lattice): element k of entry e takes
+// multiplicand (e / count^k) % count, entry e's base-count digits, kept as
+// an odometer that advances one entry at a time. Type 2: the multiplicands
+// in order.
+@(private)
+unpack_vectors :: proc(out: []f32, multiplicands: []u32, dimensions: int, lattice: bool, minimum, delta: f32, sequence: bool) #no_bounds_check {
+	count := len(multiplicands)
+	digits := make([]int, dimensions, context.temp_allocator)
+	defer delete(digits, context.temp_allocator)
+	for e in 0 ..< len(out) / dimensions {
+		last: f32
+		vector := out[e * dimensions:][:dimensions]
+		for &v, k in vector {
+			m := lattice ? multiplicands[digits[k]] : multiplicands[e * dimensions + k]
+			v = f32(m) * delta + minimum + last
+			if sequence do last = v
+		}
+		if !lattice do continue
+		for &d in digits {
+			d += 1
+			if d < count do break
+			d = 0
+		}
+	}
 }

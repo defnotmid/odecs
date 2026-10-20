@@ -9,6 +9,7 @@ import common "../../common"
 import flac "../../flac"
 import mp3 "../../mp3"
 import opus "../../opus"
+import vorbis "../../vorbis"
 import avcd "../../h264/decoder"
 import avce "../../h264/encoder"
 import hevcd "../../h265/decoder"
@@ -127,6 +128,10 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 		cfg, e := alac.parse_config(config.extradata)
 		if e == .Unsupported do return .Unsupported
 		if e != .None || cfg.sample_rate != config.sample_rate || cfg.channels != config.channels do return .Invalid_Config
+	case .Vorbis:
+		identification, _, _, ok := vorbis.split_headers(config.extradata)
+		info, e := vorbis.read_identification(identification)
+		if !ok || e != .None || info.channels != config.channels || info.rate != config.sample_rate do return .Invalid_Config
 	case .AAC:
 		cfg, e := aac_config(config)
 		if e != .None {
@@ -184,6 +189,7 @@ State :: struct {
 	flac_decoder:       ^flac.Decoder,
 	mp3_decoder:        ^mp3.Decoder,
 	opus_decoder:       ^opus.Multistream,
+	vorbis_decoder:     ^vorbis.Decoder,
 	alac_decoder:       ^alac.Decoder,
 	encoded:            [dynamic]u8,
 	decoded:            [dynamic]^hevcd.Picture,
@@ -237,6 +243,18 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			s.alac_decoder = new(alac.Decoder)
 			if alac.init_decoder(s.alac_decoder, cfg) != .None do return .Invalid_Config
 			s.pcm = make([]f32, cfg.frame_length * cfg.channels)
+		case .Vorbis:
+			identification, _, setup, _ := vorbis.split_headers(config.extradata)
+			s.vorbis_decoder = new(vorbis.Decoder)
+			switch vorbis.init_decoder(s.vorbis_decoder, identification, setup) {
+			case .None:
+			case .Unsupported:
+				session.error_detail = "Vorbis floor type 0 is not supported"
+				return .Unsupported
+			case .Invalid, .Out_Of_Memory:
+				return .Invalid_Config
+			}
+			s.pcm = make([]f32, vorbis.max_frames(s.vorbis_decoder) * config.channels)
 		case .AV1:
 			return .Unsupported
 		case .AAC:
@@ -252,7 +270,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 	}
 	if config.codec == .H265 do s.encoded = make([dynamic]u8, 0, 65536)
 	switch config.codec {
-	case .ProRes, .FLAC, .MP3, .Opus, .ALAC, .AV1:
+	case .ProRes, .FLAC, .MP3, .Opus, .ALAC, .Vorbis, .AV1:
 		return .Unsupported // probe admits these for decoding only (AV1 not at all)
 	case .VP9:
 		return open_vp9_encoders(session, s, config, options)
@@ -362,6 +380,7 @@ close_native :: proc(session: ^media.Session) {
 	if s.mp3_decoder != nil do free(s.mp3_decoder)
 	if s.opus_decoder != nil {opus.destroy_multistream(s.opus_decoder); free(s.opus_decoder)}
 	if s.alac_decoder != nil {alac.destroy_decoder(s.alac_decoder); free(s.alac_decoder)}
+	if s.vorbis_decoder != nil {vorbis.destroy_decoder(s.vorbis_decoder); free(s.vorbis_decoder)}
 	if s.aac_encoder != nil {aace.destroy_encoder(s.aac_encoder); free(s.aac_encoder)}
 	hevcd.destroy_nal_scratch(&s.nal_scratch)
 	delete(s.encoded); delete(s.decoded); delete(s.input); delete(s.pcm)
@@ -586,6 +605,20 @@ decode_opus :: proc(session: ^media.Session, s: ^State, packet: media.Packet, re
 	return .None
 }
 
+// One Vorbis packet; the first returns nothing (it primes the overlap).
+@(private)
+decode_vorbis :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
+	if packet.framing != .Frame do return .Invalid_Input
+	n, err := vorbis.decode_packet(s.vorbis_decoder, packet.data, s.pcm)
+	if err != .None {
+		session.error_detail = "invalid Vorbis packet"
+		return .Invalid_Input
+	}
+	ch := session.config.channels
+	emit_audio_frame(s, packet, s.pcm[:n * ch], s.vorbis_decoder.rate, ch, n, receiver)
+	return .None
+}
+
 @(private)
 decode_alac :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
 	if packet.framing != .Frame do return .Invalid_Input
@@ -774,6 +807,8 @@ decode_native :: proc(
 		return decode_opus(session, s, packet, receiver)
 	case .ALAC:
 		return decode_alac(session, s, packet, receiver)
+	case .Vorbis:
+		return decode_vorbis(session, s, packet, receiver)
 	case .H264, .H265, .AAC:
 	}
 	if session.config.codec == .AAC {

@@ -118,7 +118,7 @@ video_track :: proc(r: ^movie.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]
 	if nal do for p in r.parameter_sets do append(setup, slice.clone(p))
 	for i in 0 ..< len(r.index.pts) {
 		data, alpha: []u8
-		if r.container == .WebM {
+		if r.audio.container == .WebM {
 			p, e := webm.read_sample(&r.webm, r.video_index, i)
 			if e != .None do fail("video sample %d: %v", i, e)
 			data, alpha = p.data, p.additional
@@ -160,7 +160,7 @@ audio_track :: proc(r: ^movie.Reader, packets: ^[dynamic]media.Packet) -> media.
 	add :: proc(packets: ^[dynamic]media.Packet, data: []u8, framing: media.Framing) {
 		append(packets, media.Packet{data = slice.clone(data), framing = framing})
 	}
-	switch r.container {
+	switch r.audio.container {
 	case .FLAC:
 		if e := flac.seek(&r.flac_file, 0); e != .None do fail("flac seek: %v", e)
 		for {

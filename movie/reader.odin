@@ -1,18 +1,11 @@
 package movie
 
-import alac "../alac"
-import common "../common"
+import audio "../audio"
 import mp4 "../mp4"
-import flac "../flac"
-import ogg "../ogg"
-import opus "../opus"
-import mp3 "../mp3"
-import wav "../wav"
 import webm "../webm"
 import av1 "../av1"
+import "base:intrinsics"
 import "core:io"
-import "core:os"
-import "core:slice"
 import h264 "../h264"
 import avcd "../h264/decoder"
 import hevcd "../h265/decoder"
@@ -30,28 +23,11 @@ Reader_Config :: struct {
 	format:              Frame_Format, // RGBA (default) or Planar
 }
 
-// MP4 includes QuickTime .mov; WebM includes Matroska; WAV includes RF64;
-// FLAC and MP3 are native .flac and .mp3 files.
-Container :: enum u8 {
-	MP4,
-	WebM,
-	WAV,
-	FLAC,
-	MP3,
-	Ogg, // Ogg Opus (.opus, .ogg)
-}
-
-Audio_Codec :: enum u8 {
-	None,
-	AAC,
-	PCM, // uncompressed audio (QuickTime, Matroska, WAV)
-	FLAC,
-	MP3, // MPEG-1/2/2.5 Layer III
-	Opus, // CELT packets; SILK and hybrid (speech) packets are not decoded yet
-	ALAC, // Apple Lossless (.m4a, .mov, .mp4)
-	Vorbis, // demuxed, not decoded
-	Other,
-}
+// The container, the audio codecs and the audio track's description are
+// the audio package's: the reader opens the file through it.
+Container :: audio.Container
+Audio_Codec :: audio.Codec
+Audio_Info :: audio.Info
 
 Video_Info :: struct {
 	width, height:    int, // decoded (cropped) size; frames come out in this size
@@ -66,13 +42,6 @@ Video_Info :: struct {
 	bit_depth:        int, // coded sample depth; 0 until known (VP9: after the first frame)
 	chroma:           media.Chroma,
 	decodable:        bool, // a decoder admits the track (probed at open); else error_detail says why
-}
-
-Audio_Info :: struct {
-	present:               bool, // AAC-LC or PCM that read_audio decodes
-	codec:                 Audio_Codec, // the first audio track's codec, decodable or not
-	sample_rate, channels: int,
-	samples:               i64, // presented samples per channel
 }
 
 // A decoded frame: RGBA8, top-down, tight rows. Alpha comes from the video
@@ -91,34 +60,19 @@ Frame :: struct {
 
 Reader :: struct {
 	config:         Reader_Config,
-	container:      Container,
-	demux:          mp4.Reader,
-	webm:           webm.Reader,
-	wave:           wav.Reader, // WAV
-	flac_file:      flac.Reader, // native FLAC
-	mp3_file:       mp3.Reader, // native MP3
-	ogg_file:       ogg.Reader, // Ogg Opus
-	audio_header:   []u8, // owned: Ogg Opus's OpusHead (audio_config points here)
+	// The opened file and its audio track (audio.Reader): the video track
+	// reads its samples from the same container (audio.demux, audio.webm).
+	audio:          audio.Reader,
 	index:          Sample_Index, // the video track's samples, in Video_Info.timescale ticks
 	color_from_frames: bool, // the container has no colour; use the bitstream's
 	video_index:    int, // demuxer track, -1 when absent
-	audio_index:    int,
 	video:          Video_Info,
-	audio:          Audio_Info,
 	error_detail:   string,
 	conversion:     Conversion_Cache,
 	bit_depth:      int,
 	parameter_sets: [dynamic][]u8, // views into the track's configuration record
 	config_record:  []u8, // H.264 avcC or H.265 hvcC, borrowed from the demuxer
 	nal_length_size: int, // bytes before each NAL unit in a sample
-	audio_config:   []u8, // AAC AudioSpecificConfig or FLAC metadata, borrowed from the demuxer
-	audio_done:     bool, // native FLAC: the last frame has been fed
-	pcm_sample:     common.Sample_Format, // PCM: how each sample is stored
-	// Matroska: the PCM index of each audio packet, from the frame sizes
-	// (block timestamps are rounded to the timestamp scale), and the
-	// decoded samples to discard at the start (CodecDelay).
-	audio_starts:   []i64,
-	audio_delay:    i64,
 	// Video decode state.
 	session:        media.Session,
 	session_open:   bool,
@@ -144,15 +98,6 @@ Reader :: struct {
 	has_current:    bool,
 	free:           [dynamic][]u8,
 	err:            Error,
-	// Audio decode state.
-	audio_session:  media.Session,
-	audio_open:     bool,
-	audio_cursor:   int, // next AAC sample to feed
-	audio_next:     i64, // index of the next PCM sample to queue
-	audio_end:      i64,
-	pcm:            [dynamic]f32,
-	pcm_head:       int,
-	pcm_input:      [dynamic]f32, // one PCM chunk converted to f32
 }
 
 // The video samples in decode order (borrowed from the demuxer's tables) and
@@ -188,199 +133,39 @@ open_input :: proc(r: ^Reader, config: Reader_Config, path: string, stream: io.S
 	r^ = {
 		config      = config,
 		video_index = -1,
-		audio_index = -1,
 		preference  = config.preference,
 	}
-	// EBML's magic number marks WebM/Matroska and RIFF-style WAVE marks WAV;
-	// anything else is ISO BMFF.
-	magic: [12]u8
-	if stream.procedure != nil {
-		io.read_at(stream, magic[:], 0)
-	} else if f, err := os.open(path); err == nil {
-		os.read(f, magic[:])
-		os.close(f)
+	// The file and its audio track; the video track is found in the same
+	// container.
+	if e := stream.procedure != nil ? audio.open_stream(&r.audio, stream) : audio.open(&r.audio, path); e != .None {
+		r.error_detail = r.audio.error_detail
+		return e
 	}
-	riff := string(magic[:4])
-	if is_flac(&magic, path, stream) {
-		r.container = .FLAC
-		if e := stream.procedure != nil ? flac.open_stream(&r.flac_file, stream) : flac.open(&r.flac_file, path); e != .None {
-			r.error_detail = "not a readable FLAC file"
-			return flac_error(e)
-		}
-		r.audio_index = 0
-	} else if string(magic[8:]) == "WAVE" && (riff == "RIFF" || riff == "RIFX" || riff == "RF64" || riff == "BW64") {
-		r.container = .WAV
-		if e := stream.procedure != nil ? wav.open_stream(&r.wave, stream) : wav.open(&r.wave, path); e != .None {
-			r.error_detail = e == .Unsupported ? "ADPCM and other compressed WAV audio is not supported" : "not a readable WAV file"
-			return wav_error(e)
-		}
-		r.audio_index = 0
-	} else if is_mp3(&magic) {
-		r.container = .MP3
-		if e := stream.procedure != nil ? mp3.open_stream(&r.mp3_file, stream) : mp3.open(&r.mp3_file, path); e != .None {
-			r.error_detail = e == .Unsupported ? "MP3 Layer I/II or free-format streams are not supported" : "not a readable MP3 file"
-			return mp3_error(e)
-		}
-		r.audio_index = 0
-	} else if riff == "OggS" {
-		r.container = .Ogg
-		if e := stream.procedure != nil ? ogg.open_stream(&r.ogg_file, stream, "OpusHead") : ogg.open(&r.ogg_file, path, "OpusHead"); e != .None {
-			r.error_detail = "not a readable Ogg Opus file"
-			return ogg_error(e)
-		}
-		r.audio_index = 0
-	} else if riff == "\x1A\x45\xDF\xA3" {
-		r.container = .WebM
-		if e := stream.procedure != nil ? webm.open_stream(&r.webm, stream) : webm.open(&r.webm, path); e != .None {
-			r.error_detail = e == .Unsupported ? "unsupported Matroska document" : "not a readable WebM file"
-			return webm_error(e)
-		}
-		for &t, i in r.webm.tracks {
+	#partial switch r.audio.container {
+	case .WebM:
+		for &t, i in r.audio.webm.tracks {
 			video := t.codec == .VP9 || t.codec == .H264 || t.codec == .H265 || t.codec == .AV1
-			if t.kind == .Video && r.video_index < 0 && video && len(t.samples) > 0 do r.video_index = i
-			if t.kind == .Audio && r.audio_index < 0 && len(t.samples) > 0 do r.audio_index = i
+			if t.kind == .Video && video && len(t.samples) > 0 {r.video_index = i; break}
 		}
-	} else {
-		if e := stream.procedure != nil ? mp4.open_stream(&r.demux, stream) : mp4.open(&r.demux, path); e != .None {
-			r.error_detail = e == .Unsupported ? "fragmented or multi-description MP4 is not supported" : "not a readable MP4 file"
-			return mp4_error(e)
-		}
-		for &t, i in r.demux.tracks {
+	case .MP4:
+		for &t, i in r.audio.demux.tracks {
 			video := t.codec == .H264 || t.codec == .H265 || t.codec == .ProRes || t.codec == .AV1
-			if t.kind == .Video && r.video_index < 0 && video && len(t.samples) > 0 do r.video_index = i
-			if t.kind == .Audio && r.audio_index < 0 && len(t.samples) > 0 do r.audio_index = i
+			if t.kind == .Video && video && len(t.samples) > 0 {r.video_index = i; break}
 		}
 	}
 	if r.video_index >= 0 do if e := describe_video(r); e != .None {close_reader(r); return e}
 	if r.video_index >= 0 do check_video(r)
-	if r.audio_index >= 0 do describe_audio(r)
 	return .None
 }
 
-// "fLaC", possibly after an ID3v2 tag (which MP3 files also start with).
+// A container reader's error: every container names them alike.
 @(private)
-is_flac :: proc(magic: ^[12]u8, path: string, stream: io.Stream) -> bool {
-	if string(magic[:4]) == "fLaC" do return true
-	if string(magic[:3]) != "ID3" do return false
-	at := i64(magic[6]) << 21 | i64(magic[7]) << 14 | i64(magic[8]) << 7 | i64(magic[9])
-	at += 10 + (magic[5] & 0x10 != 0 ? 10 : 0)
-	marker: [4]u8
-	if stream.procedure != nil {
-		io.read_at(stream, marker[:], at)
-	} else if f, err := os.open(path); err == nil {
-		os.read_at(f, marker[:], at)
-		os.close(f)
-	}
-	return string(marker[:]) == "fLaC"
-}
-
-// An ID3v2 tag (FLAC's was ruled out first) or an MPEG audio frame sync.
-@(private)
-is_mp3 :: proc(magic: ^[12]u8) -> bool {
-	if string(magic[:3]) == "ID3" do return true
-	_, e := mp3.parse_header(magic[:4])
-	return e == .None
-}
-
-@(private)
-ogg_error :: proc(e: ogg.Error) -> Error {
-	switch e {
+container_error :: proc(e: $E) -> Error where intrinsics.type_is_enum(E) {
+	#partial switch e {
 	case .None:
 		return .None
 	case .Invalid_Argument:
 		return .Invalid_Input
-	case .Invalid_Data:
-		return .Invalid_Data
-	case .IO_Error:
-		return .IO_Error
-	case .Out_Of_Memory:
-		return .Out_Of_Memory
-	case .End_Of_Stream:
-		return .End_Of_Stream
-	case .Closed:
-		return .Closed
-	}
-	return .Invalid_Data
-}
-
-@(private)
-mp3_error :: proc(e: mp3.Error) -> Error {
-	switch e {
-	case .None:
-		return .None
-	case .Invalid_Argument:
-		return .Invalid_Input
-	case .Invalid_Data:
-		return .Invalid_Data
-	case .Unsupported:
-		return .Unsupported
-	case .IO_Error:
-		return .IO_Error
-	case .Out_Of_Memory:
-		return .Out_Of_Memory
-	case .End_Of_Stream:
-		return .End_Of_Stream
-	case .Closed:
-		return .Closed
-	}
-	return .Invalid_Data
-}
-
-@(private)
-flac_error :: proc(e: flac.Error) -> Error {
-	switch e {
-	case .None:
-		return .None
-	case .Invalid_Argument:
-		return .Invalid_Input
-	case .Invalid_Data:
-		return .Invalid_Data
-	case .Unsupported:
-		return .Unsupported
-	case .IO_Error:
-		return .IO_Error
-	case .Out_Of_Memory:
-		return .Out_Of_Memory
-	case .End_Of_Stream:
-		return .End_Of_Stream
-	case .Closed:
-		return .Closed
-	}
-	return .Invalid_Data
-}
-
-@(private)
-wav_error :: proc(e: wav.Error) -> Error {
-	switch e {
-	case .None:
-		return .None
-	case .Invalid_Argument:
-		return .Invalid_Input
-	case .Invalid_Data:
-		return .Invalid_Data
-	case .Unsupported:
-		return .Unsupported
-	case .IO_Error:
-		return .IO_Error
-	case .Out_Of_Memory:
-		return .Out_Of_Memory
-	case .End_Of_Stream:
-		return .End_Of_Stream
-	case .Closed:
-		return .Closed
-	}
-	return .Invalid_Data
-}
-
-@(private)
-webm_error :: proc(e: webm.Error) -> Error {
-	switch e {
-	case .None:
-		return .None
-	case .Invalid_Argument:
-		return .Invalid_Input
-	case .Invalid_Data:
-		return .Invalid_Data
 	case .Unsupported:
 		return .Unsupported
 	case .IO_Error:
@@ -397,8 +182,8 @@ webm_error :: proc(e: webm.Error) -> Error {
 
 @(private)
 describe_video :: proc(r: ^Reader) -> Error {
-	if r.container == .WebM do return describe_webm_video(r)
-	t := &r.demux.tracks[r.video_index]
+	if r.audio.container == .WebM do return describe_webm_video(r)
+	t := &r.audio.demux.tracks[r.video_index]
 	n := len(t.samples)
 	r.index = {t.samples.pts[:n], t.samples.sync[:n], t.presentation}
 	r.video.timescale = t.timescale
@@ -475,7 +260,7 @@ describe_nal_video :: proc(r: ^Reader, codec: Video_Codec, record: []u8, contain
 // ProRes video is limited range.
 @(private)
 describe_prores :: proc(r: ^Reader, t: ^mp4.Track) -> Error {
-	p, e := mp4.read_sample(&r.demux, r.video_index, 0)
+	p, e := mp4.read_sample(&r.audio.demux, r.video_index, 0)
 	if e != .None do return mp4_error(e)
 	h, he := prores.parse_frame_header(p.data)
 	if he != .None {
@@ -543,7 +328,7 @@ describe_av1_video :: proc(r: ^Reader, record: []u8, container: media.Color, ran
 // and the bitstream's colour space from the first decoded frame.
 @(private)
 describe_webm_video :: proc(r: ^Reader) -> Error {
-	t := &r.webm.tracks[r.video_index]
+	t := &r.audio.webm.tracks[r.video_index]
 	n := len(t.samples)
 	r.index = {t.samples.pts[:n], t.samples.sync[:n], t.presentation}
 	r.video.timescale = 1_000_000_000 // WebM timestamps are nanoseconds
@@ -691,243 +476,14 @@ sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 	return
 }
 
-@(private)
-describe_audio :: proc(r: ^Reader) {
-	if r.container == .WebM {
-		describe_webm_audio(r)
-		return
-	}
-	if r.container == .Ogg {
-		describe_ogg_audio(r)
-		return
-	}
-	if r.container == .MP3 {
-		h := r.mp3_file.header
-		r.audio = {
-			present     = true,
-			codec       = .MP3,
-			sample_rate = h.sample_rate,
-			channels    = h.channels,
-			samples     = mp3.total_samples(&r.mp3_file),
-		}
-		r.audio_end = r.audio.samples
-		return
-	}
-	if r.container == .FLAC {
-		info := r.flac_file.info
-		total, e := flac.total_samples(&r.flac_file)
-		r.audio = {
-			present     = e == .None && info.channels <= 8 && info.sample_rate > 0,
-			codec       = .FLAC,
-			sample_rate = info.sample_rate,
-			channels    = info.channels,
-			samples     = total,
-		}
-		r.audio_end = total
-		r.audio_config = r.flac_file.stream_info[:]
-		return
-	}
-	if r.container == .WAV {
-		f := r.wave.format
-		r.audio = {
-			present     = true,
-			codec       = .PCM,
-			sample_rate = f.sample_rate,
-			channels    = f.channels,
-			samples     = r.wave.frames,
-		}
-		r.audio_end = r.wave.frames
-		r.pcm_sample = f.sample
-		return
-	}
-	t := &r.demux.tracks[r.audio_index]
-	r.audio.sample_rate, r.audio.channels = t.sample_rate, t.channels
-	r.audio.samples = mp4.track_end(t) * i64(t.sample_rate) / i64(t.timescale)
-	r.audio_end = r.audio.samples
-	r.audio_config = t.audio_specific_config
-	#partial switch t.codec {
-	case .PCM:
-		r.audio.codec = .PCM
-		ok: bool
-		r.pcm_sample, ok = common.sample_format(int(t.pcm.bits), t.pcm.float, t.pcm.unsigned, !t.pcm.little_endian)
-		r.audio.present = ok && t.channels >= 1
-	case .AAC:
-		r.audio.codec = .AAC
-		info, ok := mp4.parse_asc(t.audio_specific_config)
-		r.audio.present = ok && info.object_type == 2 && t.channels >= 1 && t.channels <= 8
-	case .FLAC:
-		r.audio.codec = .FLAC
-		r.audio.present = flac_config_ok(t.audio_specific_config, t.sample_rate, t.channels)
-	case .MP3:
-		r.audio.codec = .MP3
-		r.audio.present = t.sample_rate > 0 && t.channels >= 1 && t.channels <= 2
-	case .ALAC:
-		r.audio.codec = .ALAC
-		cfg, e := alac.parse_config(t.audio_specific_config)
-		r.audio.present = e == .None && cfg.sample_rate == t.sample_rate && cfg.channels == t.channels
-	case .Opus:
-		r.audio.codec = .Opus
-		h, e := opus.parse_head(t.audio_specific_config)
-		r.audio.present = e == .None && h.channels == t.channels && t.sample_rate == 48000
-	case:
-		r.audio.codec = .Other
-	}
-}
-
-// Ogg Opus (RFC 7845): OpusHead and OpusTags, then audio packets. Packet
-// positions run on from the first page's granule position by each
-// packet's duration; the last granule position trims the end.
-@(private)
-OGG_HEADERS :: 2
-
-@(private)
-describe_ogg_audio :: proc(r: ^Reader) {
-	f := &r.ogg_file
-	head, e := ogg.read_packet(f, 0)
-	if e != .None || len(f.packets) <= OGG_HEADERS do return
-	r.audio_header = slice.clone(head)
-	h, he := opus.parse_head(r.audio_header)
-	r.audio = {
-		present     = he == .None,
-		codec       = .Opus,
-		sample_rate = 48000,
-		channels    = h.channels,
-	}
-	r.audio_config = r.audio_header
-	r.audio_delay = i64(h.pre_skip)
-	n := len(f.packets) - OGG_HEADERS
-	r.audio_starts = make([]i64, n)
-	position, offset: i64
-	anchored := false
-	last_granule: i64 = -1
-	for i in 0 ..< n {
-		p := f.packets[OGG_HEADERS + i]
-		lead := p.lead
-		samples, _ := opus.packet_samples(lead[:])
-		r.audio_starts[i] = position
-		position += i64(samples)
-		if p.granule >= 0 {
-			if !anchored {
-				offset = max(p.granule - position, 0)
-				anchored = true
-			}
-			last_granule = p.granule
-		}
-	}
-	for &start in r.audio_starts do start += offset
-	end := position + offset
-	if last_granule >= 0 do end = min(end, last_granule)
-	r.audio.samples = max(end - r.audio_delay, 0)
-	r.audio_end = r.audio.samples
-}
-
-@(private)
-flac_config_ok :: proc(metadata: []u8, rate, channels: int) -> bool {
-	info, _, e := flac.parse_metadata(metadata)
-	return e == .None && info.sample_rate == rate && info.channels == channels && channels <= 8 && rate > 0
-}
-
-// Matroska audio. Block timestamps are rounded to the timestamp scale
-// (usually 1 ms), too coarse to place PCM, so packet positions come from
-// frame sizes: AAC's fixed frame length, or a PCM block's byte count. A
-// timestamp further than a packet from that running position (a gap in the
-// recording) restarts it there.
-@(private)
-describe_webm_audio :: proc(r: ^Reader) {
-	t := &r.webm.tracks[r.audio_index]
-	rate := t.sample_rate
-	r.audio.sample_rate, r.audio.channels = rate, t.channels
-	frame_samples := 0
-	#partial switch t.codec {
-	case .Opus:
-		r.audio.codec = .Opus
-		h, he := opus.parse_head(t.codec_private)
-		if he == .None && h.channels == t.channels {
-			r.audio.present = true
-			r.audio_config = t.codec_private
-			rate = 48000 // Opus always decodes at 48 kHz
-			r.audio.sample_rate = rate
-			// Packets are as long as the first one says, block timestamps
-			// correcting any change.
-			if len(t.samples) > 0 {
-				if p, pe := webm.read_sample(&r.webm, r.audio_index, 0); pe == .None do frame_samples, _ = opus.packet_samples(p.data)
-			}
-			if t.codec_delay == 0 do t.codec_delay = i64(h.pre_skip) * 1_000_000_000 / 48000
-		}
-	case .Vorbis:
-		r.audio.codec = .Vorbis
-	case .AAC:
-		r.audio.codec = .AAC
-		info, ok := mp4.parse_asc(t.codec_private)
-		if ok && info.object_type == 2 && t.channels >= 1 && t.channels <= 8 && info.sample_rate == rate {
-			r.audio.present = true
-			r.audio_config = t.codec_private
-			frame_samples = info.frame_samples
-		}
-	case .MP3:
-		r.audio.codec = .MP3
-		r.audio.present = t.channels >= 1 && t.channels <= 2
-		frame_samples = rate >= 32000 ? 1152 : 576 // MPEG-1 rates, else MPEG-2/2.5
-	case .FLAC:
-		r.audio.codec = .FLAC
-		if flac_config_ok(t.codec_private, rate, t.channels) {
-			r.audio.present = true
-			r.audio_config = t.codec_private
-			// Fixed-blocking streams place every frame exactly; otherwise the
-			// block timestamps do.
-			info, _, _ := flac.parse_metadata(t.codec_private)
-			if info.min_block == info.max_block do frame_samples = info.max_block
-		}
-	case .PCM:
-		r.audio.codec = .PCM
-		f := t.pcm_format
-		ok: bool
-		r.pcm_sample, ok = common.sample_format(int(f.bits), f.float, f.unsigned, !f.little_endian)
-		r.audio.present = ok && t.channels >= 1 && rate > 0
-	case:
-		r.audio.codec = .Other
-	}
-	if rate <= 0 {r.audio.present = false; return}
-	r.audio.samples = webm.track_end(t) * i64(rate) / 1_000_000_000
-	if !r.audio.present do return
-	n := len(t.samples)
-	r.audio_starts = make([]i64, n)
-	frame_bytes := i64(common.SAMPLE_BYTES[r.pcm_sample]) * i64(t.channels)
-	position: i64
-	for i in 0 ..< n {
-		s := t.samples[i]
-		stated := (s.pts * i64(rate) + 500_000_000) / 1_000_000_000
-		length := i64(frame_samples)
-		if t.codec == .PCM do length = (i64(s.size) + i64(len(t.stripped))) / frame_bytes
-		if i == 0 || length == 0 || abs(stated - position) > max(length, i64(rate) / 100) do position = stated
-		r.audio_starts[i] = position
-		position += length
-	}
-	// Nanoseconds are not exact sample counts (1024 at 48 kHz is 21333333 ns).
-	r.audio_delay = (t.codec_delay * i64(rate) + 500_000_000) / 1_000_000_000
-	r.audio.samples = max(position - r.audio_delay - (t.end_discard * i64(rate) + 500_000_000) / 1_000_000_000, 0)
-	// FLAC's last frame is shorter than the rest; streaminfo has the count.
-	if t.codec == .FLAC {
-		if info, _, _ := flac.parse_metadata(t.codec_private); info.total_samples > 0 do r.audio.samples = min(r.audio.samples, info.total_samples)
-	}
-	r.audio_end = r.audio.samples
-}
-
 close_reader :: proc(r: ^Reader) {
 	if r == nil do return
 	if r.session_open do media.close(&r.session)
-	if r.audio_open do media.close(&r.audio_session)
 	if r.own_context != nil {
 		vulkan.destroy_context(r.own_context)
 		free(r.own_context)
 	}
-	mp4.close(&r.demux)
-	webm.close(&r.webm)
-	wav.close(&r.wave)
-	flac.close(&r.flac_file)
-	mp3.close(&r.mp3_file)
-	ogg.close(&r.ogg_file)
-	delete(r.audio_header)
+	audio.close(&r.audio)
 	for q in r.queue[r.queue_head:] do delete(q.data)
 	if r.has_current do delete(r.current.data)
 	for b in r.free do delete(b)
@@ -936,10 +492,7 @@ close_reader :: proc(r: ^Reader) {
 	delete(r.pending)
 	delete(r.parameter_sets)
 	delete(r.keyframes)
-	delete(r.audio_starts)
 	free(r.conversion.tone)
-	delete(r.pcm)
-	delete(r.pcm_input)
 	r^ = {}
 }
 
@@ -965,7 +518,7 @@ video_config :: proc(r: ^Reader) -> media.Config {
 	config.chroma = r.video.chroma
 	if codec == .H264 || codec == .H265 {
 		// Matroska does not say whether frames are reordered.
-		config.no_reordering = r.container == .MP4 && codec == .H264 && r.demux.tracks[r.video_index].no_reordering
+		config.no_reordering = r.audio.container == .MP4 && codec == .H264 && r.audio.demux.tracks[r.video_index].no_reordering
 		c := r.config_record
 		if codec == .H264 && len(c) > 1 {
 			switch c[1] {
@@ -1193,12 +746,12 @@ convert_bands :: proc(data: rawptr, first, end: int) {
 // WebM, the alpha stream's frame.
 @(private)
 read_video_sample :: proc(r: ^Reader, i: int) -> (data, alpha: []u8, err: Error) {
-	if r.container == .WebM {
-		p, e := webm.read_sample(&r.webm, r.video_index, i)
-		if e != .None do return nil, nil, webm_error(e)
+	if r.audio.container == .WebM {
+		p, e := webm.read_sample(&r.audio.webm, r.video_index, i)
+		if e != .None do return nil, nil, container_error(e)
 		return p.data, p.additional, .None
 	}
-	p, e := mp4.read_sample(&r.demux, r.video_index, i)
+	p, e := mp4.read_sample(&r.audio.demux, r.video_index, i)
 	if e != .None do return nil, nil, mp4_error(e)
 	return p.data, nil, .None
 }
@@ -1410,222 +963,12 @@ keyframe_times :: proc(r: ^Reader) -> []f64 {
 // presented audio is exhausted. PCM index zero is movie time zero: priming
 // and padding are trimmed and a delayed track starts with silence.
 read_audio :: proc(r: ^Reader, out: []f32) -> (samples: int, err: Error) {
-	if r == nil || !r.audio.present do return 0, .Unsupported
-	ch := r.audio.channels
-	want := len(out) / ch
-	got := 0
-	for got < want {
-		available := (len(r.pcm) - r.pcm_head) / ch
-		if available > 0 {
-			n := min(available, want - got)
-			copy(out[got * ch:][:n * ch], r.pcm[r.pcm_head:][:n * ch])
-			r.pcm_head += n * ch
-			got += n
-			continue
-		}
-		clear(&r.pcm)
-		r.pcm_head = 0
-		if r.audio_next >= r.audio_end || r.audio_open && audio_exhausted(r) do break
-		if !r.audio_open {
-			if e := reset_audio(r, r.audio_next); e != .None do return got, e
-		}
-		// Samples already copied are reported along with a later failure.
-		if e := advance_audio(r); e != .None do return got, e
-	}
-	return got, got == 0 ? .End_Of_Stream : .None
+	if r == nil do return 0, .Unsupported
+	return audio.read(&r.audio, out)
 }
 
 // Moves the audio position to `seconds`; read_audio continues from there.
 seek_audio :: proc(r: ^Reader, seconds: f64) -> Error {
-	if r == nil || !r.audio.present do return .Unsupported
-	target := i64(seconds * f64(r.audio.sample_rate) + 0.5)
-	return reset_audio(r, clamp(target, 0, r.audio_end))
+	if r == nil do return .Unsupported
+	return audio.seek(&r.audio, seconds)
 }
-
-@(private, rodata)
-AUDIO_CODECS := #partial [Audio_Codec]media.Codec {
-	.AAC  = .AAC,
-	.FLAC = .FLAC,
-	.MP3  = .MP3,
-	.Opus = .Opus,
-	.ALAC = .ALAC,
-}
-
-@(private)
-reset_audio :: proc(r: ^Reader, position: i64) -> Error {
-	if r.audio_open {media.close(&r.audio_session); r.audio_open = false}
-	coded := r.audio.codec == .AAC || r.audio.codec == .FLAC || r.audio.codec == .MP3 || r.audio.codec == .Opus || r.audio.codec == .ALAC
-	if coded {
-		config := media.default_config(AUDIO_CODECS[r.audio.codec], .Decode)
-		config.sample_rate, config.channels = r.audio.sample_rate, r.audio.channels
-		config.extradata = r.audio_config
-		providers := [1]media.Provider{native.provider()}
-		if e := media.open(&r.audio_session, config, providers[:]); e != .None {
-			r.error_detail = "the audio decoder refused the track configuration"
-			return media_error(e)
-		}
-	}
-	r.audio_open = true
-	r.audio_next = position
-	clear(&r.pcm)
-	r.pcm_head = 0
-	if r.container == .FLAC {
-		r.audio_done = false
-		if e := flac.seek(&r.flac_file, position); e != .None do return flac_error(e)
-		return .None
-	}
-	// One packet of pre-roll restores the AAC overlap of the target's frame,
-	// and covers a FLAC frame placed by a rounded timestamp; MP3 needs the
-	// bit reservoir (up to 511 bytes back, 11 of the smallest frames) and
-	// the frame before; ALAC frames and PCM chunks start exactly.
-	k := audio_packet_at(r, position)
-	preroll := r.audio.codec == .AAC || r.audio.codec == .FLAC ? 1 : 0
-	if r.audio.codec == .MP3 do preroll = MP3_PREROLL
-	if r.audio.codec == .Opus {
-		// 80 ms for the decoder to converge (RFC 7845 4.6).
-		k = audio_packet_at(r, position - OPUS_PREROLL)
-		preroll = 0
-	}
-	r.audio_cursor = max(k - preroll, 0)
-	return .None
-}
-
-@(private)
-MP3_PREROLL :: 13
-
-@(private)
-OPUS_PREROLL :: 3840 // samples at 48 kHz
-
-// WAV has no packets: its data is read in runs of this many frames.
-@(private)
-WAV_PACKET :: 4096
-
-@(private)
-audio_exhausted :: proc(r: ^Reader) -> bool {
-	return r.container == .FLAC ? r.audio_done : r.audio_cursor >= audio_packet_count(r)
-}
-
-@(private)
-audio_packet_count :: proc(r: ^Reader) -> int {
-	switch r.container {
-	case .MP3:
-		return len(r.mp3_file.frames)
-	case .FLAC:
-		return 0 // read frame by frame; see audio_exhausted
-	case .WAV:
-		return int((r.wave.frames + WAV_PACKET - 1) / WAV_PACKET)
-	case .WebM:
-		return len(r.webm.tracks[r.audio_index].samples)
-	case .Ogg:
-		return max(len(r.ogg_file.packets) - OGG_HEADERS, 0)
-	case .MP4:
-	}
-	return len(r.demux.tracks[r.audio_index].samples)
-}
-
-// Decode-order index of the audio packet holding PCM index `position`, or
-// -1 before the first.
-@(private)
-audio_packet_at :: proc(r: ^Reader, position: i64) -> int {
-	if r.container == .WAV do return position < 0 ? -1 : int(position / WAV_PACKET)
-	if r.container == .MP3 {
-		at := position + i64(r.mp3_file.tag.delay)
-		return at < 0 ? -1 : int(at / i64(r.mp3_file.header.samples))
-	}
-	if r.container == .WebM || r.container == .Ogg {
-		starts := r.audio_starts
-		lo, hi := 0, len(starts)
-		for lo < hi {
-			mid := (lo + hi) / 2
-			if starts[mid] - r.audio_delay <= position {lo = mid + 1} else {hi = mid}
-		}
-		return lo - 1
-	}
-	t := &r.demux.tracks[r.audio_index]
-	ix := Sample_Index{t.samples.pts[:len(t.samples)], t.samples.sync[:len(t.samples)], t.presentation}
-	return sample_at(&ix, position * i64(t.timescale) / i64(r.audio.sample_rate))
-}
-
-// One audio packet and the PCM index of its first decoded sample.
-@(private)
-read_audio_packet :: proc(r: ^Reader, i: int) -> (data: []u8, sample_index: i64, err: Error) {
-	if r.container == .MP3 {
-		bytes, e := mp3.read_frame(&r.mp3_file, i)
-		if e != .None do return nil, 0, mp3_error(e)
-		return bytes, mp3.frame_sample(&r.mp3_file, i), .None
-	}
-	if r.container == .WAV {
-		first := i64(i) * WAV_PACKET
-		bytes, e := wav.read_frames(&r.wave, first, WAV_PACKET)
-		if e != .None do return nil, 0, wav_error(e)
-		return bytes, first, .None
-	}
-	if r.container == .Ogg {
-		bytes, e := ogg.read_packet(&r.ogg_file, OGG_HEADERS + i)
-		if e != .None do return nil, 0, ogg_error(e)
-		return bytes, r.audio_starts[i] - r.audio_delay, .None
-	}
-	if r.container == .WebM {
-		p, e := webm.read_sample(&r.webm, r.audio_index, i)
-		if e != .None do return nil, 0, webm_error(e)
-		return p.data, r.audio_starts[i] - r.audio_delay, .None
-	}
-	t := &r.demux.tracks[r.audio_index]
-	p, e := mp4.read_sample(&r.demux, r.audio_index, i)
-	if e != .None do return nil, 0, mp4_error(e)
-	return p.data, p.pts * i64(r.audio.sample_rate) / i64(t.timescale), .None
-}
-
-@(private)
-on_audio :: proc(f: media.Audio_Frame, user: rawptr) {
-	r := (^Reader)(user)
-	ch := f.channels
-	// Time before the track's first sample (an empty edit) reads as silence,
-	// so PCM index zero is always movie time zero.
-	gap := min(f.sample_index, r.audio_end) - r.audio_next
-	if gap > 0 {
-		resize(&r.pcm, len(r.pcm) + int(gap) * ch)
-		r.audio_next += gap
-	}
-	lo := max(f.sample_index, r.audio_next)
-	hi := min(f.sample_index + i64(f.samples_per_channel), r.audio_end)
-	if hi <= lo do return
-	start := int(lo - f.sample_index) * ch
-	append(&r.pcm, ..f.samples[start:][:int(hi - lo) * ch])
-	r.audio_next = hi
-}
-
-@(private)
-advance_audio :: proc(r: ^Reader) -> Error {
-	if audio_exhausted(r) do return .None
-	data: []u8
-	sample_index: i64
-	if r.container == .FLAC {
-		p, e := flac.read_frame(&r.flac_file)
-		if e == .End_Of_Stream {r.audio_done = true; return .None}
-		if e != .None do return flac_error(e)
-		data, sample_index = p.data, p.first_sample
-	} else {
-		data, sample_index = read_audio_packet(r, r.audio_cursor) or_return
-		r.audio_cursor += 1
-	}
-	if r.audio.codec == .PCM {
-		ch := r.audio.channels
-		resize(&r.pcm_input, len(data) / common.SAMPLE_BYTES[r.pcm_sample])
-		frames := common.convert_pcm(data, r.pcm_sample, ch, r.pcm_input[:], ch)
-		on_audio({samples = r.pcm_input[:frames * ch], sample_rate = r.audio.sample_rate, channels = r.audio.channels, samples_per_channel = frames, sample_index = sample_index}, r)
-		return .None
-	}
-	packet := media.Packet {
-		data         = data,
-		framing      = r.audio.codec == .AAC ? .Raw_AAC : .Frame,
-		sample_index = sample_index,
-		sample_rate  = r.audio.sample_rate,
-	}
-	if de := media.decode(&r.audio_session, packet, {audio = on_audio, user = r}); de != .None {
-		r.error_detail = r.audio_session.error_detail
-		return media_error(de)
-	}
-	return .None
-}
-

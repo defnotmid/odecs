@@ -32,13 +32,12 @@ ff=(ffmpeg -hide_banner -loglevel error -y)
 for f in "$out"/celt_*.opus "$out"/celt_*.webm "$out"/celt_*.ogg "$out/silk_mono.ogg" "$out/hybrid_stereo.webm"; do
 	"${ff[@]}" -c:a libopus -i "$f" -f f32le "$f.f32"
 done
-# 5.1 surround: four streams (two coupled), mapping family 1. FFmpeg
-# decodes to its own 5.1 order; the pan puts it back in the Opus (Vorbis)
-# order the decoder outputs.
+# 5.1 surround: four streams (two coupled), mapping family 1. The reader
+# returns WAVE order (FL FR FC LFE and the surround pair), as FFmpeg decodes it.
 "${ff[@]}" -f lavfi -i "sine=f=220:d=5" -f lavfi -i "sine=f=330:d=5" -f lavfi -i "sine=f=440:d=5" \
 	-f lavfi -i "sine=f=60:d=5" -f lavfi -i "anoisesrc=d=5:c=pink:a=0.05" -f lavfi -i "sine=f=660:d=5" \
 	-filter_complex "[0][1][2][3][4][5]join=inputs=6:channel_layout=5.1" -c:a libopus -b:a 192k "$out/surround51.opus"
-"${ff[@]}" -c:a libopus -i "$out/surround51.opus" -af "pan=6c|c0=c0|c1=c2|c2=c1|c3=c4|c4=c5|c5=c3" -f f32le "$out/surround51.opus.f32"
+"${ff[@]}" -c:a libopus -i "$out/surround51.opus" -f f32le "$out/surround51.opus.f32"
 # DTX: a tone in 0.8 s bursts every 2 s over faint noise, encoded with DTX
 # as hybrid (voip and audio tuning), SILK-only and CELT-only streams.
 "${ff[@]}" -f lavfi -i "aevalsrc=0.3*sin(2*PI*220*t)*sin(2*PI*3*t)*lt(mod(t\,2)\,0.8)+0.0005*(random(0)-0.5):s=48000:d=12" \

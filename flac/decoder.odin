@@ -265,7 +265,9 @@ restore_lpc :: proc(out: []$T, coefficients: []i32, shift: uint, $A: typeid, $N:
 		for j in 0 ..< N do c[j] = A(coefficients[j])
 		for i in N ..< len(out) {
 			sum: A
-			#unroll for j in 0 ..< N do sum += c[j] * A(out[i - 1 - j])
+			// The newest sample last: the loop-carried dependency is then one
+			// multiply and add, not the whole sum (wrapping adds, the same result).
+			#unroll for j in 0 ..< N do sum += c[N - 1 - j] * A(out[i - N + j])
 			out[i] = T(A(out[i]) + sum >> shift)
 		}
 	}

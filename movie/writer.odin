@@ -1,6 +1,7 @@
 package movie
 
 import aac "../aac"
+import audio "../audio"
 import "core:io"
 import mp4 "../mp4"
 import hevce "../h265/encoder"
@@ -18,18 +19,8 @@ Video_Codec :: enum u8 {
 	AV1,    // reading only, with Vulkan Video AV1 decoding
 }
 
-Error :: enum {
-	None,
-	Invalid_Config,
-	Invalid_Input,
-	Unsupported,
-	Invalid_Data,
-	IO_Error,
-	Out_Of_Memory,
-	Codec_Error,
-	End_Of_Stream,
-	Closed,
-}
+// The audio package's errors, shared by reading and writing.
+Error :: audio.Error
 
 BT709_LIMITED :: media.Color{1, 1, 1, false}
 
@@ -85,6 +76,8 @@ Writer :: struct {
 	coefficients:   Rgb_To_Yuv,
 	pcm:            []f32, // one AAC frame of pending input
 	pcm_fill:       int, // samples per channel in pcm
+	aac_order:      [8]u8, // AAC channel j takes WAVE-order input channel aac_order[j]
+	reorder:        bool,
 	pcm_total:      i64, // input samples per channel
 	queue:          [dynamic]u8, // encoded audio waiting to interleave
 	queued:         [dynamic]Queued_Audio,
@@ -275,7 +268,13 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 		w.error_detail = "could not create the output file"
 		return mp4_error(e)
 	}
-	if w.has_audio do w.pcm = make([]f32, 1024 * c.channels)
+	if w.has_audio {
+		w.pcm = make([]f32, 1024 * c.channels)
+		// Input arrives in WAVE order; the encoder takes AAC's.
+		source: [8]u8
+		source, w.reorder = audio.channel_order(.AAC, c.channels)
+		for s, k in source do w.aac_order[s] = u8(k)
+	}
 	if w.has_video {
 		open_frames(w)
 	} else {
@@ -297,7 +296,7 @@ create_webm :: proc(w: ^Writer, path: string, stream: io.Stream) -> Error {
 	if e != .None {
 		media.close(&w.video)
 		w.error_detail = "could not create the output file"
-		return webm_error(e)
+		return container_error(e)
 	}
 	open_frames(w)
 	return .None
@@ -482,7 +481,15 @@ write_audio :: proc(w: ^Writer, samples: []f32) -> Error {
 	for pos < len(samples) {
 		n := min(len(samples) - pos, frame - w.pcm_fill * ch)
 		dst := w.pcm[w.pcm_fill * ch:][:n]
-		for v, i in samples[pos:][:n] do dst[i] = v != v ? 0 : clamp(v, -1, 1)
+		src := samples[pos:][:n]
+		if w.reorder {
+			for i := 0; i < n; i += ch do for j in 0 ..< ch {
+				v := src[i + int(w.aac_order[j])]
+				dst[i + j] = v != v ? 0 : clamp(v, -1, 1)
+			}
+		} else {
+			for v, i in src do dst[i] = v != v ? 0 : clamp(v, -1, 1)
+		}
 		pos += n
 		w.pcm_fill += n / ch
 		if w.pcm_fill * ch == frame do encode_pcm(w) or_return
@@ -541,7 +548,7 @@ finish :: proc(w: ^Writer) -> Error {
 	flush_audio(w, 0, -1)
 	if w.err != .None do return w.err
 	if w.config.codec == .VP9 {
-		if e := webm.finish(&w.webm); e != .None {w.err = webm_error(e); return w.err}
+		if e := webm.finish(&w.webm); e != .None {w.err = container_error(e); return w.err}
 	} else if e := mp4.finish(&w.mux); e != .None {
 		w.err = mp4_error(e)
 		return w.err
@@ -577,7 +584,7 @@ video_backend :: proc(w: ^Writer) -> (media.Backend, string) {
 add_vp9_packet :: proc(w: ^Writer, packet: media.Packet) {
 	pts, next := frame_time_ns(w, w.samples), frame_time_ns(w, w.samples + 1)
 	if e := webm.write_sample(&w.webm, packet.data, pts, packet.keyframe, packet.alpha, next - pts); e != .None {
-		w.err = webm_error(e)
+		w.err = container_error(e)
 		return
 	}
 	w.samples += 1

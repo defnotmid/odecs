@@ -56,8 +56,8 @@ movie.destroy(&w)
   to the providers.
 - **Audio:**
   - Interleaved `f32` PCM at a standard AAC rate (7350..96000); any other
-    rate is `Unsupported`. Use 1..8 channels in AAC canonical order: C, L, R,
-    then surrounds, then LFE. Stereo is L, R.
+    rate is `Unsupported`. 1..8 channels in WAVE order (FL, FR, FC, LFE, BL,
+    BR, then side and centre pairs), the order reading returns.
   - Samples are clamped to [-1, 1], and NaN becomes 0.
   - The final partial frame is zero-padded, and the edit list trims priming
     and padding to the exact input length.

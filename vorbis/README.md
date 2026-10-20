@@ -2,8 +2,9 @@
 
 Vorbis I audio decoding, written from the Vorbis I specification. It reads
 the identification and setup headers into flat tables, then turns audio
-packets into interleaved `f32` PCM. Ogg Vorbis files decode through
-[`audio`](../audio/README.md), which also handles the Ogg granule positions.
+packets into interleaved `f32` PCM. Ogg Vorbis and Vorbis in
+WebM/Matroska decode through [`audio`](../audio/README.md) (a `media` native
+codec), which places packets from their block sizes and the granule positions.
 
 ```odin
 import vorbis "../vorbis"
@@ -15,8 +16,9 @@ pcm := make([]f32, vorbis.max_frames(&d) * d.channels)
 for packet in audio_packets {
 	frames, e := vorbis.decode_packet(&d, packet, pcm) // interleaved; none for the first packet
 }
-// Before decoding: vorbis.packet_blocksize(&d, first_bytes) and
-// vorbis.packet_frames(previous, current) give every packet's output.
+// Before decoding (or without a decoder): shape := vorbis.packet_shape(identification, setup)
+// (the setup read without building its tables); vorbis.packet_blocksize(shape, first_bytes)
+// and vorbis.packet_frames(previous, current) give every packet's output.
 ```
 
 ## Data layout

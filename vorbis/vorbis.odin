@@ -33,6 +33,7 @@ Info :: struct {
 Decoder :: struct {
 	using info: Info,
 	setup:      Setup,
+	shape:      Packet_Shape,
 	transforms: [2]Transform,
 	slopes:     [2][]f32, // each block size's rising window half
 	spectra:    []f32, // channels planes of blocksize[1] / 2
@@ -69,6 +70,28 @@ read_identification :: proc(packet: []u8) -> (info: Info, err: Error) {
 	return info, .None
 }
 
+// The three headers from Xiph lacing (Matroska's CodecPrivate for Vorbis):
+// a count less one, the first two lengths as runs of bytes summed until
+// one is below 255, then the headers back to back.
+split_headers :: proc(extradata: []u8) -> (identification, comment, setup: []u8, ok: bool) {
+	if len(extradata) < 3 || extradata[0] != 2 do return
+	at := 1
+	lengths: [2]int
+	for &n in lengths {
+		for at < len(extradata) {
+			v := int(extradata[at])
+			at += 1
+			n += v
+			if v < 255 do break
+		}
+	}
+	if at + lengths[0] + lengths[1] > len(extradata) do return
+	identification = extradata[at:][:lengths[0]]
+	comment = extradata[at + lengths[0]:][:lengths[1]]
+	setup = extradata[at + lengths[0] + lengths[1]:]
+	return identification, comment, setup, true
+}
+
 // Reads the identification and setup headers (the first and third
 // packets; the comment header between them is not needed) and allocates
 // everything decoding needs.
@@ -77,6 +100,7 @@ init_decoder :: proc(d: ^Decoder, identification, setup: []u8, allocator := cont
 	defer if err != .None do destroy_decoder(d)
 	d.info = read_identification(identification) or_return
 	read_setup(&d.setup, d.info, setup, allocator) or_return
+	d.shape = shape_of(d.info, &d.setup)
 	half := d.blocksize[1] / 2
 	maxp := 0
 	for r in d.setup.residues {
@@ -128,13 +152,39 @@ max_frames :: proc(d: ^Decoder) -> int {
 	return d.blocksize[1] / 2
 }
 
+// What a packet's first bits say about its length: the block sizes and
+// whether each mode uses the long one.
+Packet_Shape :: struct {
+	blocksize: [2]int,
+	modes:     int,
+	long:      [64]bool,
+}
+
+// The packet shape from the identification and setup headers, without
+// building the setup's decode tables.
+packet_shape :: proc(identification, setup: []u8) -> (shape: Packet_Shape, err: Error) {
+	info := read_identification(identification) or_return
+	s: Setup
+	defer destroy_setup(&s, context.temp_allocator)
+	read_setup(&s, info, setup, context.temp_allocator, tables = false) or_return
+	return shape_of(info, &s), .None
+}
+
+@(private)
+shape_of :: proc(info: Info, s: ^Setup) -> (shape: Packet_Shape) {
+	shape.blocksize = info.blocksize
+	shape.modes = len(s.modes)
+	for m, i in s.modes do shape.long[i] = m.long
+	return
+}
+
 // An audio packet's block size, from its first bits; 0 if it is not one.
-packet_blocksize :: proc(d: ^Decoder, packet: []u8) -> int {
+packet_blocksize :: proc(shape: Packet_Shape, packet: []u8) -> int {
 	b := Bits{data = packet}
 	if read(&b, 1) != 0 do return 0
-	mode := int(read(&b, ilog(len(d.setup.modes) - 1)))
-	if b.overrun || mode >= len(d.setup.modes) do return 0
-	return d.blocksize[int(d.setup.modes[mode].long)]
+	mode := int(read(&b, ilog(shape.modes - 1)))
+	if b.overrun || mode >= shape.modes do return 0
+	return shape.blocksize[int(shape.long[mode])]
 }
 
 // The frames a packet of block size `current` returns after one of size

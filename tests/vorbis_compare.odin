@@ -52,7 +52,9 @@ reference :: proc(path: string, out: ^[dynamic]f32) -> (channels, rate: int, ok:
 		n := int(ov_read_float(&vf, &pcm, 4096, &section))
 		if n < 0 do return
 		if n == 0 do break
-		for i in 0 ..< n do for ch in 0 ..< channels do append(out, pcm[ch][i])
+		// libvorbis keeps the stream's order; odecs returns WAVE order.
+		order, _ := audio.channel_order(.Vorbis, channels)
+		for i in 0 ..< n do for ch in 0 ..< channels do append(out, pcm[channels <= 8 ? int(order[ch]) : ch][i])
 	}
 	return channels, rate, true
 }

@@ -15,10 +15,11 @@ Codec :: enum {
 	AV1,    // decode only, Vulkan Video; one temporal unit per packet (Framing.Frame), Main 4:2:0 8/10-bit
 	Opus,   // decode only, 48 kHz; one packet per Packet (Framing.Frame), OpusHead in Config.extradata; channels in the Opus mapping order
 	ALAC,   // decode only; one packet per Packet (Framing.Frame), 24-byte ALACSpecificConfig in Config.extradata
+	Vorbis, // decode only; one packet per Packet (Framing.Frame), the three headers Xiph-laced in Config.extradata (Matroska's CodecPrivate)
 }
 
 is_audio :: proc(codec: Codec) -> bool {
-	return codec == .AAC || codec == .FLAC || codec == .MP3 || codec == .Opus || codec == .ALAC
+	return codec == .AAC || codec == .FLAC || codec == .MP3 || codec == .Opus || codec == .ALAC || codec == .Vorbis
 }
 Operation :: enum {
 	Decode,
