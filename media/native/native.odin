@@ -2,14 +2,9 @@ package media_native
 
 import media ".."
 import aac "../../aac"
-import aacd "../../aac/decoder"
+import audio "../../audio"
 import aace "../../aac/encoder"
-import alac "../../alac"
 import common "../../common"
-import flac "../../flac"
-import mp3 "../../mp3"
-import opus "../../opus"
-import vorbis "../../vorbis"
 import avcd "../../h264/decoder"
 import avce "../../h264/encoder"
 import hevcd "../../h265/decoder"
@@ -116,22 +111,15 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 		if config.operation == .Encode && (depth != 8 || config.chroma != .YUV420) do return .Unsupported // profile 0
 	case .AV1:
 		return .Unsupported // hardware only (media/vulkan)
-	case .FLAC:
-		info, _, e := flac.parse_metadata(config.extradata)
-		if e != .None || info.sample_rate != config.sample_rate || info.channels != config.channels do return .Invalid_Config
-	case .MP3:
-	case .Opus:
-		h, e := opus.parse_head(config.extradata)
-		if e == .Unsupported do return .Unsupported // ambisonics with a demixing matrix
-		if e != .None || h.channels != config.channels do return .Invalid_Config
-	case .ALAC:
-		cfg, e := alac.parse_config(config.extradata)
-		if e == .Unsupported do return .Unsupported
-		if e != .None || cfg.sample_rate != config.sample_rate || cfg.channels != config.channels do return .Invalid_Config
-	case .Vorbis:
-		identification, _, _, ok := vorbis.split_headers(config.extradata)
-		info, e := vorbis.read_identification(identification)
-		if !ok || e != .None || info.channels != config.channels || info.rate != config.sample_rate do return .Invalid_Config
+	case .FLAC, .MP3, .Opus, .ALAC, .Vorbis:
+		// Decoded by the audio package, the one audio decode implementation.
+		switch audio.check_config(AUDIO_CODECS[config.codec], config.sample_rate, config.channels, config.extradata) {
+		case .None:
+		case .Unsupported:
+			return .Unsupported
+		case .Invalid_Config, .Invalid_Input, .Invalid_Data, .IO_Error, .Out_Of_Memory, .Codec_Error, .End_Of_Stream, .Closed:
+			return .Invalid_Config
+		}
 	case .AAC:
 		cfg, e := aac_config(config)
 		if e != .None {
@@ -179,18 +167,13 @@ State :: struct {
 	alpha_encoded:      [dynamic]u8,
 	alpha_input:        []u16, // the alpha plane, then flat chroma planes
 	joined:             [dynamic]u8, // both layers' access unit
-	aac_decoder:        ^aacd.Decoder,
 	aac_encoder:        ^aace.Encoder,
 	prores_decoder:     ^proresd.Decoder,
 	vp9_decoder:        ^vp9d.Decoder,
 	vp9_alpha:          ^vp9d.Decoder, // the alpha stream, opened on its first packet
 	vp9_encoders:       [2]^vp9e.Encoder, // colour, and alpha with Config.alpha
 	vp9_alpha_planes:   []u8, // the alpha encoder's input: alpha as luma, flat chroma
-	flac_decoder:       ^flac.Decoder,
-	mp3_decoder:        ^mp3.Decoder,
-	opus_decoder:       ^opus.Multistream,
-	vorbis_decoder:     ^vorbis.Decoder,
-	alac_decoder:       ^alac.Decoder,
+	audio_decoder:      ^audio.Decoder, // AAC, FLAC, MP3, Opus, ALAC and Vorbis decoding, the audio package's
 	encoded:            [dynamic]u8,
 	decoded:            [dynamic]^hevcd.Picture,
 	input:              []u16,
@@ -226,45 +209,15 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			s.prores_decoder = new(proresd.Decoder); proresd.init_decoder(s.prores_decoder, s.pool)
 		case .VP9:
 			s.vp9_decoder = new(vp9d.Decoder); vp9d.init_decoder(s.vp9_decoder, s.pool)
-		case .FLAC:
-			info, _, e := flac.parse_metadata(config.extradata)
-			if e != .None do return .Invalid_Config
-			s.flac_decoder = new(flac.Decoder); flac.init_decoder(s.flac_decoder, info)
-		case .MP3:
-			s.mp3_decoder = new(mp3.Decoder)
-		case .Opus:
-			h, _ := opus.parse_head(config.extradata)
-			s.opus_decoder = new(opus.Multistream)
-			if opus.init_multistream(s.opus_decoder, h) != .None do return .Invalid_Config
-			s.pcm = make([]f32, opus.MAX_FRAME_SAMPLES * config.channels)
-		case .ALAC:
-			cfg, e := alac.parse_config(config.extradata)
-			if e != .None do return .Invalid_Config
-			s.alac_decoder = new(alac.Decoder)
-			if alac.init_decoder(s.alac_decoder, cfg) != .None do return .Invalid_Config
-			s.pcm = make([]f32, cfg.frame_length * cfg.channels)
-		case .Vorbis:
-			identification, _, setup, _ := vorbis.split_headers(config.extradata)
-			s.vorbis_decoder = new(vorbis.Decoder)
-			switch vorbis.init_decoder(s.vorbis_decoder, identification, setup) {
-			case .None:
-			case .Unsupported:
-				session.error_detail = "Vorbis floor type 0 is not supported"
-				return .Unsupported
-			case .Invalid, .Out_Of_Memory:
-				return .Invalid_Config
-			}
-			s.pcm = make([]f32, vorbis.max_frames(s.vorbis_decoder) * config.channels)
 		case .AV1:
 			return .Unsupported
-		case .AAC:
-			cfg, e := aac_config(config)
-			if e != .None do return .Invalid_Config
-			s.aac_decoder = new(aacd.Decoder)
-			if s.aac_decoder == nil do return map_aac_error(session, .Allocation_Failed)
-			s.pcm = make([]f32, 8 * 1024 * 64)
-			if raw_data(s.pcm) == nil do return map_aac_error(session, .Allocation_Failed)
-			if aacd.init_decoder(s.aac_decoder, cfg) != .None do return .Invalid_Config
+		case .FLAC, .MP3, .Opus, .ALAC, .Vorbis, .AAC:
+			s.audio_decoder = new(audio.Decoder)
+			if s.audio_decoder == nil do return .Codec_Error
+			if e := audio.init_decoder(s.audio_decoder, AUDIO_CODECS[config.codec], config.sample_rate, config.channels, config.extradata, config.frame_samples); e != .None {
+				session.error_detail = s.audio_decoder.error_detail
+				return e == .Unsupported ? .Unsupported : .Invalid_Config
+			}
 		}
 		return .None
 	}
@@ -370,17 +323,12 @@ close_native :: proc(session: ^media.Session) {
 	if s.hevc_alpha_encoder != nil {hevce.destroy_encoder(s.hevc_alpha_encoder); free(s.hevc_alpha_encoder)}
 	delete(s.alpha_encoded); delete(s.alpha_input); delete(s.joined)
 	delete(s.chroma_planes)
-	if s.aac_decoder != nil do free(s.aac_decoder)
 	if s.prores_decoder != nil {proresd.destroy_decoder(s.prores_decoder); free(s.prores_decoder)}
 	if s.vp9_decoder != nil {vp9d.destroy_decoder(s.vp9_decoder); free(s.vp9_decoder)}
 	if s.vp9_alpha != nil {vp9d.destroy_decoder(s.vp9_alpha); free(s.vp9_alpha)}
 	for e in s.vp9_encoders do if e != nil {vp9e.destroy_encoder(e); free(e)}
 	delete(s.vp9_alpha_planes)
-	if s.flac_decoder != nil {flac.destroy_decoder(s.flac_decoder); free(s.flac_decoder)}
-	if s.mp3_decoder != nil do free(s.mp3_decoder)
-	if s.opus_decoder != nil {opus.destroy_multistream(s.opus_decoder); free(s.opus_decoder)}
-	if s.alac_decoder != nil {alac.destroy_decoder(s.alac_decoder); free(s.alac_decoder)}
-	if s.vorbis_decoder != nil {vorbis.destroy_decoder(s.vorbis_decoder); free(s.vorbis_decoder)}
+	if s.audio_decoder != nil {audio.destroy_decoder(s.audio_decoder); free(s.audio_decoder)}
 	if s.aac_encoder != nil {aace.destroy_encoder(s.aac_encoder); free(s.aac_encoder)}
 	hevcd.destroy_nal_scratch(&s.nal_scratch)
 	delete(s.encoded); delete(s.decoded); delete(s.input); delete(s.pcm)
@@ -509,134 +457,62 @@ decode_vp9 :: proc(session: ^media.Session, s: ^State, packet: media.Packet, rec
 	return .None
 }
 
-@(private)
-pcm_slice :: proc(s: ^State, count: int) -> []f32 {
-	if len(s.pcm) < count {
-		delete(s.pcm)
-		s.pcm = make([]f32, count)
-	}
-	return s.pcm[:count]
+// The media codecs the audio package decodes.
+@(private, rodata)
+AUDIO_CODECS := #partial [media.Codec]audio.Codec {
+	.AAC    = .AAC,
+	.FLAC   = .FLAC,
+	.MP3    = .MP3,
+	.Opus   = .Opus,
+	.ALAC   = .ALAC,
+	.Vorbis = .Vorbis,
 }
 
+// An audio packet through the audio package's decoder, the one audio decode
+// implementation. Its position is the packet's when the caller times
+// packets (sample_rate set), else it follows on.
 @(private)
-emit_audio_frame :: proc(s: ^State, packet: media.Packet, samples: []f32, sample_rate, channels, n: int, receiver: media.Receiver) {
-	if packet.sample_rate != 0 do s.audio_sample_index = packet.sample_index
-	if receiver.audio != nil && n > 0 {
-		receiver.audio({samples = samples, sample_rate = sample_rate, channels = channels, samples_per_channel = n, sample_index = s.audio_sample_index}, receiver.user)
-	}
-	s.audio_sample_index += i64(n)
-}
-
-// One FLAC frame per packet, delivered interleaved. Its position is the
-// packet's when the caller times packets (sample_rate set), else the
-// frame header's.
-@(private)
-decode_flac :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
-	if packet.framing != .Frame do return .Invalid_Input
-	f, _, err := flac.decode_frame(s.flac_decoder, packet.data)
-	#partial switch err {
-	case .None:
-	case .Out_Of_Memory:
-		session.error_detail = "FLAC frame allocation failed"
-		return .Codec_Error
+decode_audio :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
+	framing: audio.Framing
+	#partial switch packet.framing {
+	case .Frame:
+		framing = .Frame
+	case .Raw_AAC:
+		framing = .Raw_AAC
+	case .ADTS:
+		framing = .ADTS
+	case .LOAS:
+		framing = .LOAS
 	case:
-		session.error_detail = "invalid FLAC frame"
 		return .Invalid_Input
 	}
-	h := f.header
-	if h.channels != session.config.channels || h.sample_rate != session.config.sample_rate {
-		session.error_detail = "FLAC frame changes the channel count or sample rate"
-		return .Unsupported
+	index := audio.UNTIMED
+	if packet.sample_rate != 0 {
+		if packet.sample_rate != session.config.sample_rate do return .Invalid_Input
+		index = packet.sample_index
 	}
-	pcm := pcm_slice(s, h.block_size * h.channels)
-	flac.interleave_f32(f, pcm)
-	index := packet.sample_rate != 0 ? packet.sample_index : flac.first_sample(h, s.flac_decoder.info)
-	if receiver.audio != nil do receiver.audio({samples = pcm, sample_rate = h.sample_rate, channels = h.channels, samples_per_channel = h.block_size, sample_index = index}, receiver.user)
-	return .None
-}
-
-// One MP3 frame per packet, delivered interleaved at the session's channel
-// count (a stream may switch between mono and stereo frames). A frame whose
-// main data began in bytes not given to this session (after a seek)
-// decodes as silence, so the timeline stays intact. Positions come from the
-// packet when the caller times packets (sample_rate set), else follow on.
-@(private)
-decode_mp3 :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
-	if packet.framing != .Frame do return .Invalid_Input
-	f, err := mp3.decode_frame(s.mp3_decoder, packet.data)
-	#partial switch err {
-	case .None:
-	case .Unsupported:
-		session.error_detail = "MP3 frame uses unsupported syntax (Layer I/II or free format)"
-		return .Unsupported
-	case:
-		session.error_detail = "invalid MP3 frame"
-		return .Invalid_Input
-	}
-	h := f.header
-	if h.sample_rate != session.config.sample_rate {
-		session.error_detail = "MP3 frame changes the sample rate"
-		return .Unsupported
-	}
-	ch, n := session.config.channels, h.samples
-	pcm := pcm_slice(s, n * ch)
-	switch {
-	case h.channels == ch:
-		for c in 0 ..< ch do for x, i in f.pcm[c] do pcm[i * ch + c] = x
-	case h.channels == 1:
-		for x, i in f.pcm[0] do pcm[i * 2], pcm[i * 2 + 1] = x, x
-	case:
-		for i in 0 ..< n do pcm[i] = 0.5 * (f.pcm[0][i] + f.pcm[1][i])
-	}
-	emit_audio_frame(s, packet, pcm, h.sample_rate, ch, n, receiver)
-	return .None
-}
-
-@(private)
-decode_opus :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
-	if packet.framing != .Frame do return .Invalid_Input
-	n, err := opus.decode_multistream(s.opus_decoder, packet.data, s.pcm)
-	if err != .None {
-		session.error_detail = "invalid Opus packet"
-		return .Invalid_Input
-	}
-	ch := session.config.channels
-	emit_audio_frame(s, packet, s.pcm[:n * ch], 48000, ch, n, receiver)
-	return .None
-}
-
-// One Vorbis packet; the first returns nothing (it primes the overlap).
-@(private)
-decode_vorbis :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
-	if packet.framing != .Frame do return .Invalid_Input
-	n, err := vorbis.decode_packet(s.vorbis_decoder, packet.data, s.pcm)
-	if err != .None {
-		session.error_detail = "invalid Vorbis packet"
-		return .Invalid_Input
-	}
-	ch := session.config.channels
-	emit_audio_frame(s, packet, s.pcm[:n * ch], s.vorbis_decoder.rate, ch, n, receiver)
-	return .None
-}
-
-@(private)
-decode_alac :: proc(session: ^media.Session, s: ^State, packet: media.Packet, receiver: media.Receiver) -> media.Error {
-	if packet.framing != .Frame do return .Invalid_Input
-	f, err := alac.decode_frame(s.alac_decoder, packet.data)
+	pcm, first, err := audio.decode_packet(s.audio_decoder, packet.data, framing, index)
 	switch err {
 	case .None:
 	case .Unsupported:
-		session.error_detail = "ALAC packet uses unsupported syntax"
+		session.error_detail = s.audio_decoder.error_detail
 		return .Unsupported
-	case .Out_Of_Memory:
+	case .Codec_Error, .Out_Of_Memory:
+		session.error_detail = s.audio_decoder.error_detail
 		return .Codec_Error
-	case .Invalid_Data:
-		session.error_detail = "invalid ALAC packet"
+	case .Invalid_Config, .Invalid_Input, .Invalid_Data, .IO_Error, .End_Of_Stream, .Closed:
+		session.error_detail = s.audio_decoder.error_detail
 		return .Invalid_Input
 	}
-	pcm := pcm_slice(s, f.samples * f.channels)
-	alac.interleave_f32(f, pcm)
-	emit_audio_frame(s, packet, pcm, f.sample_rate, f.channels, f.samples, receiver)
+	if receiver.audio == nil do return .None
+	ch := session.config.channels
+	// AAC is delivered a frame at a time, the others a packet at a time.
+	frames := len(pcm) / ch
+	step := session.config.codec == .AAC ? s.audio_decoder.aac.frame_samples : max(frames, 1)
+	for at := 0; at < frames; at += step {
+		n := min(step, frames - at)
+		receiver.audio({samples = pcm[at * ch:][:n * ch], sample_rate = session.config.sample_rate, channels = ch, samples_per_channel = n, sample_index = first + i64(at)}, receiver.user)
+	}
 	return .None
 }
 
@@ -799,57 +675,9 @@ decode_native :: proc(
 		return decode_prores(session, s, packet, receiver)
 	case .VP9:
 		return decode_vp9(session, s, packet, receiver)
-	case .FLAC:
-		return decode_flac(session, s, packet, receiver)
-	case .MP3:
-		return decode_mp3(session, s, packet, receiver)
-	case .Opus:
-		return decode_opus(session, s, packet, receiver)
-	case .ALAC:
-		return decode_alac(session, s, packet, receiver)
-	case .Vorbis:
-		return decode_vorbis(session, s, packet, receiver)
-	case .H264, .H265, .AAC:
-	}
-	if session.config.codec == .AAC {
-		if packet.framing != .ADTS && packet.framing != .Raw_AAC && packet.framing != .LOAS do return .Invalid_Input
-		if packet.sample_rate != 0 {
-			if packet.sample_rate != session.config.sample_rate do return .Invalid_Input
-			s.audio_sample_index = packet.sample_index
-		}
-		pos := 0
-		n := s.aac_decoder.frame_samples
-		for pos < len(packet.data) {
-			consumed, samples: int
-			err: aac.Error
-			if packet.framing == .ADTS {
-				consumed, samples, err = aacd.decode_adts_frame(
-					s.aac_decoder,
-					packet.data[pos:],
-					s.pcm,
-				)
-			} else if packet.framing == .LOAS {
-				consumed, samples, err = aacd.decode_loas_frame(
-					s.aac_decoder,
-					packet.data[pos:],
-					s.pcm,
-				)
-			} else {
-				consumed, samples, err = aacd.decode_frame_prefix(
-					s.aac_decoder,
-					packet.data[pos:],
-					s.pcm,
-				)
-			}
-			if err != .None do return map_aac_error(session, err)
-			if consumed <= 0 || consumed > len(packet.data) - pos || samples <= 0 || samples % n != 0 || samples > len(s.pcm) / session.config.channels || s.audio_sample_index > max(i64) - i64(samples) do return .Codec_Error
-			for first := 0; first < samples; first += n {
-				if receiver.audio != nil do receiver.audio({samples = s.pcm[first * session.config.channels:(first + n) * session.config.channels], sample_rate = session.config.sample_rate, channels = session.config.channels, samples_per_channel = n, sample_index = s.audio_sample_index}, receiver.user)
-				s.audio_sample_index += i64(n)
-			}
-			pos += consumed
-		}
-		return .None
+	case .FLAC, .MP3, .Opus, .ALAC, .Vorbis, .AAC:
+		return decode_audio(session, s, packet, receiver)
+	case .H264, .H265:
 	}
 	it := media.Nal_Iterator {
 		packet = packet,

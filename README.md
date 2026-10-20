@@ -47,8 +47,11 @@ Putting them together:
 - `viewer`: an SDL3 player for all of the above.
 
 Each layer imports only the ones below it: `common`, then the codecs and
-containers, then `media` with one provider package per backend under it, then
-`audio`, then `video`. `image` stands on the image codecs alone.
+containers, then `audio` (the audio decoders behind one dispatch), then
+`media` with one provider package per backend under it (its native provider
+decodes audio through `audio`), then `video`. `image` stands on the image
+codecs alone. Neither facade imports the other or anything of video's, so an
+audio-only or image-only program links no video codec.
 
 Parallel work runs on the caller's `common.Work_Pool`; the codecs never create
 threads of their own.

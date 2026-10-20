@@ -29,9 +29,13 @@ audio.close(&r)
 ## How it is built
 
 `audio.Reader` owns the opened file: the container reader and the first
-audio track's decoding (codecs through `media`'s native provider). A file
-with video is opened the same way. [`video`](../video/README.md)'s reader
-embeds an `audio.Reader` and reads its video track from the same container.
+audio track's decoding through `audio.Decoder`. That decoder is the one
+implementation of AAC, FLAC, MP3, Opus, ALAC and Vorbis packet decoding, and
+`media`'s native provider delegates to it. `audio` imports only audio codecs
+and containers: an audio-only program links no video codec and needs no
+video codec's licence notice. A file with video is opened the same way:
+[`video`](../video/README.md)'s reader embeds an `audio.Reader` and reads
+its video track from the same container.
 
 **Positions.** PCM index zero is time zero:
 - priming and padding are trimmed (edit lists, LAME tags, Opus pre-skip,

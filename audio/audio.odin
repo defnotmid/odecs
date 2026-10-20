@@ -5,7 +5,6 @@
 // whole file in memory. Mixing down and resampling are the caller's.
 package audio
 
-import media "../media"
 import ogg "../ogg"
 import "base:intrinsics"
 import "core:bytes"
@@ -96,23 +95,4 @@ container_error :: proc(e: $E) -> Error where intrinsics.type_is_enum(E) {
 		return .Closed
 	}
 	return .Invalid_Data
-}
-
-@(private)
-media_error :: proc(e: media.Error) -> Error {
-	switch e {
-	case .None:
-		return .None
-	case .Invalid_Config:
-		return .Invalid_Config
-	case .Invalid_Input:
-		return .Invalid_Input
-	case .Unsupported, .Unavailable:
-		return .Unsupported
-	case .Driver_Error, .Codec_Error, .Failed:
-		return .Codec_Error
-	case .Closed, .Wrong_Operation, .Busy, .Ended:
-		return .Closed
-	}
-	return .Codec_Error
 }

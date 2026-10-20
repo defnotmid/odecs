@@ -3,8 +3,6 @@ package audio
 import alac "../alac"
 import common "../common"
 import flac "../flac"
-import media "../media"
-import native "../media/native"
 import mp3 "../mp3"
 import mp4 "../mp4"
 import ogg "../ogg"
@@ -73,7 +71,7 @@ Reader :: struct {
 	starts:       []i64,
 	delay:        i64,
 	// Decode state.
-	session:      media.Session,
+	decoder:      Decoder,
 	open:         bool,
 	done:         bool, // native FLAC: the last frame has been fed
 	cursor:       int, // next packet to feed
@@ -162,7 +160,7 @@ open_file :: proc(r: ^Reader, path: string, stream: io.Stream) -> Error {
 
 close :: proc(r: ^Reader) {
 	if r == nil do return
-	if r.open do media.close(&r.session)
+	if r.open do destroy_decoder(&r.decoder)
 	mp4.close(&r.demux)
 	webm.close(&r.webm)
 	wav.close(&r.wave)
@@ -572,27 +570,13 @@ describe_webm :: proc(r: ^Reader) {
 	r.end = r.samples
 }
 
-@(private, rodata)
-MEDIA_CODECS := #partial [Codec]media.Codec {
-	.AAC    = .AAC,
-	.FLAC   = .FLAC,
-	.MP3    = .MP3,
-	.Opus   = .Opus,
-	.ALAC   = .ALAC,
-	.Vorbis = .Vorbis,
-}
-
 @(private)
 reset :: proc(r: ^Reader, position: i64) -> Error {
-	if r.open {media.close(&r.session); r.open = false}
+	if r.open {destroy_decoder(&r.decoder); r.open = false}
 	if r.codec != .PCM {
-		config := media.default_config(MEDIA_CODECS[r.codec], .Decode)
-		config.sample_rate, config.channels = r.sample_rate, r.channels
-		config.extradata = r.config
-		providers := [1]media.Provider{native.provider()}
-		if e := media.open(&r.session, config, providers[:]); e != .None {
-			r.error_detail = "the audio decoder refused the track configuration"
-			return media_error(e)
+		if e := init_decoder(&r.decoder, r.codec, r.sample_rate, r.channels, r.config); e != .None {
+			r.error_detail = r.decoder.error_detail != "" ? r.decoder.error_detail : "the audio decoder refused the track configuration"
+			return e
 		}
 	}
 	r.open = true
@@ -714,21 +698,23 @@ read_packet :: proc(r: ^Reader, i: int) -> (data: []u8, sample_index: i64, err: 
 }
 
 @(private)
-on_audio :: proc(f: media.Audio_Frame, user: rawptr) {
-	r := (^Reader)(user)
-	ch := f.channels
+// A packet's PCM (frames from sample index `first`) into the queue, in WAVE
+// order, within the presented range.
+on_audio :: proc(r: ^Reader, samples: []f32, first: i64) {
+	ch := r.channels
+	frames := i64(len(samples) / ch)
 	// Time before the track's first sample (an empty edit) reads as silence,
 	// so PCM index zero is always time zero.
-	gap := min(f.sample_index, r.end) - r.next
+	gap := min(first, r.end) - r.next
 	if gap > 0 {
 		resize(&r.pcm, len(r.pcm) + int(gap) * ch)
 		r.next += gap
 	}
-	lo := max(f.sample_index, r.next)
-	hi := min(f.sample_index + i64(f.samples_per_channel), r.end)
+	lo := max(first, r.next)
+	hi := min(first + frames, r.end)
 	if hi <= lo do return
-	start := int(lo - f.sample_index) * ch
-	src := f.samples[start:][:int(hi - lo) * ch]
+	start := int(lo - first) * ch
+	src := samples[start:][:int(hi - lo) * ch]
 	if r.reorder {
 		base := len(r.pcm)
 		resize(&r.pcm, base + len(src))
@@ -758,18 +744,14 @@ advance :: proc(r: ^Reader) -> Error {
 		ch := r.channels
 		resize(&r.pcm_input, len(data) / common.SAMPLE_BYTES[r.pcm_sample])
 		frames := common.convert_pcm(data, r.pcm_sample, ch, r.pcm_input[:], ch)
-		on_audio({samples = r.pcm_input[:frames * ch], sample_rate = r.sample_rate, channels = r.channels, samples_per_channel = frames, sample_index = sample_index}, r)
+		on_audio(r, r.pcm_input[:frames * ch], sample_index)
 		return .None
 	}
-	packet := media.Packet {
-		data         = data,
-		framing      = r.codec == .AAC ? .Raw_AAC : .Frame,
-		sample_index = sample_index,
-		sample_rate  = r.sample_rate,
+	pcm, first, e := decode_packet(&r.decoder, data, r.codec == .AAC ? .Raw_AAC : .Frame, sample_index)
+	if e != .None {
+		r.error_detail = r.decoder.error_detail
+		return e
 	}
-	if de := media.decode(&r.session, packet, {audio = on_audio, user = r}); de != .None {
-		r.error_detail = r.session.error_detail
-		return media_error(de)
-	}
+	if len(pcm) > 0 do on_audio(r, pcm, first)
 	return .None
 }
