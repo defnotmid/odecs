@@ -35,6 +35,41 @@ Inter_Block :: struct($T: typeid) {
 }
 
 predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
+	if b.step_x != 16 || b.step_y != 16 {
+		predict_scaled(b)
+		return
+	}
+	ref := b.ref
+	x, y, w, h := b.x, b.y, b.w, b.h
+	max_value := i32(1) << uint(b.bit_depth) - 1
+	kernels := &SUBPEL_FILTERS[b.filter]
+	cols, rows := w + 7, h + 7
+	x0, y0 := (x >> 4) - 3, (y >> 4) - 3
+	// Direct reads when the whole footprint is inside the reference.
+	src := raw_data(ref.data)
+	src_stride := ref.stride
+	origin := y0 * ref.stride + x0
+	UNSCALED_STRIDE :: 72
+	local: [UNSCALED_STRIDE * UNSCALED_STRIDE]T = ---
+	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
+		edge_copy(local[:], UNSCALED_STRIDE, ref, x0, y0, cols, rows)
+		src, src_stride, origin = raw_data(local[:]), UNSCALED_STRIDE, 0
+	}
+	// Native-width lanes, as HEVC's motion compensation; narrower blocks
+	// take their own width.
+	LANES :: max(8, runtime.NATIVE_SIMD_BIT_WIDTH / 32)
+	switch {
+	case w >= LANES:
+		predict_unscaled(b, src, src_stride, origin, kernels, max_value, LANES)
+	case w >= 8:
+		predict_unscaled(b, src, src_stride, origin, kernels, max_value, 8)
+	case:
+		predict_unscaled(b, src, src_stride, origin, kernels, max_value, 4)
+	}
+}
+
+@(private)
+predict_scaled :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 	ref := b.ref
 	x, y, w, h := b.x, b.y, b.w, b.h
 	max_value := i32(1) << uint(b.bit_depth) - 1
@@ -42,7 +77,6 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 	rows := (((h - 1) * b.step_y + 15) >> 4) + 8
 	cols := (((w - 1) * b.step_x + 15) >> 4) + 8
 	x0, y0 := (x >> 4) - 3, (y >> 4) - 3
-	// Direct reads when the whole footprint is inside the reference.
 	src := raw_data(ref.data)
 	src_stride := ref.stride
 	origin := y0 * ref.stride + x0
@@ -50,20 +84,6 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
 		edge_copy(local[:], MAX_SOURCE, ref, x0, y0, cols, rows)
 		src, src_stride, origin = raw_data(local[:]), MAX_SOURCE, 0
-	}
-	if b.step_x == 16 && b.step_y == 16 {
-		// Native-width lanes, as HEVC's motion compensation; narrower blocks
-		// take their own width.
-		LANES :: max(8, runtime.NATIVE_SIMD_BIT_WIDTH / 32)
-		switch {
-		case w >= LANES:
-			predict_unscaled(b, src, src_stride, origin, kernels, max_value, LANES)
-		case w >= 8:
-			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 8)
-		case:
-			predict_unscaled(b, src, src_stride, origin, kernels, max_value, 4)
-		}
-		return
 	}
 	intermediate: [MAX_SOURCE * 64]i32 = ---
 	for r in 0 ..< rows {
@@ -93,7 +113,7 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 // The unscaled case: one kernel per direction for the whole block. A zero
 // phase is the identity kernel, so that pass is skipped (exactly:
 // (128 * s + 64) >> 7 == s). Both passes of a two-axis filter are the same
-// filter_pass; the first stores its clipped samples as i16.
+// filter_pass; the first stores its clipped samples as T.
 @(private)
 predict_unscaled :: proc(b: ^Inter_Block($T), src: [^]T, stride, origin: int, kernels: ^[16][8]i16, max_value: i32, $N: int) #no_bounds_check {
 	fx, fy, w, h := b.x & 15, b.y & 15, b.w, b.h
@@ -101,14 +121,17 @@ predict_unscaled :: proc(b: ^Inter_Block($T), src: [^]T, stride, origin: int, ke
 	base := origin + 3 * stride + 3 // the block's own top-left sample
 	switch {
 	case fx == 0 && fy == 0:
-		for r in 0 ..< h do intrinsics.mem_copy_non_overlapping(&dst[r * dst_stride], &src[base + r * stride], w * size_of(T))
+		for r in 0 ..< h do for c := 0; c < w; c += N {
+			v := intrinsics.unaligned_load((^#simd[N]T)(&src[base + r * stride + c]))
+			intrinsics.unaligned_store((^#simd[N]T)(&dst[r * dst_stride + c]), v)
+		}
 	case fy == 0:
 		filter_pass(dst, dst_stride, src[base - 3:], stride, 1, w, h, &kernels[fx], max_value, N)
 	case fx == 0:
 		filter_pass(dst, dst_stride, src[base - 3 * stride:], stride, stride, w, h, &kernels[fy], max_value, N)
 	case:
 		// Horizontal over the h + 7 rows the vertical taps need.
-		mid: [(64 + 7) * 64]i16 = ---
+		mid: [(64 + 7) * 64]T = ---
 		filter_pass(raw_data(mid[:]), 64, src[origin:], stride, 1, w, h + 7, &kernels[fx], max_value, N)
 		filter_pass(dst, dst_stride, raw_data(mid[:]), 64, 64, w, h, &kernels[fy], max_value, N)
 	}
@@ -121,21 +144,32 @@ predict_unscaled :: proc(b: ^Inter_Block($T), src: [^]T, stride, origin: int, ke
 @(private)
 filter_pass :: proc(dst: [^]$D, dst_stride: int, src: [^]$S, src_stride, step, w, h: int, k: ^[8]i16, max_value: i32, $N: int) #no_bounds_check {
 	V :: #simd[N]i32
+	kv: [8]V = ---
+	#unroll for t in 0 ..< 8 do kv[t] = V(i32(k[t]))
+	zero, hi, round := V(0), V(max_value), V(64)
+	shift := (#simd[N]u32)(7)
 	for r in 0 ..< h do for c := 0; c < w; c += N {
 		at := r * src_stride + c
-		acc: V
-		#unroll for t in 0 ..< 8 do acc += V(i32(k[t])) * V(intrinsics.unaligned_load((^#simd[N]S)(&src[at + t * step])))
-		v := simd.clamp(simd.shr(acc + 64, (#simd[N]u32)(7)), V(0), V(max_value))
+		acc := round
+		#unroll for t in 0 ..< 8 do acc += kv[t] * V(intrinsics.unaligned_load((^#simd[N]S)(&src[at + t * step])))
+		v := simd.clamp(simd.shr(acc, shift), zero, hi)
 		intrinsics.unaligned_store((^#simd[N]D)(&dst[r * dst_stride + c]), (#simd[N]D)(v))
 	}
 }
 
 // Compound prediction: the rounded average of both references.
-average_into :: proc(dst: []$T, dst_stride: int, other: []T, other_stride, w, h: int) {
+average_into :: proc(dst: []$T, dst_stride: int, other: []T, other_stride, w, h: int) #no_bounds_check {
+	W :: #simd[4]u32
+	d_ptr, o_ptr := raw_data(dst), raw_data(other)
 	for r in 0 ..< h {
-		a := dst[r * dst_stride:][:w]
-		b := other[r * other_stride:][:w]
-		for c in 0 ..< w do a[c] = T((u32(a[c]) + u32(b[c]) + 1) >> 1)
+		a := d_ptr[r * dst_stride:]
+		b := o_ptr[r * other_stride:]
+		for c := 0; c < w; c += 4 {
+			av := W(intrinsics.unaligned_load((^#simd[4]T)(&a[c])))
+			bv := W(intrinsics.unaligned_load((^#simd[4]T)(&b[c])))
+			res := (#simd[4]T)(simd.shr(av + bv + W(1), W(1)))
+			intrinsics.unaligned_store((^#simd[4]T)(&a[c]), res)
+		}
 	}
 }
 

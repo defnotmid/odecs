@@ -89,7 +89,11 @@ Loop_Filter_Frame :: struct($T: typeid) {
 // (r, c) needs (r, c - 1) and (r - 1, c + 1) done, so all superblocks with
 // the same 2r + c (one "wave") are independent of each other.
 loop_filter_superblock :: proc(f: ^Loop_Filter_Frame($T), sb_row, sb_col: int) {
-	for plane in 0 ..< 3 do for pass in 0 ..< 2 do filter_superblock(f, plane, pass, sb_row * 8, sb_col * 8)
+	row, col := sb_row * 8, sb_col * 8
+	filter_superblock(f, false, 0, row, col)
+	filter_superblock(f, false, 1, row, col)
+	filter_superblock(f, true, 0, row, col)
+	filter_superblock(f, true, 1, row, col)
 }
 
 // Superblocks of wave w: rows r with column w - 2r inside the frame.
@@ -117,44 +121,75 @@ Edge_Pair :: struct {
 }
 
 @(private)
-filter_superblock :: proc(f: ^Loop_Filter_Frame($T), plane, pass, row, col: int) {
-	sub_x, sub_y := plane > 0 ? f.ss_x : 0, plane > 0 ? f.ss_y : 0
+filter_superblock :: proc(f: ^Loop_Filter_Frame($T), $chroma: bool, $pass: int, row, col: int) #no_bounds_check {
+	sub_x := chroma ? f.ss_x : 0
+	sub_y := chroma ? f.ss_y : 0
 	sub := pass == 0 ? sub_x : sub_y
-	edge_len := pass == 0 ? 64 >> uint(sub_y) : 64 >> uint(sub_x)
-	stride := f.strides[plane]
+	edge_len := 64 >> uint(pass == 0 ? sub_y : sub_x)
 	// Visible extent of the plane in samples (MiCols/MiRows * 8, subsampled).
 	plane_w, plane_h := (8 * f.mi_cols) >> uint(sub_x), (8 * f.mi_rows) >> uint(sub_y)
 	for edge in 0 ..< 16 >> uint(sub) {
 		segments: for i := 0; i < edge_len; i += 16 {
-			pair: Edge_Pair
-			start: int
-			for half in 0 ..< 2 {
-				x, y: int
-				if pass == 0 {
-					x, y = col * 8 + edge * (4 << uint(sub_x)), row * 8 + ((i + 8 * half) << uint(sub_y))
+			pair: Edge_Pair = ---
+			pair.lines = {}
+			px0, py0: int
+			#unroll for half in 0 ..< 2 {
+				when pass == 0 {
+					x := col * 8 + edge * (4 << uint(sub_x))
+					y := row * 8 + ((i + 8 * half) << uint(sub_y))
+					on_border := x == 0
 				} else {
-					x, y = col * 8 + ((i + 8 * half) << uint(sub_x)), row * 8 + edge * (4 << uint(sub_y))
+					x := col * 8 + ((i + 8 * half) << uint(sub_x))
+					y := row * 8 + edge * (4 << uint(sub_y))
+					on_border := y == 0
 				}
-				if x >= 8 * f.mi_cols || y >= 8 * f.mi_rows || pass == 0 && x == 0 || pass == 1 && y == 0 {
+				if x >= 8 * f.mi_cols || y >= 8 * f.mi_rows || on_border {
 					// Past the frame along the edge, or the frame's own edge.
 					if half == 0 do break segments
-					break
+				} else {
+					px, py := x >> uint(sub_x), y >> uint(sub_y)
+					if half == 0 do px0, py0 = px, py
+					when chroma {
+						loop_col := ((x >> 3) >> uint(sub_x)) << uint(sub_x)
+						loop_row := ((y >> 3) >> uint(sub_y)) << uint(sub_y)
+					} else {
+						loop_col := x >> 3
+						loop_row := y >> 3
+					}
+					d := edge_decision(f, &f.cells[loop_row * f.mi_cols + loop_col], chroma, pass, edge, x, y, sub_x, sub_y, sub)
+					if d.apply {
+						pair.d[half] = d
+						pair.lines[half] = min(8, pass == 0 ? plane_h - py : plane_w - px)
+					}
 				}
-				px, py := x >> uint(sub_x), y >> uint(sub_y)
-				if half == 0 do start = py * stride + px
-				loop_col := ((x >> 3) >> uint(sub_x)) << uint(sub_x)
-				loop_row := ((y >> 3) >> uint(sub_y)) << uint(sub_y)
-				d := edge_decision(f, &f.cells[loop_row * f.mi_cols + loop_col], plane, pass, edge, x, y, sub_x, sub_y, sub)
-				if !d.apply do continue
-				pair.d[half] = d
-				pair.lines[half] = min(8, pass == 0 ? plane_h - py : plane_w - px)
 			}
-			if pair.lines == {} do continue
-			along, across := pass == 0 ? stride : 1, pass == 0 ? 1 : stride
-			if f.bit_depth <= 10 {
-				filter_pair(f.planes[plane], start, along, across, &pair, f.bit_depth, i16)
+			if pair.lines[0] | pair.lines[1] == 0 do continue
+			when !chroma {
+				stride := f.strides[0]
+				start := py0 * stride + px0
+				when T == u8 {
+					filter_pair(f.planes[0], start, stride, &pair, 8, i16, pass)
+				} else {
+					if f.bit_depth <= 10 {
+						filter_pair(f.planes[0], start, stride, &pair, f.bit_depth, i16, pass)
+					} else {
+						filter_pair(f.planes[0], start, stride, &pair, f.bit_depth, i32, pass)
+					}
+				}
 			} else {
-				filter_pair(f.planes[plane], start, along, across, &pair, f.bit_depth, i32)
+				#unroll for p in 1 ..= 2 {
+					stride := f.strides[p]
+					start := py0 * stride + px0
+					when T == u8 {
+						filter_pair(f.planes[p], start, stride, &pair, 8, i16, pass)
+					} else {
+						if f.bit_depth <= 10 {
+							filter_pair(f.planes[p], start, stride, &pair, f.bit_depth, i16, pass)
+						} else {
+							filter_pair(f.planes[p], start, stride, &pair, f.bit_depth, i32, pass)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -162,27 +197,45 @@ filter_superblock :: proc(f: ^Loop_Filter_Frame($T), plane, pass, row, col: int)
 
 
 @(private)
-edge_decision :: proc(f: ^Loop_Filter_Frame($T), cell: ^Filter_Cell, plane, pass, edge, x, y, sub_x, sub_y, sub: int) -> (d: Edge_Decision) {
+edge_decision :: #force_inline proc(f: ^Loop_Filter_Frame($T), cell: ^Filter_Cell, $chroma: bool, $pass: int, edge, x, y, sub_x, sub_y, sub: int) -> (d: Edge_Decision) #no_bounds_check {
 	lvl := int(cell.level)
 	if lvl == 0 do return
 	mi_size := int(cell.mi_size)
-	tx := int(cell.tx_size[min(plane, 1)])
+	tx := int(cell.tx_size[int(chroma)])
 	// Block widths and transform sizes are powers of two.
-	sb_size := sub == 0 ? mi_size : max(BLOCK_16X16, mi_size)
-	block_edge := pass == 0 ? x & (8 * int(NUM_8X8_BLOCKS_WIDE_LOOKUP[sb_size]) - 1) == 0 : y & (8 * int(NUM_8X8_BLOCKS_HIGH_LOOKUP[sb_size]) - 1) == 0
+	when chroma {
+		sb_size := sub == 0 ? mi_size : max(BLOCK_16X16, mi_size)
+	} else {
+		sb_size := mi_size
+	}
+	when pass == 0 {
+		block_edge := x & (8 * int(NUM_8X8_BLOCKS_WIDE_LOOKUP[sb_size]) - 1) == 0
+	} else {
+		block_edge := y & (8 * int(NUM_8X8_BLOCKS_HIGH_LOOKUP[sb_size]) - 1) == 0
+	}
 	tx_edge: bool
-	if pass == 1 && sub_x == 1 && f.mi_cols & 1 == 1 && edge & 1 == 1 && x + 8 >= f.mi_cols * 8 {
-		tx_edge = false // a chroma row edge crossing the right edge of the image
+	when pass == 1 && chroma {
+		if sub_x == 1 && f.mi_cols & 1 == 1 && edge & 1 == 1 && x + 8 >= f.mi_cols * 8 {
+			tx_edge = false // a chroma row edge crossing the right edge of the image
+		} else {
+			tx_edge = edge & (1 << uint(tx) - 1) == 0
+		}
 	} else {
 		tx_edge = edge & (1 << uint(tx) - 1) == 0
 	}
 	d.apply = block_edge || tx_edge && !cell.skip
+	if !d.apply do return
 	// Filter size (8.8.3).
 	base := tx == TX_4X4 && edge & 7 == 0 ? TX_8X8 : min(TX_16X16, tx)
 	d.size = base
-	if base == TX_16X16 {
-		if pass == 0 && sub_x == 1 && x >> 3 == f.mi_cols - 1 do d.size = TX_8X8
-		if pass == 1 && sub_y == 1 && y >> 3 == f.mi_rows - 1 do d.size = TX_8X8
+	when chroma {
+		if base == TX_16X16 {
+			when pass == 0 {
+				if sub_x == 1 && x >> 3 == f.mi_cols - 1 do d.size = TX_8X8
+			} else {
+				if sub_y == 1 && y >> 3 == f.mi_rows - 1 do d.size = TX_8X8
+			}
+		}
 	}
 	// Strength (8.8.4).
 	l := &f.limits[lvl]
@@ -200,18 +253,18 @@ Edge_Lanes :: struct($V: typeid) {
 
 // Filters the lines of one edge pair (8.8.5) in lanes of E: i16 through 10
 // bits, where no filter sum overflows them, i32 at 12. `base` is q0 of the
-// pair's first line, `along` steps between lines, `across` across the edge.
+// pair's first line, `stride` is the plane stride.
 // Lanes 0..7 are the first cell's lines and take its decision, lanes 8..15
 // the second's. Unfiltered lanes are stored back unchanged.
 @(private)
-filter_pair :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bit_depth: int, $E: typeid) {
+filter_pair :: proc(plane: []$T, base, stride: int, pair: ^Edge_Pair, bit_depth: int, $E: typeid, $pass: int) {
 	// Sixteen-tap filters reach eight samples either side, the others four.
 	sixteen := pair.lines[0] > 0 && pair.d[0].size == TX_16X16 || pair.lines[1] > 0 && pair.d[1].size == TX_16X16
-	if sixteen {filter_lanes(plane, base, along, across, pair, bit_depth, E, 8)} else {filter_lanes(plane, base, along, across, pair, bit_depth, E, 4)}
+	if sixteen {filter_lanes(plane, base, stride, pair, bit_depth, E, 8, pass)} else {filter_lanes(plane, base, stride, pair, bit_depth, E, 4, pass)}
 }
 
 @(private)
-filter_lanes :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bit_depth: int, $E: typeid, $reach: int) #no_bounds_check {
+filter_lanes :: proc(plane: []$T, base, stride: int, pair: ^Edge_Pair, bit_depth: int, $E: typeid, $reach: int, $pass: int) #no_bounds_check {
 	V :: #simd[16]E
 	M :: type_of(simd.lanes_eq(V{}, V{}))
 	halves :: #force_inline proc "contextless" (a, b: i32) -> V {
@@ -225,7 +278,7 @@ filter_lanes :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bi
 	d0, d1 := &pair.d[0], &pair.d[1]
 	size0 := pair.lines[0] > 0 ? d0.size : -1
 	size1 := pair.lines[1] > 0 ? d1.size : -1
-	e := load_pair(plane, base, along, across, reach, V)
+	e := load_pair(plane, base, stride, reach, V, pass)
 	shift := uint(bit_depth - 8)
 	limit := halves(d0.limit << shift, d1.limit << shift)
 	blimit := halves(d0.blimit << shift, d1.blimit << shift)
@@ -269,7 +322,7 @@ filter_lanes :: proc(plane: []$T, base, along, across: int, pair: ^Edge_Pair, bi
 		wide16 := simd.bit_and(mask, flat2)
 		if simd.reduce_or(wide16) != 0 do wide_filter(&e, &out, 4, wide16)
 	}
-	store_pair(plane, base, along, across, reach, &out)
+	store_pair(plane, base, stride, reach, &out, pass)
 }
 
 // Low-pass over 2^log2 taps either side (8.8.5.3): modifies the n = 2^(log2-1)-1
@@ -298,66 +351,68 @@ wide_filter :: #force_inline proc(e, out: ^Edge_Lanes($V), $log2: uint, lanes: $
 	}
 }
 
-// Across a horizontal edge the lines are adjacent samples of one row, so a
-// sample position is a single load. Across a vertical edge each line is a
-// row: a row holds reach / 4 groups of eight samples from -reach, each
-// cell's groups are transposed 8 x 8 and the two cells joined into lanes.
+// Across a horizontal edge (pass == 1) the lines are adjacent samples of one
+// row, so a sample position is a single load. Across a vertical edge (pass == 0)
+// each line is a row: a row holds reach / 4 groups of eight samples from -reach,
+// each cell's groups are transposed 8 x 8 and the two cells joined into lanes.
 @(private)
-load_pair :: #force_inline proc(plane: []$T, base, along, across: int, $reach: int, $V: typeid/#simd[16]$E) -> (e: Edge_Lanes(V)) #no_bounds_check {
-	if across != 1 {
+load_pair :: #force_inline proc(plane: []$T, base, stride: int, $reach: int, $V: typeid/#simd[16]$E, $pass: int) -> (e: Edge_Lanes(V)) #no_bounds_check {
+	when pass == 1 {
 		#unroll for k in 0 ..< reach {
-			e.q[k] = V(intrinsics.unaligned_load((^#simd[16]T)(&plane[base + k * across])))
-			e.p[k] = V(intrinsics.unaligned_load((^#simd[16]T)(&plane[base - (k + 1) * across])))
+			e.q[k] = V(intrinsics.unaligned_load((^#simd[16]T)(&plane[base + k * stride])))
+			e.p[k] = V(intrinsics.unaligned_load((^#simd[16]T)(&plane[base - (k + 1) * stride])))
+		}
+		return
+	} else {
+		H :: #simd[8]E
+		G :: reach / 4
+		join :: #force_inline proc "contextless" (a, b: H) -> V {return simd.shuffle(a, b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)}
+		cols: [2][G][8]H // cell, group, sample within the group
+		#unroll for cell in 0 ..< 2 do #unroll for g in 0 ..< G {
+			rows: [8]H
+			#unroll for line in 0 ..< 8 {
+				at := base + (8 * cell + line) * stride - reach + 8 * g
+				rows[line] = H(intrinsics.unaligned_load((^#simd[8]T)(&plane[at])))
+			}
+			cols[cell][g] = common.transpose(rows)
+		}
+		#unroll for k in 0 ..< reach {
+			p, q := reach - 1 - k, reach + k // p_k is sample -(k + 1), q_k sample k
+			e.p[k] = join(cols[0][p >> 3][p & 7], cols[1][p >> 3][p & 7])
+			e.q[k] = join(cols[0][q >> 3][q & 7], cols[1][q >> 3][q & 7])
 		}
 		return
 	}
-	H :: #simd[8]E
-	G :: reach / 4
-	join :: #force_inline proc "contextless" (a, b: H) -> V {return simd.shuffle(a, b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)}
-	cols: [2][G][8]H // cell, group, sample within the group
-	#unroll for cell in 0 ..< 2 do #unroll for g in 0 ..< G {
-		rows: [8]H
-		#unroll for line in 0 ..< 8 {
-			at := base + (8 * cell + line) * along - reach + 8 * g
-			rows[line] = H(intrinsics.unaligned_load((^#simd[8]T)(&plane[at])))
-		}
-		cols[cell][g] = common.transpose(rows)
-	}
-	#unroll for k in 0 ..< reach {
-		p, q := reach - 1 - k, reach + k // p_k is sample -(k + 1), q_k sample k
-		e.p[k] = join(cols[0][p >> 3][p & 7], cols[1][p >> 3][p & 7])
-		e.q[k] = join(cols[0][q >> 3][q & 7], cols[1][q >> 3][q & 7])
-	}
-	return
 }
 
 @(private)
-store_pair :: #force_inline proc(plane: []$T, base, along, across: int, $reach: int, e: ^Edge_Lanes($V/#simd[16]$E)) #no_bounds_check {
-	if across != 1 {
+store_pair :: #force_inline proc(plane: []$T, base, stride: int, $reach: int, e: ^Edge_Lanes($V/#simd[16]$E), $pass: int) #no_bounds_check {
+	when pass == 1 {
 		// p3 and q3 (p7 and q7 for 16 taps) never change.
 		#unroll for k in 0 ..< reach - 1 {
-			intrinsics.unaligned_store((^#simd[16]T)(&plane[base + k * across]), (#simd[16]T)(e.q[k]))
-			intrinsics.unaligned_store((^#simd[16]T)(&plane[base - (k + 1) * across]), (#simd[16]T)(e.p[k]))
+			intrinsics.unaligned_store((^#simd[16]T)(&plane[base + k * stride]), (#simd[16]T)(e.q[k]))
+			intrinsics.unaligned_store((^#simd[16]T)(&plane[base - (k + 1) * stride]), (#simd[16]T)(e.p[k]))
 		}
 		return
-	}
-	H :: #simd[8]E
-	G :: reach / 4
-	half :: #force_inline proc "contextless" (v: V, cell: int) -> H {
-		return cell == 0 ? simd.shuffle(v, v, 0, 1, 2, 3, 4, 5, 6, 7) : simd.shuffle(v, v, 8, 9, 10, 11, 12, 13, 14, 15)
-	}
-	#unroll for cell in 0 ..< 2 {
-		cols: [G][8]H
-		#unroll for k in 0 ..< reach {
-			p, q := reach - 1 - k, reach + k
-			cols[p >> 3][p & 7] = half(e.p[k], cell)
-			cols[q >> 3][q & 7] = half(e.q[k], cell)
+	} else {
+		H :: #simd[8]E
+		G :: reach / 4
+		half :: #force_inline proc "contextless" (v: V, cell: int) -> H {
+			return cell == 0 ? simd.shuffle(v, v, 0, 1, 2, 3, 4, 5, 6, 7) : simd.shuffle(v, v, 8, 9, 10, 11, 12, 13, 14, 15)
 		}
-		#unroll for g in 0 ..< G {
-			rows := common.transpose(cols[g])
-			#unroll for line in 0 ..< 8 {
-				at := base + (8 * cell + line) * along - reach + 8 * g
-				intrinsics.unaligned_store((^#simd[8]T)(&plane[at]), (#simd[8]T)(rows[line]))
+		#unroll for cell in 0 ..< 2 {
+			cols: [G][8]H
+			#unroll for k in 0 ..< reach {
+				p, q := reach - 1 - k, reach + k
+				cols[p >> 3][p & 7] = half(e.p[k], cell)
+				cols[q >> 3][q & 7] = half(e.q[k], cell)
+			}
+			#unroll for g in 0 ..< G {
+				rows := common.transpose(cols[g])
+				#unroll for line in 0 ..< 8 {
+					at := base + (8 * cell + line) * stride - reach + 8 * g
+					intrinsics.unaligned_store((^#simd[8]T)(&plane[at]), (#simd[8]T)(rows[line]))
+				}
 			}
 		}
 	}

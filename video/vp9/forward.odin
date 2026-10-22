@@ -1,5 +1,6 @@
 package vp9
 
+import common "../../common"
 import "base:intrinsics"
 import "core:simd"
 
@@ -86,55 +87,93 @@ forward_transform :: proc(f: ^Forward_Transforms, block: []i32, tx_size, tx_type
 }
 
 // Residuals are within +-255, so a column sum is below 32 * 255 * 2^14 and
-// four times it still fits i32. Row sums of those values need i64.
+// four times it still fits i32. Row products also fit i32 in pairs before
+// widening to i64 for the final sum.
 // forward_transform's length assertion bounds every index below.
 @(private)
 forward_lossy :: proc(f: ^Forward_Transforms, block: []i32, tx_type: int, $TX: int) #no_bounds_check {
 	N :: 4 << uint(TX)
 	H :: N / 2
-	Row :: #simd[N]i32
+	L :: min(N, 8)
+	Vec :: #simd[L]i32
+	Acc :: #simd[L]i64
 	vertical := tx_type == ADST_DCT || tx_type == ADST_ADST
 	horizontal := tx_type == DCT_ADST || tx_type == ADST_ADST
 	cols, rows := &f.basis[TX][int(vertical)], &f.basis[TX][int(horizontal)]
-	input: [N]Row = ---
-	for i in 0 ..< N do input[i] = intrinsics.unaligned_load((^Row)(&block[i * N]))
 
-	// Columns: each output row weights whole input rows. For the DCT, the even
-	// outputs read sums of reflected rows and the odd outputs their differences.
-	tmp: [N][N]i32 = ---
-	terms, count := input[:], N
-	paired: [N]Row = ---
-	if !vertical {
-		for i in 0 ..< H do paired[i], paired[H + i] = input[i] + input[N - 1 - i], input[i] - input[N - 1 - i]
-		count = H
-	}
-	for y in 0 ..< N {
-		if !vertical do terms = paired[(y & 1) * H:][:H]
-		acc: Row
-		for i in 0 ..< count do acc += Row(cols[y][i]) * terms[i]
-		intrinsics.unaligned_store((^Row)(&tmp[y]), simd.shr(acc * 4 + 8192, (#simd[N]u32)(14)))
+	// Columns: process L columns at a time and transpose L x L tiles into t_cols
+	// so that t_cols[gb][x] holds sample x of rows gb * L ..< (gb + 1) * L.
+	t_cols: [N / L][N]Vec = ---
+	for jb := 0; jb < N; jb += L {
+		col_out: [N]Vec = ---
+		if vertical {
+			input: [N]Vec = ---
+			#unroll for i in 0 ..< N do input[i] = intrinsics.unaligned_load((^Vec)(&block[i * N + jb]))
+			for y in 0 ..< N {
+				acc: Vec
+				for i in 0 ..< N do acc += Vec(cols[y][i]) * input[i]
+				col_out[y] = simd.shr(acc * 4 + 8192, (#simd[L]u32)(14))
+			}
+		} else {
+			sums, diffs: [H]Vec = ---, ---
+			#unroll for i in 0 ..< H {
+				a := intrinsics.unaligned_load((^Vec)(&block[i * N + jb]))
+				b := intrinsics.unaligned_load((^Vec)(&block[(N - 1 - i) * N + jb]))
+				sums[i], diffs[i] = a + b, a - b
+			}
+			for y := 0; y < N; y += 2 {
+				acc0, acc1: Vec
+				for i in 0 ..< H {
+					acc0 += Vec(cols[y][i]) * sums[i]
+					acc1 += Vec(cols[y + 1][i]) * diffs[i]
+				}
+				col_out[y] = simd.shr(acc0 * 4 + 8192, (#simd[L]u32)(14))
+				col_out[y + 1] = simd.shr(acc1 * 4 + 8192, (#simd[L]u32)(14))
+			}
+		}
+		#unroll for gb in 0 ..< N / L {
+			tile: [L]Vec = ---
+			#unroll for l in 0 ..< L do tile[l] = col_out[gb * L + l]
+			tile = common.transpose(tile)
+			#unroll for k in 0 ..< L do t_cols[gb][jb + k] = tile[k]
+		}
 	}
 
-	// Rows, pairing reflected samples the same way for a horizontal DCT.
+	// Rows: transform L rows at a time in parallel, pairing two i32 products
+	// before widening to i64, then transpose L x L tiles back to block.
 	shift :: uint(2 * (TX + 2) - min(6, TX + 4))
-	for y in 0 ..< N {
-		samples := &tmp[y]
-		out := block[y * N:][:N]
+	for gb in 0 ..< N / L {
+		src := &t_cols[gb]
+		row_out: [N]Vec = ---
 		if horizontal {
 			for x in 0 ..< N {
-				s: i64
-				for i in 0 ..< N do s += i64(rows[x][i]) * i64(samples[i])
-				out[x] = round2(s, 14 + shift)
+				s: Acc
+				for i := 0; i < N; i += 2 {
+					p := Vec(rows[x][i]) * src[i] + Vec(rows[x][i + 1]) * src[i + 1]
+					s += Acc(p)
+				}
+				row_out[x] = Vec(round2_lanes(s, 14 + shift))
 			}
-			continue
+		} else {
+			sums, diffs: [H]Vec = ---, ---
+			#unroll for i in 0 ..< H do sums[i], diffs[i] = src[i] + src[N - 1 - i], src[i] - src[N - 1 - i]
+			for x := 0; x < N; x += 2 {
+				s0, s1: Acc
+				for i := 0; i < H; i += 2 {
+					p0 := Vec(rows[x][i]) * sums[i] + Vec(rows[x][i + 1]) * sums[i + 1]
+					p1 := Vec(rows[x + 1][i]) * diffs[i] + Vec(rows[x + 1][i + 1]) * diffs[i + 1]
+					s0 += Acc(p0)
+					s1 += Acc(p1)
+				}
+				row_out[x] = Vec(round2_lanes(s0, 14 + shift))
+				row_out[x + 1] = Vec(round2_lanes(s1, 14 + shift))
+			}
 		}
-		sums, differences: [H]i64 = ---, ---
-		for i in 0 ..< H do sums[i], differences[i] = i64(samples[i]) + i64(samples[N - 1 - i]), i64(samples[i]) - i64(samples[N - 1 - i])
-		for x in 0 ..< N {
-			terms := x & 1 == 0 ? &sums : &differences
-			s: i64
-			for i in 0 ..< H do s += i64(rows[x][i]) * terms[i]
-			out[x] = round2(s, 14 + shift)
+		#unroll for jb in 0 ..< N / L {
+			tile: [L]Vec = ---
+			#unroll for k in 0 ..< L do tile[k] = row_out[jb * L + k]
+			tile = common.transpose(tile)
+			#unroll for l in 0 ..< L do intrinsics.unaligned_store((^Vec)(&block[(gb * L + l) * N + jb * L]), tile[l])
 		}
 	}
 }

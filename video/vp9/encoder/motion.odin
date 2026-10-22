@@ -16,6 +16,7 @@ motion_predictor :: proc(t: ^Tile, r, c, size: int) -> (best: vp9.Mv, mode_ctx: 
 		if i < 2 do counter += int(vp9.MODE_2_COUNTER[m.y_mode])
 		if !found {best = m.sub_mvs[0][3]; found = true}
 	}
+	if !found && !e.last_keyframe do best = t.prev_origin_mv
 	best[0] = i16(clamp(int(best[0]), -r * 64 - vp9.MV_BORDER, (e.mi_rows - int(vp9.NUM_8X8_BLOCKS_HIGH_LOOKUP[size]) - r) * 64 + vp9.MV_BORDER))
 	best[1] = i16(clamp(int(best[1]), -c * 64 - vp9.MV_BORDER, (e.mi_cols - int(vp9.NUM_8X8_BLOCKS_WIDE_LOOKUP[size]) - c) * 64 + vp9.MV_BORDER))
 	return best, int(vp9.COUNTER_TO_CONTEXT[counter])
@@ -71,7 +72,11 @@ motion_cost :: proc(t: ^Tile, r, c, size: int, mv, predictor: vp9.Mv) -> i64 {
 
 @(private)
 motion_penalty :: proc(e: ^Encoder, mv, predictor: vp9.Mv) -> i64 {
-	return i64(e.config.base_q_idx / 16) * i64((abs(int(mv[0]) - int(predictor[0])) + abs(int(mv[1]) - int(predictor[1]))) / 8)
+	if mv == (vp9.Mv{}) do return 0
+	if mv == predictor do return 1
+	q := i64(max(8, int(vp9.ac_q(8, e.config.base_q_idx))))
+	diff := i64(abs(int(mv[0]) - int(predictor[0])) + abs(int(mv[1]) - int(predictor[1])))
+	return q / 2 + (q * diff) >> 5
 }
 
 @(private)
@@ -107,25 +112,40 @@ search_motion :: proc(t: ^Tile, r, c, size: int, predictor: vp9.Mv) -> vp9.Mv {
 @(private)
 put_mv :: proc(t: ^Tile, mv, predictor: vp9.Mv) {
 	p := &t.e.probs
+	c := &t.counts
 	diff := [2]int{int(mv[0]) - int(predictor[0]), int(mv[1]) - int(predictor[1])}
 	joint := int(diff[1] != 0) + 2 * int(diff[0] != 0)
 	put_tree(&t.b, vp9.MV_JOINT_TREE[:], p.mv_joint[:], joint)
+	c.mv_joint[joint] += 1
 	for comp in 0 ..< 2 {
 		v := diff[comp]
 		if v == 0 do continue
-		put_bool(&t.b, int(v < 0), p.mv_sign[comp])
+		sign := int(v < 0)
+		put_bool(&t.b, sign, p.mv_sign[comp])
+		c.mv_sign[comp][sign] += 1
 		mag := abs(v) - 1
 		class := 0
 		for mag >= (vp9.CLASS0_SIZE << uint(class + 3)) do class += 1
 		put_tree(&t.b, vp9.MV_CLASS_TREE[:], p.mv_class[comp][:], class)
+		c.mv_class[comp][class] += 1
+		fr := mag >> 1 & 3
 		if class == 0 {
 			bit := mag >> 3
 			put_bool(&t.b, bit, p.mv_class0_bit[comp])
-			put_tree(&t.b, vp9.MV_FR_TREE[:], p.mv_class0_fr[comp][bit][:], mag >> 1 & 3)
+			c.mv_class0_bit[comp][bit] += 1
+			put_tree(&t.b, vp9.MV_FR_TREE[:], p.mv_class0_fr[comp][bit][:], fr)
+			c.mv_class0_fr[comp][bit][fr] += 1
+			c.mv_class0_hp[comp][1] += 1
 		} else {
 			offset := mag - (vp9.CLASS0_SIZE << uint(class + 2))
-			for i in 0 ..< class do put_bool(&t.b, offset >> uint(i + 3) & 1, p.mv_bits[comp][i])
-			put_tree(&t.b, vp9.MV_FR_TREE[:], p.mv_fr[comp][:], mag >> 1 & 3)
+			for i in 0 ..< class {
+				bit := offset >> uint(i + 3) & 1
+				put_bool(&t.b, bit, p.mv_bits[comp][i])
+				c.mv_bits[comp][i][bit] += 1
+			}
+			put_tree(&t.b, vp9.MV_FR_TREE[:], p.mv_fr[comp][:], fr)
+			c.mv_fr[comp][fr] += 1
+			c.mv_hp[comp][1] += 1
 		}
 		// Quarter-pixel MVs have implicit hp=1 (magnitude's low bit is zero).
 	}

@@ -177,7 +177,7 @@ picture_of :: proc(f: ^Frame) -> (p: Picture) {
 }
 
 @(private)
-plane :: #force_inline proc(f: ^Frame, i: int, $T: typeid) -> []T {
+plane :: #force_inline proc(f: ^Frame, i: int, $T: typeid) -> []T #no_bounds_check {
 	bytes := f.strides[i] * f.rows[i] * size_of(T)
 	return ([^]T)(raw_data(f.storage[f.offsets[i]:]))[:bytes / size_of(T)]
 }
@@ -383,14 +383,13 @@ decode_tiles :: proc(d: ^Decoder, data: []u8) -> Error {
 				rest = rest[4:]
 				if size > len(rest) do return .Invalid_Data
 			}
-			t^ = {
-				d            = d,
-				data         = rest[:size],
-				mi_row_start = offset(row, h.mi_rows, h.tile_rows_log2),
-				mi_row_end   = offset(row + 1, h.mi_rows, h.tile_rows_log2),
-				mi_col_start = offset(col, h.mi_cols, h.tile_cols_log2),
-				mi_col_end   = offset(col + 1, h.mi_cols, h.tile_cols_log2),
-			}
+			t.d = d
+			t.data = rest[:size]
+			t.mi_row_start = offset(row, h.mi_rows, h.tile_rows_log2)
+			t.mi_row_end = offset(row + 1, h.mi_rows, h.tile_rows_log2)
+			t.mi_col_start = offset(col, h.mi_cols, h.tile_cols_log2)
+			t.mi_col_end = offset(col + 1, h.mi_cols, h.tile_cols_log2)
+			t.err = .None
 			rest = rest[size:]
 		}
 		job := Tile_Job{d, d.tiles[:cols]}
@@ -400,7 +399,10 @@ decode_tiles :: proc(d: ^Decoder, data: []u8) -> Error {
 			run_tiles(&job, 0, cols)
 		}
 		for t in d.tiles[:cols] {
-			if t.err != .None do return t.err
+			if t.err != .None {
+				t.coefs = {}
+				return t.err
+			}
 			vp9.add_counts(&d.counts, &t.counts)
 		}
 	}

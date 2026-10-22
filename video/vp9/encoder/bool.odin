@@ -20,6 +20,23 @@ start_bool :: proc(b: ^Bool_Writer) {
 }
 
 @(private)
+put_bool_byte :: #force_no_inline proc(b: ^Bool_Writer, shift: int) #no_bounds_check {
+	offset := shift - b.count
+	if (b.low << uint(offset - 1)) & 0x80000000 != 0 {
+		at := len(b.data) - 1
+		for at >= 0 && b.data[at] == 255 {b.data[at] = 0; at -= 1}
+		assert(at >= 0 || b.failed)
+		if at >= 0 do b.data[at] += 1
+	}
+	if _, err := append(&b.data, u8(b.low >> uint(24 - offset))); err != nil do b.failed = true
+	b.low <<= uint(offset)
+	rem := b.count
+	b.low &= 0xFFFFFF
+	b.count -= 8
+	b.low <<= uint(rem)
+}
+
+@(private)
 put_bool :: #force_inline proc(b: ^Bool_Writer, bit: int, prob: u8) {
 	split := 1 + ((b.range - 1) * u32(prob) >> 8)
 	if bit == 0 {b.range = split} else {b.low += split; b.range -= split}
@@ -27,18 +44,8 @@ put_bool :: #force_inline proc(b: ^Bool_Writer, bit: int, prob: u8) {
 	b.range <<= uint(shift)
 	b.count += shift
 	if b.count >= 0 {
-		offset := shift - b.count
-		if (b.low << uint(offset - 1)) & 0x80000000 != 0 {
-			at := len(b.data) - 1
-			for at >= 0 && b.data[at] == 255 {b.data[at] = 0; at -= 1}
-			assert(at >= 0 || b.failed)
-			if at >= 0 do b.data[at] += 1
-		}
-		if _, err := append(&b.data, u8(b.low >> uint(24 - offset))); err != nil do b.failed = true
-		b.low <<= uint(offset)
-		shift = b.count
-		b.low &= 0xFFFFFF
-		b.count -= 8
+		put_bool_byte(b, shift)
+		return
 	}
 	b.low <<= uint(shift)
 }

@@ -264,24 +264,41 @@ transform_lanes :: proc(block: []i32, $n: uint, $E: typeid, tx_type, rows: int) 
 	// 32x32 is DCT only.
 	row_dct := n == 5 || tx_type == DCT_DCT || tx_type == ADST_DCT
 	col_dct := n == 5 || tx_type == DCT_DCT || tx_type == DCT_ADST
-	t: [32]V
+	// A DC-only DCT block reconstructs to a constant across all N x N samples.
+	if rows == 1 && row_dct && col_dct {
+		dc_only := true
+		for j in 1 ..< N do if block[j] != 0 {dc_only = false; break}
+		if dc_only {
+			dc1 := round2(i64(block[0]) * cos64(16), 14)
+			dc2 := round2(i64(dc1) * cos64(16), 14)
+			v := W(round2(i64(dc2), SHIFT))
+			for idx := 0; idx < N * N; idx += L {
+				intrinsics.unaligned_store((^W)(&block[idx]), v)
+			}
+			return
+		}
+	}
+	t: [32]V = ---
 	for g := 0; g < rows; g += L {
 		#unroll for jb in 0 ..< N / L {
-			tile: [L]V
+			tile: [L]V = ---
 			#unroll for l in 0 ..< L do tile[l] = V(intrinsics.unaligned_load((^W)(&block[(g + l) * N + jb * L])))
 			tile = common.transpose(tile)
 			#unroll for k in 0 ..< L do t[jb * L + k] = tile[k]
 		}
 		if row_dct {idct(&t, n)} else {iadst(&t, n)}
 		#unroll for jb in 0 ..< N / L {
-			tile: [L]V
+			tile: [L]V = ---
 			#unroll for k in 0 ..< L do tile[k] = t[jb * L + k]
 			tile = common.transpose(tile)
 			#unroll for l in 0 ..< L do intrinsics.unaligned_store((^W)(&block[(g + l) * N + jb * L]), W(tile[l]))
 		}
 	}
+	row_end := min(N, (rows + L - 1) & ~int(L - 1))
 	for jb := 0; jb < N; jb += L {
-		#unroll for i in 0 ..< N do t[i] = V(intrinsics.unaligned_load((^W)(&block[i * N + jb])))
+		#unroll for i in 0 ..< N {
+			t[i] = i < row_end ? V(intrinsics.unaligned_load((^W)(&block[i * N + jb]))) : 0
+		}
 		if col_dct {idct(&t, n)} else {iadst(&t, n)}
 		#unroll for i in 0 ..< N do intrinsics.unaligned_store((^W)(&block[i * N + jb]), W(round2_lanes(t[i], SHIFT)))
 	}

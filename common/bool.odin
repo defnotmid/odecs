@@ -21,18 +21,20 @@ bool_start :: proc "contextless" (b: ^Bool_Decoder, data: []u8) {
 	bool_fill(b)
 }
 
+@(private)
+bool_fill_tail :: #force_no_inline proc "contextless" (b: ^Bool_Decoder) -> u64 #no_bounds_check {
+	word: u64
+	for i in 0 ..< 4 {
+		word <<= 8
+		if b.pos + i < len(b.data) do word |= u64(b.data[b.pos + i])
+	}
+	return word
+}
+
 // Refills load 32 stream bits once fewer than 16 remain, as the CABAC window
 // does; a decision consumes at most 7, so the window never runs dry.
 bool_fill :: #force_inline proc "contextless" (b: ^Bool_Decoder) #no_bounds_check {
-	word: u64
-	if b.pos + 4 <= len(b.data) {
-		word = u64(bits.from_be_u32(intrinsics.unaligned_load((^u32)(&b.data[b.pos]))))
-	} else {
-		for i in 0 ..< 4 {
-			word <<= 8
-			if b.pos + i < len(b.data) do word |= u64(b.data[b.pos + i])
-		}
-	}
+	word := b.pos + 4 <= len(b.data) ? u64(bits.from_be_u32(intrinsics.unaligned_load((^u32)(&b.data[b.pos])))) : bool_fill_tail(b)
 	b.value |= word << uint(32 - b.bits)
 	b.pos += 4
 	b.bits += 32

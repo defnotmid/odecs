@@ -38,12 +38,13 @@ Encoder :: struct {
 	filter_levels: vp9.Filter_Levels,
 	mi_cols, mi_rows, sb_cols, sb_rows: int,
 	probs: vp9.Probabilities,
+	counts: vp9.Counts,
 	forward: vp9.Forward_Transforms,
 	tiles: []Tile,
 	packet: [dynamic]u8,
 	header: Bool_Writer,
 	frames: u64,
-	keyframe, initialized: bool,
+	keyframe, last_keyframe, initialized: bool,
 }
 
 // Init owns all persistent buffers with the calling allocator. The encoder
@@ -119,8 +120,10 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 	context.allocator = e.allocator
 	e.input, e.input_strides = planes, strides
 	e.keyframe = e.frames % u64(e.config.keyframe_interval) == 0
+	if e.keyframe do vp9.default_probabilities(&e.probs)
 	for &t in e.tiles {
 		t.e = e
+		t.counts = {}
 		for &v in t.above_partition do v = 0
 		for &a in t.above_nonzero do for &v in a do v = 0
 	}
@@ -149,6 +152,16 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 		}
 		append(&e.packet, ..t.b.data[:])
 	}
+	e.counts = {}
+	for &t in e.tiles {
+		vp9.add_counts(&e.counts, &t.counts)
+		t.prev_origin_mv = e.keyframe || t.first_col >= e.mi_cols ? {} : e.mi[t.first_col].sub_mvs[0][3]
+	}
+	vp9.adapt_coef_probs(&e.probs, &e.counts, e.keyframe, e.last_keyframe)
+	if !e.keyframe {
+		vp9.adapt_noncoef_probs(&e.probs, &e.counts, false, e.config.base_q_idx != 0, false)
+	}
+	e.last_keyframe = e.keyframe
 	for p in 0 ..< 3 {
 		e.planes[p], e.reference[p] = e.reference[p], e.planes[p]
 		e.planes_storage[p], e.reference_storage[p] = e.reference_storage[p], e.planes_storage[p]

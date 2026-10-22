@@ -6,7 +6,11 @@ import vp9 ".."
 build_compressed_header :: proc(e: ^Encoder) {
 	b := &e.header
 	start_bool(b)
-	if e.config.base_q_idx != 0 {put_literal(b, vp9.ALLOW_32X32, 2); put_literal(b, 0, 1)}
+	if e.config.base_q_idx != 0 {
+		put_literal(b, vp9.ALLOW_32X32, 2)
+		put_literal(b, 1, 1) // TX_MODE_SELECT
+		for _ in 0 ..< vp9.TX_SIZE_CONTEXTS * (1 + 2 + 3) do put_bool(b, 0, 252)
+	}
 	count := e.config.base_q_idx == 0 ? 1 : 4
 	for _ in 0 ..< count do put_literal(b, 0, 1) // no coefficient probability updates
 	for _ in 0 ..< vp9.SKIP_CONTEXTS do put_bool(b, 0, 252)
@@ -52,13 +56,14 @@ build_uncompressed_header :: proc(e: ^Encoder) -> bool {
 	raw_bits(&w, 2, 2); raw_bits(&w, 0, 2) // marker, profile 0
 	raw_bits(&w, 0, 1) // show_existing_frame
 	raw_bits(&w, int(!e.keyframe), 1)
-	raw_bits(&w, 1, 1); raw_bits(&w, 1, 1) // shown, error resilient (implies frame parallel)
+	raw_bits(&w, 1, 1); raw_bits(&w, 0, 1) // shown, error_resilient=0 (enables backward adaptation)
 	if e.keyframe {
 		raw_bits(&w, 0x498342, 24)
 		raw_bits(&w, 2, 3); raw_bits(&w, 0, 1) // BT.709 limited
 		raw_bits(&w, e.config.width - 1, 16); raw_bits(&w, e.config.height - 1, 16)
 		raw_bits(&w, 0, 1) // same render size
 	} else {
+		raw_bits(&w, 0, 2) // reset_frame_context = 0
 		raw_bits(&w, 1, 8) // refresh LAST slot zero
 		for _ in 0 ..< 3 {raw_bits(&w, 0, 3); raw_bits(&w, 0, 1)}
 		raw_bits(&w, 1, 1) // size from LAST
@@ -66,6 +71,7 @@ build_uncompressed_header :: proc(e: ^Encoder) -> bool {
 		raw_bits(&w, 0, 1) // quarter-pixel precision
 		raw_bits(&w, 0, 1); raw_bits(&w, 1, 2) // fixed EIGHTTAP
 	}
+	raw_bits(&w, 1, 1); raw_bits(&w, 0, 1) // refresh_frame_context=1, frame_parallel=0
 	raw_bits(&w, 0, 2) // context index
 	level := e.config.base_q_idx == 0 || e.config.disable_loop_filter ? 0 : min(63, (e.config.base_q_idx + 4) / 8)
 	raw_bits(&w, level, 6); raw_bits(&w, 0, 3); raw_bits(&w, 0, 1) // filter level, sharpness, deltas
