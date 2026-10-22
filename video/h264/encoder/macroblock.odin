@@ -142,6 +142,7 @@ encode_macroblock :: proc(
 				source_luma,
 				source.y_stride,
 				motion_lambda,
+				inter_candidate.distortion > 16384,
 			)
 			motion_choice.chroma_prediction_mode = .DC
 			evaluate_inter_candidate(
@@ -160,8 +161,9 @@ encode_macroblock :: proc(
 				distortion_lambda,
 			)
 			if !state.config.exhaustive_intra &&
-			   inter_candidate.choice.is_skip &&
-			   f64(inter_candidate.distortion) <= distortion_lambda * 16 {
+			   (state.config.ultrafast ?
+					   motion_choice.motion_search_cost <= 4096 + 16 * motion_lambda :
+					   (inter_candidate.choice.is_skip && f64(inter_candidate.distortion) <= distortion_lambda * 16)) {
 				selected_candidate = inter_candidate
 				evaluate_intra = false
 			}
@@ -267,6 +269,7 @@ encode_macroblock :: proc(
 		// Intra4 keeps the original tie preference over Intra16 and inter.
 		intra_luma_cost: Intra_Luma_Cost
 		if chroma_cost <= inter_candidate_cost &&
+		   (!state.config.ultrafast || selected_cost > distortion_lambda * 64) &&
 		   evaluate_intra_4x4_candidate(
 			   task,
 			   macroblock,
@@ -331,6 +334,7 @@ encode_macroblock :: proc(
 	case .P_L0_16x16, .P_L0_L0_16x8, .P_L0_L0_8x16, .P_8x8:
 		macroblock.is_intra = false
 		macroblock.motion_vectors[0] = choice.motion_vectors
+		task.last_inter_mv = choice.motion_vectors[0]
 		for index in 0 ..< 4 {
 			macroblock.reference_indices[0][index] = choice.reference_indices[index]
 			macroblock.reference_picture_ids[0][index] =
@@ -504,30 +508,67 @@ code_luma_4x4 :: proc(
 	reconstructed_luma: [^]u8,
 	reconstruction_stride: int,
 	intra: bool,
+	macroblock_index: int = -1,
 ) {
 	choice.luma_coded_block_mask = 0
 	q := &task.state.frame.quantizers[0][intra ? 1 : 0]
-	for block in 0 ..< 16 {
-		block_column, block_row := h264.subblock_to_xy(block)
-		nonzero_count := code_residual_4x4_samples(
-			task,
-			h264.load_luma_block_4x4(
+	for group in 0 ..< 4 {
+		only_pred: #simd[16]i16 = ---
+		only_sub := 0
+		group_nz_count := 0
+		for sub in 0 ..< 4 {
+			block := group * 4 + sub
+			block_column, block_row := h264.subblock_to_xy(block)
+			src_vec := h264.load_luma_block_4x4(
 				&source_luma[block_row * 4 * source_stride + block_column * 4],
 				source_stride,
-			),
-			h264.load_luma_block_4x4(
+			)
+			pred_vec := h264.load_luma_block_4x4(
 				&reconstructed_luma[block_row * 4 * reconstruction_stride + block_column * 4],
 				reconstruction_stride,
-			),
-			&reconstructed_luma[block_row * 4 * reconstruction_stride + block_column * 4],
-			reconstruction_stride,
-			&choice.luma_coefficients[block],
-			q,
-			intra,
-			0,
-		)
-		macroblock.nonzero_coefficient_counts[block] = u8(nonzero_count)
-		if nonzero_count > 0 do choice.luma_coded_block_mask |= 1 << uint(block / 4)
+			)
+			nonzero_count := code_residual_4x4_samples(
+				task,
+				src_vec,
+				pred_vec,
+				&reconstructed_luma[block_row * 4 * reconstruction_stride + block_column * 4],
+				reconstruction_stride,
+				&choice.luma_coefficients[block],
+				q,
+				intra,
+				0,
+			)
+			macroblock.nonzero_coefficient_counts[block] = u8(nonzero_count)
+			if nonzero_count > 0 {
+				only_sub = sub
+				only_pred = pred_vec
+				group_nz_count += nonzero_count
+			}
+		}
+		if group_nz_count > 0 {
+			if !intra && macroblock_index >= 0 && group_nz_count == 1 {
+				only_block := group * 4 + only_sub
+				bx, by := h264.subblock_to_xy(only_block)
+				src_ptr: [^]u8 = &source_luma[by * 4 * source_stride + bx * 4]
+				rec_ptr: [^]u8 = &reconstructed_luma[by * 4 * reconstruction_stride + bx * 4]
+				rec_ssd := block_squared_difference_sum(src_ptr, source_stride, rec_ptr, reconstruction_stride, 4, 4)
+				bits := 1
+				for sub in 0 ..< 4 {
+					block := group * 4 + sub
+					nc := h264.cavlc_neighbour_coefficient_count(&task.grid, macroblock_index, block, false)
+					bits += sub == only_sub ? cavlc_coefficient_bit_count(choice.luma_coefficients[block][:], nc) : cavlc_zero_coefficient_bit_count(nc)
+				}
+				h264.store_luma_block_4x4(rec_ptr, reconstruction_stride, only_pred)
+				pred_ssd := block_squared_difference_sum(src_ptr, source_stride, rec_ptr, reconstruction_stride, 4, 4)
+				if f64(rec_ssd) + task.distortion_lambda * f64(bits) >= f64(pred_ssd) {
+					choice.luma_coefficients[only_block] = {}
+					macroblock.nonzero_coefficient_counts[only_block] = 0
+					continue
+				}
+				h264.reconstruct_4x4(&task.state.scales, rec_ptr, reconstruction_stride, &choice.luma_coefficients[only_block], true, q.qp, 3, false, 0)
+			}
+			choice.luma_coded_block_mask |= 1 << uint(group)
+		}
 	}
 }
 
@@ -724,6 +765,7 @@ select_inter_prediction :: proc(
 	source_luma: [^]u8,
 	source_stride: int,
 	motion_lambda: i32,
+	wide_search := false,
 ) {
 	state := task.state
 
@@ -772,6 +814,7 @@ select_inter_prediction :: proc(
 		source_stride: int,
 		motion_lambda: i32,
 		search_radius: int,
+		wide_search: bool,
 	) -> (
 		[2]i16,
 		i32,
@@ -807,21 +850,56 @@ select_inter_prediction :: proc(
 			block,
 			width,
 		)
-		candidates := [5][2]i16 {
+		r := i16(search_radius * 4)
+		candidates := [31][2]i16 {
 			predictor,
 			{0, 0},
 			left_neighbour.mv,
 			top_neighbour.mv,
 			top_right_neighbour.mv,
+			task.last_inter_mv,
+			task.last_search_mv,
+			{-r, 0},
+			{r, 0},
+			{0, -r},
+			{0, r},
+			{-r, -r},
+			{r, -r},
+			{-r, r},
+			{r, r},
+			{-2 * r, 0},
+			{2 * r, 0},
+			{0, -2 * r},
+			{0, 2 * r},
+			{-2 * r, -2 * r},
+			{2 * r, -2 * r},
+			{-2 * r, 2 * r},
+			{2 * r, 2 * r},
+			{-3 * r, 0},
+			{3 * r, 0},
+			{0, -3 * r},
+			{0, 3 * r},
+			{-3 * r, -2 * r},
+			{3 * r, -2 * r},
+			{-3 * r, 2 * r},
+			{3 * r, 2 * r},
 		}
-		return search_integer_motion(&search_region, candidates[:])
+		motion, cost := search_integer_motion(&search_region, candidates[:7])
+		// A poorly predicted 16x16 also descends from the best point of a
+		// grid out to three search radii (pans faster than the radius), and
+		// keeps whichever descent ends cheaper.
+		if width == 4 && height == 4 && wide_search {
+			if wide, wide_cost := search_integer_motion(&search_region, candidates[7:]); wide_cost < cost do motion, cost = wide, wide_cost
+		}
+		return motion, cost
 	}
 
 	// 16x16 over all references
 	selected_reference := 0
 	selected_motion: [2]i16
 	selected_cost := max(i32)
-	for reference_index in 0 ..< state.num_refs {
+	max_refs := state.config.ultrafast ? min(state.num_refs, 1) : state.num_refs
+	for reference_index in 0 ..< max_refs {
 		motion, cost := search_partition_motion(
 			task,
 			macroblock,
@@ -834,6 +912,7 @@ select_inter_prediction :: proc(
 			source_stride,
 			motion_lambda,
 			search_radius,
+			wide_search,
 		)
 		cost += motion_lambda * reference_index_bit_count(state, reference_index)
 		if cost < selected_cost {
@@ -842,6 +921,7 @@ select_inter_prediction :: proc(
 	}
 	choice.type = .P_L0_16x16
 	choice.motion_search_cost = selected_cost + motion_lambda * 1
+	task.last_search_mv = selected_motion
 	for index in 0 ..< 4 do choice.reference_indices[index] = i8(selected_reference)
 	for index in 0 ..< 16 do choice.motion_vectors[index] = selected_motion
 
@@ -849,7 +929,7 @@ select_inter_prediction :: proc(
 	// the vector-only floor is unlikely to improve enough to pay for more vectors.
 	reference_index := selected_reference
 	partition_cost := motion_lambda * (reference_index_bit_count(state, reference_index) * 2 + 3)
-	if selected_cost < partition_cost + 16 * motion_lambda do return
+	if state.config.ultrafast || selected_cost < partition_cost + 16 * motion_lambda do return
 	stage_partition_motion(macroblock, 0, 4, 4, i8(reference_index), selected_motion)
 	first_motion, first_cost := search_partition_motion(
 		task,
@@ -863,6 +943,7 @@ select_inter_prediction :: proc(
 		source_stride,
 		motion_lambda,
 		search_radius,
+		false,
 	)
 	stage_partition_motion(macroblock, 0, 4, 2, i8(reference_index), first_motion)
 	second_motion, second_cost := search_partition_motion(
@@ -877,6 +958,7 @@ select_inter_prediction :: proc(
 		source_stride,
 		motion_lambda,
 		search_radius,
+		false,
 	)
 	if first_cost + second_cost + partition_cost < choice.motion_search_cost {
 		choice.type = .P_L0_L0_16x8
@@ -897,6 +979,7 @@ select_inter_prediction :: proc(
 		source_stride,
 		motion_lambda,
 		search_radius,
+		false,
 	)
 	stage_partition_motion(macroblock, 0, 2, 4, i8(reference_index), first_motion)
 	second_motion, second_cost = search_partition_motion(
@@ -911,6 +994,7 @@ select_inter_prediction :: proc(
 		source_stride,
 		motion_lambda,
 		search_radius,
+		false,
 	)
 	if first_cost + second_cost + partition_cost < choice.motion_search_cost {
 		choice.type = .P_L0_L0_8x16
@@ -935,6 +1019,7 @@ select_inter_prediction :: proc(
 			source_stride,
 			motion_lambda,
 			search_radius,
+			false,
 		)
 		stage_partition_motion(macroblock, index * 4, 2, 2, i8(reference_index), motion)
 		partition_motions[index] = motion

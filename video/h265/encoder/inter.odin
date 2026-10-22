@@ -106,7 +106,9 @@ sad_int_luma :: proc(enc: ^Encoder, ref: ^Frame, x, y, w, h, mx, my: int) -> u32
 // The integer stage uses integer SAD (no interpolation) and stops early on an
 // exact match; only the 8 half-pel and 8 quarter-pel neighbours around the
 // best integer vector are interpolated. This mirrors kvazaar's
-// `search_mv_full` + `search_frac`.
+// `search_mv_full` + `search_frac`. Ultrafast replaces the exhaustive stage
+// with a coarse-to-fine diamond from the prediction and the origin, and
+// stops at half-pel.
 motion_estimate :: proc(
 	enc: ^Encoder,
 	ref: ^Frame,
@@ -117,29 +119,52 @@ motion_estimate :: proc(
 	best: [2]i16,
 	cost: u32,
 ) {
-	// Integer-pixel search at unit step around the prediction.
 	ix := i32(pred_x) >> 2
 	iy := i32(pred_y) >> 2
-	best = {i16(clamp(ix * 4, -2048, 2047)), i16(clamp(iy * 4, -2048, 2047))}
-	cost = max(u32)
+	bx, by := ix, iy
 	range := enc.motion_range
-	integer_exact := false
-	for dy := -range; dy <= range && !integer_exact; dy += 1 {
-		for dx := -range; dx <= range; dx += 1 {
-			s := sad_int_luma(enc, ref, x, y, w, h, int(ix + dx), int(iy + dy))
-			if s < cost {
-				cost = s
-				best = {
-					i16(clamp((ix + dx) * 4, -2048, 2047)),
-					i16(clamp((iy + dy) * 4, -2048, 2047)),
+	if enc.config.ultrafast {
+		cost = sad_int_luma(enc, ref, x, y, w, h, int(bx), int(by))
+		if (ix != 0 || iy != 0) && cost > 0 {
+			s0 := sad_int_luma(enc, ref, x, y, w, h, 0, 0)
+			if s0 < cost {
+				cost = s0
+				bx, by = 0, 0
+			}
+		}
+		min_x, max_x := ix - range, ix + range
+		min_y, max_y := iy - range, iy + range
+		step := range >= 8 ? i32(4) : i32(2)
+		for ; step >= 1 && cost > 0; step >>= 1 {
+			for {
+				cx, cy := bx, by
+				for offset in ([4][2]i32{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}) {
+					nx, ny := cx + offset[0] * step, cy + offset[1] * step
+					if nx < min_x || nx > max_x || ny < min_y || ny > max_y do continue
+					s := sad_int_luma(enc, ref, x, y, w, h, int(nx), int(ny))
+					if s < cost {
+						cost = s
+						bx, by = nx, ny
+					}
 				}
-				if s == 0 {
-					integer_exact = true
-					break
+				if bx == cx && by == cy do break
+			}
+		}
+	} else {
+		cost = max(u32)
+		search: for dy := -range; dy <= range; dy += 1 {
+			for dx := -range; dx <= range; dx += 1 {
+				s := sad_int_luma(enc, ref, x, y, w, h, int(ix + dx), int(iy + dy))
+				if s < cost {
+					cost = s
+					bx, by = ix + dx, iy + dy
+					if s == 0 do break search
 				}
 			}
 		}
 	}
+	best = {i16(clamp(bx * 4, -2048, 2047)), i16(clamp(by * 4, -2048, 2047))}
+	integer_exact := cost == 0
 	// Half-pel (d = 2) then quarter-pel (d = 1) refinement: the 3x3
 	// neighbourhood minus the centre, whose cost is already known.
 	if !integer_exact {
@@ -148,7 +173,8 @@ motion_estimate :: proc(
 		cache.ix = x + int(i32(best[0]) >> 2) - 1
 		cache.iy = y + int(i32(best[1]) >> 2) - 1
 		use_cache := wp_is_default(wp)
-		for step in 1 ..= 2 {
+		max_step := enc.config.ultrafast ? 1 : 2
+		for step in 1 ..= max_step {
 			base := best
 			d := i16(step == 1 ? 2 : 1)
 			for oy := i32(-1); oy <= 1; oy += 1 {

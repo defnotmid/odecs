@@ -209,6 +209,9 @@ Config :: struct {
 	// The alpha channel information SEI's alpha_channel_use_idc: true (1)
 	// marks colour premultiplied by alpha, false (0) straight colour.
 	alpha_premultiplied: bool,
+	// Prefer speed over size: a top-down CU tree, four intra modes, a
+	// diamond integer search refined to half-pel, earlier merge decisions.
+	ultrafast:           bool,
 }
 
 Layer_Role :: enum u8 {

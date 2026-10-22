@@ -191,7 +191,7 @@ choose_intra_mode :: #force_inline proc(
 	best_cost := max(u64)
 	tried: [35]bool
 
-	if size <= 8 {
+	if size <= 8 && !enc.config.ultrafast {
 		for m in 0 ..= 34 {
 			try_intra_mode(enc, size, u8(m), inputs, &tried, &best_mode, &best_cost)
 		}
@@ -205,6 +205,12 @@ choose_intra_mode :: #force_inline proc(
 	}
 	try_intra_mode(enc, size, 0, inputs, &tried, &best_mode, &best_cost)
 	try_intra_mode(enc, size, 1, inputs, &tried, &best_mode, &best_cost)
+
+	if enc.config.ultrafast {
+		try_intra_mode(enc, size, 10, inputs, &tried, &best_mode, &best_cost)
+		try_intra_mode(enc, size, 26, inputs, &tried, &best_mode, &best_cost)
+		return {mode = best_mode, sse = best_cost}
+	}
 
 	for m in 2 ..= 34 {
 		if (m - 2) % 8 != 0 do continue
@@ -299,17 +305,17 @@ write_leaf :: proc(
 			if enc.slice_type == .B do return write_inter_leaf_b_rqt(enc, x, y, depth, cabac, search)
 			return write_inter_leaf_rqt(enc, x, y, depth, cabac, search)
 		}
-		return write_intra_leaf(enc, x, y, depth, cabac, intra_refs)
+		return write_intra_leaf(enc, x, y, depth, cabac, intra_refs, search)
 	} else {
 		// With partitions or the intra transform tree on, every residual-less
 		// CU (skip, rqt_root_cbf 0, intra) still carries the decoder's
 		// CU-boundary transform marks.
 		if enc.config.amp || enc.config.intra_rqt do mark_tu_enc(enc, x, y, size)
 		if cu.type == .Inter {
-			if enc.slice_type == .B do return write_inter_leaf_b(enc, x, y, depth, cabac)
-			return write_inter_leaf(enc, x, y, depth, cabac)
+			if enc.slice_type == .B do return write_inter_leaf_b(enc, x, y, depth, cabac, search)
+			return write_inter_leaf(enc, x, y, depth, cabac, search)
 		}
-		return write_intra_leaf(enc, x, y, depth, cabac, intra_refs)
+		return write_intra_leaf(enc, x, y, depth, cabac, intra_refs, search)
 	}
 }
 
@@ -739,7 +745,13 @@ reconstruct_prediction_b :: #force_inline proc(
 // `cu.skipped` selects the inferred-merge, no-residual form; `cu.merge` the
 // merge form (merge index, no MVD, rqt_root_cbf inferred to one); otherwise
 // AMVP with an explicit MVD.
-write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> u64 {
+write_inter_leaf :: proc(
+	enc: ^Encoder,
+	x, y: int,
+	depth: u8,
+	cabac: ^Cabac,
+	search := true,
+) -> u64 {
 	sub_w, sub_h := chroma_sub(enc.config.chroma_format)
 	size := CTU_WIDTH >> depth
 	cu := cu_at(enc.cu, x, y)
@@ -747,6 +759,7 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 
 	if cu.skipped {
 		write_merge_idx(cabac, int(cu.merge_idx))
+		if !search do return 0
 		return reconstruct_prediction(enc, x, y, size, mv, int(cu.ref_idx[0]))
 	}
 
@@ -786,6 +799,17 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 		cabac_unary_max_symbol(cabac, cabac.ctx.mvp_idx_model[:], u32(idx), 1, 1)
 	}
 
+	n_chroma := chroma_blocks(enc.config.chroma_format)
+	if !search && !cu.cbf_y && !cu.cbf_u && !cu.cbf_v {
+		if !cu.merge {
+			cabac_bin(cabac, &cabac.ctx.cu_qt_root_cbf_model, 0)
+		} else if has_chroma(enc) {
+			for _ in 0 ..< n_chroma do cabac_bin(cabac, &cabac.ctx.qt_cbf_model_chroma[0], 0)
+			for _ in 0 ..< n_chroma do cabac_bin(cabac, &cabac.ctx.qt_cbf_model_chroma[0], 0)
+		}
+		return 0
+	}
+
 	// --- Prediction --------------------------------------------------------
 	csize := size / sub_w
 	qp_c := chroma_qp_scaled(enc)
@@ -801,84 +825,90 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 	pred_v: [2 * 32 * 32]Sample = ---
 
 	frame_cw, frame_ch := enc.coded_width / sub_w, enc.coded_height / sub_h
-	mc_luma_uni_w(
-		pred_y[:],
-		size,
-		&enc.refs[0][ref],
-		x,
-		y,
-		size,
-		size,
-		mv,
-		wp_luma(enc, 0, ref),
-		enc.bit_depth,
-	)
-	for j in 0 ..< size {
-		for i in 0 ..< size {
-			res_y[j * size + i] = i16(
-				i32(at(enc.source.y, x + i, y + j)) - i32(pred_y[j * size + i]),
-			)
+	cbf_y: bool
+	if search || cu.cbf_y {
+		mc_luma_uni_w(
+			pred_y[:],
+			size,
+			&enc.refs[0][ref],
+			x,
+			y,
+			size,
+			size,
+			mv,
+			wp_luma(enc, 0, ref),
+			enc.bit_depth,
+		)
+		for j in 0 ..< size {
+			for i in 0 ..< size {
+				res_y[j * size + i] = i16(
+					i32(at(enc.source.y, x + i, y + j)) - i32(pred_y[j * size + i]),
+				)
+			}
 		}
+		forward_transform(enc, size, res_y[:], size, coeff[:], enc.bit_depth)
+		cbf_y = enc_quantize(enc, coeff[:], q_y[:], size, .Y, false, int(luma_qp_scaled(enc)))
 	}
-	forward_transform(enc, size, res_y[:], size, coeff[:], enc.bit_depth)
-	cbf_y := enc_quantize(enc, coeff[:], q_y[:], size, .Y, false, int(luma_qp_scaled(enc)))
 
 	cbf_u, cbf_v: [2]bool
 	if has_chroma(enc) {
 		mv_c := chroma_mv(enc.config.chroma_format, mv)
-		n_chroma := chroma_blocks(enc.config.chroma_format)
 		for t in 0 ..< n_chroma {
 			cy := y / sub_h + t * csize
 			blk := t * csize * csize
-			mc_chroma_uni_w(
-				pred_u[blk:],
-				csize,
-				enc.refs[0][ref].u,
-				x / sub_w,
-				cy,
-				csize,
-				csize,
-				mv_c,
-				frame_cw,
-				frame_ch,
-				wp_chroma(enc, 0, ref, 0),
-				enc.bit_depth,
-			)
-			for j in 0 ..< csize {
-				for i in 0 ..< csize {
-					res_c[j * csize + i] = i16(
-						i32(at(enc.source.u, x / sub_w + i, cy + j)) -
-						i32(pred_u[blk + j * csize + i]),
-					)
+			if search || cu.cbf_u {
+				mc_chroma_uni_w(
+					pred_u[blk:],
+					csize,
+					enc.refs[0][ref].u,
+					x / sub_w,
+					cy,
+					csize,
+					csize,
+					mv_c,
+					frame_cw,
+					frame_ch,
+					wp_chroma(enc, 0, ref, 0),
+					enc.bit_depth,
+				)
+				for j in 0 ..< csize {
+					for i in 0 ..< csize {
+						res_c[j * csize + i] = i16(
+							i32(at(enc.source.u, x / sub_w + i, cy + j)) -
+							i32(pred_u[blk + j * csize + i]),
+						)
+					}
 				}
+				forward_transform(enc, csize, res_c[:], csize, coeff[:], enc.bit_depth)
+				cbf_u[t] = enc_quantize(enc, coeff[:], q_u[t][:], csize, .Cb, false, int(qp_c))
 			}
-			forward_transform(enc, csize, res_c[:], csize, coeff[:], enc.bit_depth)
-			cbf_u[t] = enc_quantize(enc, coeff[:], q_u[t][:], csize, .Cb, false, int(qp_c))
 
-			mc_chroma_uni_w(
-				pred_v[blk:],
-				csize,
-				enc.refs[0][ref].v,
-				x / sub_w,
-				cy,
-				csize,
-				csize,
-				mv_c,
-				frame_cw,
-				frame_ch,
-				wp_chroma(enc, 0, ref, 1),
-				enc.bit_depth,
-			)
-			for j in 0 ..< csize {
-				for i in 0 ..< csize {
-					res_c[j * csize + i] = i16(
-						i32(at(enc.source.v, x / sub_w + i, cy + j)) -
-						i32(pred_v[blk + j * csize + i]),
-					)
+			if search || cu.cbf_v {
+				mc_chroma_uni_w(
+					pred_v[blk:],
+					csize,
+					enc.refs[0][ref].v,
+					x / sub_w,
+					cy,
+					csize,
+					csize,
+					mv_c,
+					frame_cw,
+					frame_ch,
+					wp_chroma(enc, 0, ref, 1),
+					enc.bit_depth,
+				)
+				for j in 0 ..< csize {
+					for i in 0 ..< csize {
+						res_c[j * csize + i] = i16(
+							i32(at(enc.source.v, x / sub_w + i, cy + j)) -
+							i32(pred_v[blk + j * csize + i]),
+						)
+					}
 				}
+				forward_transform(enc, csize, res_c[:], csize, coeff[:], enc.bit_depth)
+				cbf_v[t] = enc_quantize(enc, coeff[:], q_v[t][:], csize, .Cr, false, int(qp_c))
 			}
-			forward_transform(enc, csize, res_c[:], csize, coeff[:], enc.bit_depth)
-			cbf_v[t] = enc_quantize(enc, coeff[:], q_v[t][:], csize, .Cr, false, int(qp_c))
 		}
 	}
 
@@ -886,7 +916,9 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 	// The transform tree of a non-split inter TU signals cbf_cb and cbf_cr,
 	// then cbf_luma only when a chroma component is coded. A merge unit reads
 	// none of rqt_root_cbf; it is inferred to one.
-	set_cbf_flags(enc, x, y, size, cbf_y, cbf_u[0] || cbf_u[1], cbf_v[0] || cbf_v[1])
+	if search {
+		set_cbf_flags(enc, x, y, size, cbf_y, cbf_u[0] || cbf_u[1], cbf_v[0] || cbf_v[1])
+	}
 	cbf_any := cbf_y || cbf_u[0] || cbf_u[1] || cbf_v[0] || cbf_v[1]
 	if !cu.merge {
 		cabac_bin(cabac, &cabac.ctx.cu_qt_root_cbf_model, cbf_any ? 1 : 0)
@@ -897,7 +929,6 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 		// rqt_root_cbf inference (7.3.8.8), not a bin. A 4:2:2 pair codes
 		// its second cbf beside the first (7.3.8.8).
 		if has_chroma(enc) {
-			n_chroma := chroma_blocks(enc.config.chroma_format)
 			for t in 0 ..< n_chroma {
 				cabac_bin(cabac, &cabac.ctx.qt_cbf_model_chroma[0], cbf_u[t] ? 1 : 0)
 			}
@@ -910,7 +941,6 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 		}
 		if cbf_y do encode_coeff_nxn(cabac, q_y[:size * size], size, 0, .Diag)
 		if has_chroma(enc) {
-			n_chroma := chroma_blocks(enc.config.chroma_format)
 			for t in 0 ..< n_chroma {
 				if cbf_u[t] do encode_coeff_nxn(cabac, q_u[t][:csize * csize], csize, 1, .Diag)
 			}
@@ -919,6 +949,8 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 			}
 		}
 	}
+
+	if !search do return 0
 
 	sse: u64
 	recon_plane(
@@ -938,7 +970,6 @@ write_inter_leaf :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> 
 		&sse,
 	)
 	if has_chroma(enc) {
-		n_chroma := chroma_blocks(enc.config.chroma_format)
 		for t in 0 ..< n_chroma {
 			cy := y / sub_h + t * csize
 			blk := t * csize * csize
@@ -1107,13 +1138,20 @@ write_inter_leaf_rqt :: proc(
 
 // Encode one inter leaf CU of a B slice (2Nx2N). Merge/skip reads the merged
 // per-list motion; AMVP signals inter_pred_idc and an MVD per used list.
-write_inter_leaf_b :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -> u64 {
+write_inter_leaf_b :: proc(
+	enc: ^Encoder,
+	x, y: int,
+	depth: u8,
+	cabac: ^Cabac,
+	search := true,
+) -> u64 {
 	sub_w, sub_h := chroma_sub(enc.config.chroma_format)
 	size := CTU_WIDTH >> depth
 	cu := cu_at(enc.cu, x, y)
 
 	if cu.skipped {
 		write_merge_idx(cabac, int(cu.merge_idx))
+		if !search do return 0
 		return reconstruct_prediction_b(enc, x, y, size, cu.pred, cu.mv, cu.ref_idx)
 	}
 
@@ -1256,6 +1294,8 @@ write_inter_leaf_b :: proc(enc: ^Encoder, x, y: int, depth: u8, cabac: ^Cabac) -
 			}
 		}
 	}
+
+	if !search do return 0
 
 	sse: u64
 	recon_plane(
@@ -1471,10 +1511,12 @@ write_intra_leaf :: #force_inline proc(
 	depth: u8,
 	cabac: ^Cabac,
 	prepared_refs: ^Intra_Refs = nil,
+	search := true,
 ) -> u64 {
 	sub_w, sub_h := chroma_sub(enc.config.chroma_format)
 	size := CTU_WIDTH >> depth
-	mode := cu_at(enc.cu, x, y).mode
+	cu := cu_at(enc.cu, x, y)
+	mode := cu.mode
 
 	// part_mode: intra CUs at minimum size signal 2Nx2N; larger CUs signal
 	// nothing because only 2Nx2N is used for depth < MAX_CU_DEPTH.
@@ -1496,21 +1538,24 @@ write_intra_leaf :: #force_inline proc(
 	pred_y: [32 * 32]Sample = ---
 	refs: Intra_Refs
 
-	luma_refs := prepared_refs
-	if luma_refs == nil {
-		build_reference(enc, &enc.rec, x, y, log2_size(size), .Y, &refs, enc.bit_depth)
-		luma_refs = &refs
-	}
-	intra_predict(luma_refs, log2_size(size), mode, .Y, pred_y[:], size, enc.bit_depth)
-	for j in 0 ..< size {
-		for i in 0 ..< size {
-			res_y[j * size + i] = i16(
-				i32(at(enc.source.y, x + i, y + j)) - i32(pred_y[j * size + i]),
-			)
+	cbf_y: bool
+	if search || cu.cbf_y {
+		luma_refs := prepared_refs
+		if luma_refs == nil {
+			build_reference(enc, &enc.rec, x, y, log2_size(size), .Y, &refs, enc.bit_depth)
+			luma_refs = &refs
 		}
+		intra_predict(luma_refs, log2_size(size), mode, .Y, pred_y[:], size, enc.bit_depth)
+		for j in 0 ..< size {
+			for i in 0 ..< size {
+				res_y[j * size + i] = i16(
+					i32(at(enc.source.y, x + i, y + j)) - i32(pred_y[j * size + i]),
+				)
+			}
+		}
+		forward_transform(enc, size, res_y[:], size, coeff_y[:], enc.bit_depth)
+		cbf_y = enc_quantize(enc, coeff_y[:], q_y[:], size, .Y, true, int(luma_qp_scaled(enc)))
 	}
-	forward_transform(enc, size, res_y[:], size, coeff_y[:], enc.bit_depth)
-	cbf_y := enc_quantize(enc, coeff_y[:], q_y[:], size, .Y, true, int(luma_qp_scaled(enc)))
 
 	// --- Chroma ------------------------------------------------------------
 	csize := has_chroma(enc) ? size / sub_w : 0
@@ -1525,103 +1570,107 @@ write_intra_leaf :: #force_inline proc(
 	pred_v: [2 * 32 * 32]Sample = ---
 
 	cbf_u, cbf_v: [2]bool
+	n_chroma := chroma_blocks(enc.config.chroma_format)
 	if has_chroma(enc) {
-		n_chroma := chroma_blocks(enc.config.chroma_format)
 		mode_c := chroma_pred_mode(enc.config.chroma_format, mode)
 		for t in 0 ..< n_chroma {
 			// Each block is reconstructed as it is computed: the second
 			// stacked block predicts from the first's reconstruction (8.4.2).
 			ty := y + t * csize * sub_h
-			build_reference(enc, &enc.rec, x, ty, log2_size(csize), .U, &refs, enc.bit_depth)
-			intra_predict(
-				&refs,
-				log2_size(csize),
-				mode_c,
-				.U,
-				pred_u[:],
-				csize,
-				enc.bit_depth,
-				enc.config.chroma_format,
-			)
-			for j in 0 ..< csize {
-				for i in 0 ..< csize {
-					res_c[j * csize + i] = i16(
-						i32(at(enc.source.u, x / sub_w + i, ty / sub_h + j)) -
-						i32(pred_u[j * csize + i]),
-					)
-				}
-			}
-			forward_transform(enc, csize, res_c[:], csize, coeff_c[:], enc.bit_depth)
-			cbf_u[t] = enc_quantize(enc, coeff_c[:], q_u[t][:], csize, .Cb, true, int(qp_c))
-			if n_chroma > 1 {
-				// 4:2:2: the second stacked block predicts from the
-				// first's reconstruction (8.4.2), so each block
-				// reconstructs as it is computed. The single-block
-				// formats reconstruct at the tail below (byte-identical
-				// historical order). The reconstruction's inverse
-				// transform writes its spatial result back into the
-				// coefficient buffer, so the quantized levels are held
-				// across it — the coefficient writes come later.
-				saved_u := q_u[t]
-				recon_plane(
-					enc,
-					enc.rec.u,
-					enc.source.u,
-					x / sub_w,
-					ty / sub_h,
-					csize,
-					q_u[t][:],
-					res_c[:],
+			if search || cu.cbf_u {
+				build_reference(enc, &enc.rec, x, ty, log2_size(csize), .U, &refs, enc.bit_depth)
+				intra_predict(
+					&refs,
+					log2_size(csize),
+					mode_c,
+					.U,
 					pred_u[:],
-					cbf_u[t],
-					.Cb,
-					true,
-					qp_c,
-					&sse_chroma,
+					csize,
+					enc.bit_depth,
+					enc.config.chroma_format,
 				)
-				q_u[t] = saved_u
+				for j in 0 ..< csize {
+					for i in 0 ..< csize {
+						res_c[j * csize + i] = i16(
+							i32(at(enc.source.u, x / sub_w + i, ty / sub_h + j)) -
+							i32(pred_u[j * csize + i]),
+						)
+					}
+				}
+				forward_transform(enc, csize, res_c[:], csize, coeff_c[:], enc.bit_depth)
+				cbf_u[t] = enc_quantize(enc, coeff_c[:], q_u[t][:], csize, .Cb, true, int(qp_c))
+				if search && n_chroma > 1 {
+					// 4:2:2: the second stacked block predicts from the
+					// first's reconstruction (8.4.2), so each block
+					// reconstructs as it is computed. The single-block
+					// formats reconstruct at the tail below (byte-identical
+					// historical order). The reconstruction's inverse
+					// transform writes its spatial result back into the
+					// coefficient buffer, so the quantized levels are held
+					// across it — the coefficient writes come later.
+					saved_u := q_u[t]
+					recon_plane(
+						enc,
+						enc.rec.u,
+						enc.source.u,
+						x / sub_w,
+						ty / sub_h,
+						csize,
+						q_u[t][:],
+						res_c[:],
+						pred_u[:],
+						cbf_u[t],
+						.Cb,
+						true,
+						qp_c,
+						&sse_chroma,
+					)
+					q_u[t] = saved_u
+				}
 			}
 
-			build_reference(enc, &enc.rec, x, ty, log2_size(csize), .V, &refs, enc.bit_depth)
-			intra_predict(
-				&refs,
-				log2_size(csize),
-				mode_c,
-				.V,
-				pred_v[:],
-				csize,
-				enc.bit_depth,
-				enc.config.chroma_format,
-			)
-			for j in 0 ..< csize {
-				for i in 0 ..< csize {
-					res_c[j * csize + i] = i16(
-						i32(at(enc.source.v, x / sub_w + i, ty / sub_h + j)) -
-						i32(pred_v[j * csize + i]),
-					)
-				}
-			}
-			forward_transform(enc, csize, res_c[:], csize, coeff_c[:], enc.bit_depth)
-			cbf_v[t] = enc_quantize(enc, coeff_c[:], q_v[t][:], csize, .Cr, true, int(qp_c))
-			if n_chroma > 1 {
-				saved_v := q_v[t]
-				recon_plane(
-					enc,
-					enc.rec.v,
-					enc.source.v,
-					x / sub_w,
-					ty / sub_h,
-					csize,
-					q_v[t][:],
-					res_c[:],
+			if search || cu.cbf_v {
+				build_reference(enc, &enc.rec, x, ty, log2_size(csize), .V, &refs, enc.bit_depth)
+				intra_predict(
+					&refs,
+					log2_size(csize),
+					mode_c,
+					.V,
 					pred_v[:],
-					cbf_v[t],
-					.Cr,
-					true,
-					qp_c,
-					&sse_chroma,
+					csize,
+					enc.bit_depth,
+					enc.config.chroma_format,
 				)
-				q_v[t] = saved_v
+				for j in 0 ..< csize {
+					for i in 0 ..< csize {
+						res_c[j * csize + i] = i16(
+							i32(at(enc.source.v, x / sub_w + i, ty / sub_h + j)) -
+							i32(pred_v[j * csize + i]),
+						)
+					}
+				}
+				forward_transform(enc, csize, res_c[:], csize, coeff_c[:], enc.bit_depth)
+				cbf_v[t] = enc_quantize(enc, coeff_c[:], q_v[t][:], csize, .Cr, true, int(qp_c))
+				if search && n_chroma > 1 {
+					saved_v := q_v[t]
+					recon_plane(
+						enc,
+						enc.rec.v,
+						enc.source.v,
+						x / sub_w,
+						ty / sub_h,
+						csize,
+						q_v[t][:],
+						res_c[:],
+						pred_v[:],
+						cbf_v[t],
+						.Cr,
+						true,
+						qp_c,
+						&sse_chroma,
+					)
+					q_v[t] = saved_v
+				}
 			}
 		}
 	}
@@ -1630,9 +1679,10 @@ write_intra_leaf :: #force_inline proc(
 	// With the minimum CU size of 8x8 the luma transform is at least 8x8, so
 	// cbf_cb and cbf_cr are always present (log2TrafoSize > 2) — except at
 	// ChromaArrayType 0, which codes no chroma at all.
-	set_cbf_flags(enc, x, y, size, cbf_y, cbf_u[0] || cbf_u[1], cbf_v[0] || cbf_v[1])
+	if search {
+		set_cbf_flags(enc, x, y, size, cbf_y, cbf_u[0] || cbf_u[1], cbf_v[0] || cbf_v[1])
+	}
 	if has_chroma(enc) {
-		n_chroma := chroma_blocks(enc.config.chroma_format)
 		for t in 0 ..< n_chroma {
 			cabac_bin(cabac, &cabac.ctx.qt_cbf_model_chroma[0], cbf_u[t] ? 1 : 0)
 		}
@@ -1657,6 +1707,8 @@ write_intra_leaf :: #force_inline proc(
 		if cbf_v[t] do encode_coeff_nxn(cabac, q_v[t][:csize * csize], csize, 2, scan_c)
 	}
 
+	if !search do return 0
+
 	recon_plane(
 		enc,
 		enc.rec.y,
@@ -1674,7 +1726,6 @@ write_intra_leaf :: #force_inline proc(
 		&sse,
 	)
 	if has_chroma(enc) {
-		n_chroma := chroma_blocks(enc.config.chroma_format)
 		for t in 0 ..< n_chroma * (n_chroma == 1 ? 1 : 0) {
 			ty := y + t * csize * sub_h
 			blk := t * csize * csize

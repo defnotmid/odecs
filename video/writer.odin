@@ -42,6 +42,7 @@ Writer_Config :: struct {
 	// writes no audio track.
 	sample_rate, channels: int,
 	audio_bit_rate:        int, // 0 selects 64 kb/s per channel
+	ultrafast:             bool, // prefer encode speed over size (media.Config.ultrafast)
 	native_options:        ^native.Options, // optional worker pool and slice/tile geometry
 	gpu_context:           ^vulkan.Context, // optional shared Vulkan device
 }
@@ -193,6 +194,7 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 		video.frame_rate_num, video.frame_rate_den = c.fps_num, c.fps_den
 		video.alpha = c.transparency != .None
 		video.alpha_premultiplied = c.transparency == .Premultiplied
+		video.ultrafast = c.ultrafast
 		if e := media.open(&w.video, video, providers[:]); e != .None {
 			w.error_detail = "video encoder unavailable for this configuration"
 			return media_error(e)

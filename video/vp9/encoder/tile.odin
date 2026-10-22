@@ -9,6 +9,7 @@ Tile :: struct {
 	e: ^Encoder,
 	first_col, end_col: int,
 	b: Bool_Writer,
+	syms: [dynamic]u16,
 	counts: vp9.Counts,
 	prev_origin_mv: vp9.Mv,
 	above_partition: []u8,
@@ -17,15 +18,100 @@ Tile :: struct {
 	left_nonzero: [3][16]u8,
 }
 
+// Tiles stage their symbols, coded once the compressed header has settled
+// this frame's probabilities. A symbol is its bit (bit 15) and where its
+// probability is: below 256 the probability itself, below 4096 a byte of
+// Probabilities (offset + 256), above that a Pareto row entry of a
+// coefficient probability (4096 + offset * 8 + entry).
+#assert(256 + size_of(vp9.Probabilities) <= 4096)
+#assert(4096 + (offset_of(vp9.Probabilities, coef) + size_of(vp9.Probabilities{}.coef)) * 8 <= 1 << 15)
+
+@(private)
+emit_sym :: #force_inline proc(t: ^Tile, sym: u16) {
+	if _, err := append(&t.syms, sym); err != nil do t.b.failed = true
+}
+
+@(private)
+put_fixed :: #force_inline proc(t: ^Tile, bit: int, prob: u8) {
+	emit_sym(t, u16((bit << 15) | int(prob)))
+}
+
+@(private)
+put_prob :: #force_inline proc(t: ^Tile, bit: int, prob: ^u8) {
+	emit_sym(t, u16((bit << 15) | (256 + int(uintptr(prob) - uintptr(&t.e.probs)))))
+}
+
+@(private)
+put_tree_fixed :: proc(t: ^Tile, tree: []i8, probs: []u8, value: int) {
+	path, bits, ok := tree_path(tree, 0, value)
+	assert(ok)
+	node := 0
+	for i := bits - 1; i >= 0; i -= 1 {
+		bit := path >> uint(i) & 1
+		put_fixed(t, bit, probs[node >> 1])
+		node = int(tree[node + bit])
+	}
+}
+
+@(private)
+put_tree_prob :: proc(t: ^Tile, tree: []i8, probs: []u8, value: int) {
+	path, bits, ok := tree_path(tree, 0, value)
+	assert(ok)
+	node := 0
+	for i := bits - 1; i >= 0; i -= 1 {
+		bit := path >> uint(i) & 1
+		put_prob(t, bit, &probs[node >> 1])
+		node = int(tree[node + bit])
+	}
+}
+
+@(private)
+put_tree_pareto :: proc(t: ^Tile, pr2: ^u8, token: int) {
+	base := 4096 + (int(uintptr(pr2) - uintptr(&t.e.probs)) << 3)
+	path, bits, ok := tree_path(vp9.TOKEN_TREE[:], 4, token)
+	assert(ok)
+	node := 4
+	for i := bits - 1; i >= 0; i -= 1 {
+		bit := path >> uint(i) & 1
+		emit_sym(t, u16((bit << 15) | (base + (node >> 1) - 2)))
+		node = int(vp9.TOKEN_TREE[node + bit])
+	}
+}
+
 @(private)
 encode_tile :: proc(t: ^Tile) {
 	stage_source(t)
-	start_bool(&t.b)
+	clear(&t.syms)
+	t.b.failed = false
 	for r := 0; r < t.e.mi_rows; r += 8 {
 		t.left_partition, t.left_nonzero = {}, {}
 		for c := t.first_col; c < t.end_col; c += 8 do encode_partition(t, r, c, vp9.BLOCK_64X64)
 	}
-	finish_bool(&t.b)
+}
+
+@(private)
+flush_tile :: proc(t: ^Tile) #no_bounds_check {
+	if t.b.failed do return
+	probs_bytes := ([^]u8)(&t.e.probs)
+	b := t.b
+	start_bool(&b)
+	for s in t.syms {
+		bit := int(s >> 15)
+		id := int(s & 0x7FFF)
+		prob: u8
+		if id < 256 {
+			prob = u8(id)
+		} else if id < 4096 {
+			prob = probs_bytes[id - 256]
+		} else {
+			rem := id - 4096
+			pr2 := probs_bytes[rem >> 3]
+			prob = vp9.pareto_row(pr2)[rem & 7]
+		}
+		put_bool(&b, bit, prob)
+	}
+	finish_bool(&b)
+	t.b = b
 }
 
 // Copies this tile's columns of the input into the aligned source, replicating
@@ -61,13 +147,22 @@ encode_partition :: proc(t: ^Tile, r, c, size: int) #no_bounds_check {
 	a, l: u8
 	for i in 0 ..< n {a |= t.above_partition[c + i]; l |= t.left_partition[(r + i) & 7]}
 	ctx := int(bsl) * 4 + int(l >> (3 - bsl) & 1) * 2 + int(a >> (3 - bsl) & 1)
-	probs := e.keyframe ? &vp9.KF_PARTITION_PROBS[ctx] : &e.probs.partition[ctx]
 	leaf := size == vp9.BLOCK_8X8 || int(bsl) <= e.config.block_log2 - 3 && has_rows && has_cols && !should_split(t, r, c, size)
 	part := leaf ? vp9.PARTITION_NONE : vp9.PARTITION_SPLIT
-	switch {
-	case has_rows && has_cols: put_tree(&t.b, vp9.PARTITION_TREE[:], probs[:], part)
-	case has_cols: put_bool(&t.b, 1, probs[1])
-	case has_rows: put_bool(&t.b, 1, probs[2])
+	if e.keyframe {
+		probs := &vp9.KF_PARTITION_PROBS[ctx]
+		switch {
+		case has_rows && has_cols: put_tree_fixed(t, vp9.PARTITION_TREE[:], probs[:], part)
+		case has_cols: put_fixed(t, 1, probs[1])
+		case has_rows: put_fixed(t, 1, probs[2])
+		}
+	} else {
+		probs := &e.probs.partition[ctx]
+		switch {
+		case has_rows && has_cols: put_tree_prob(t, vp9.PARTITION_TREE[:], probs[:], part)
+		case has_cols: put_prob(t, 1, &probs[1])
+		case has_rows: put_prob(t, 1, &probs[2])
+		}
 	}
 	t.counts.partition[ctx][part] += 1
 	if leaf {
@@ -92,6 +187,10 @@ should_split :: proc(t: ^Tile, r, c, size: int) -> bool #no_bounds_check {
 	x, y := c * 8, r * 8
 	s_stride := e.source_strides[0]
 	area := u32(half_px * half_px)
+	q0 := &e.source[0][y * s_stride + x]
+	q1 := &e.source[0][y * s_stride + x + half_px]
+	q2 := &e.source[0][(y + half_px) * s_stride + x]
+	q3 := &e.source[0][(y + half_px) * s_stride + x + half_px]
 	if e.keyframe {
 		p0 := &e.source[0][y * s_stride + x]
 		p1 := &e.source[0][(y + half_px - 2) * s_stride + x + half_px - 2]
@@ -99,10 +198,6 @@ should_split :: proc(t: ^Tile, r, c, size: int) -> bool #no_bounds_check {
 		h_diff := block_sad(half_px, p0, s_stride, &e.source[0][y * s_stride + x + 2], s_stride) + block_sad(half_px, p1, s_stride, &e.source[0][(y + half_px - 2) * s_stride + x + half_px], s_stride)
 		return min(v_diff, h_diff) > area / 2
 	}
-	q0 := &e.source[0][y * s_stride + x]
-	q1 := &e.source[0][y * s_stride + x + half_px]
-	q2 := &e.source[0][(y + half_px) * s_stride + x]
-	q3 := &e.source[0][(y + half_px) * s_stride + x + half_px]
 	r_stride := e.strides[0]
 	rx, ry := BORDER + x, BORDER + y
 	r0 := &e.reference_storage[0][ry * r_stride + rx]
@@ -117,7 +212,7 @@ should_split :: proc(t: ^Tile, r, c, size: int) -> bool #no_bounds_check {
 	min_s := min(min(s0, s1), min(s2, s3))
 	max_s := max(max(s0, s1), max(s2, s3))
 	q := u32(vp9.ac_q(8, e.config.base_q_idx))
-	noise := (area * q) >> 6
+	noise := (area * q) >> 5
 	return max_s > min_s + noise || max_s > noise * 3
 }
 
@@ -126,7 +221,6 @@ encode_block :: proc(t: ^Tile, r, c, size: int) #no_bounds_check {
 	V4 :: #simd[4]i32
 	U4 :: #simd[4]u8
 	e := t.e
-	b := &t.b
 	n8 := int(vp9.NUM_8X8_BLOCKS_WIDE_LOOKUP[size])
 	lossless := e.config.base_q_idx == 0
 	max_tx := int(vp9.MAX_TXSIZE_LOOKUP[size])
@@ -140,7 +234,7 @@ encode_block :: proc(t: ^Tile, r, c, size: int) #no_bounds_check {
 	} else {
 		predictor, inter_ctx = motion_predictor(t, r, c, size)
 		mv = search_motion(t, r, c, size, predictor)
-		mode = mv == vp9.Mv{} ? vp9.ZEROMV : mv == predictor ? vp9.NEARESTMV : vp9.NEWMV
+		mode = mv == predictor ? vp9.NEARESTMV : mv == vp9.Mv{} ? vp9.ZEROMV : vp9.NEWMV
 	}
 	any_nonzero := false
 	dc, ac := vp9.dc_q(8, e.config.base_q_idx), vp9.ac_q(8, e.config.base_q_idx)
@@ -266,22 +360,22 @@ encode_block :: proc(t: ^Tile, r, c, size: int) #no_bounds_check {
 	skip_ctx := 0
 	if r > 0 && e.mi[(r - 1) * e.mi_cols + c].skip do skip_ctx += 1
 	if c > t.first_col && e.mi[r * e.mi_cols + c - 1].skip do skip_ctx += 1
-	put_bool(b, int(skip), e.probs.skip[skip_ctx])
+	put_prob(t, int(skip), &e.probs.skip[skip_ctx])
 	t.counts.skip[skip_ctx][int(skip)] += 1
 	if e.keyframe {
 		if !lossless do write_tx_size(t, r, c, size, tx)
 		above := r > 0 ? int(e.mi[(r - 1) * e.mi_cols + c].sub_modes[2]) : vp9.DC_PRED
 		left := c > t.first_col ? int(e.mi[r * e.mi_cols + c - 1].sub_modes[1]) : vp9.DC_PRED
-		put_tree(b, vp9.INTRA_MODE_TREE[:], vp9.KF_Y_MODE_PROBS[above][left][:], mode)
-		put_tree(b, vp9.INTRA_MODE_TREE[:], vp9.KF_UV_MODE_PROBS[mode][:], vp9.DC_PRED)
+		put_tree_fixed(t, vp9.INTRA_MODE_TREE[:], vp9.KF_Y_MODE_PROBS[above][left][:], mode)
+		put_tree_fixed(t, vp9.INTRA_MODE_TREE[:], vp9.KF_UV_MODE_PROBS[mode][:], vp9.DC_PRED)
 	} else {
-		put_bool(b, 1, e.probs.is_inter[0])
+		put_prob(t, 1, &e.probs.is_inter[0])
 		t.counts.is_inter[0][1] += 1
 		if !lossless && !skip do write_tx_size(t, r, c, size, tx)
 		ref_ctx := r > 0 || c > t.first_col ? 4 : 2
-		put_bool(b, 0, e.probs.single_ref[ref_ctx][0])
+		put_prob(t, 0, &e.probs.single_ref[ref_ctx][0])
 		t.counts.single_ref[ref_ctx][0][0] += 1
-		put_tree(b, vp9.INTER_MODE_TREE[:], e.probs.inter_mode[inter_ctx][:], mode - vp9.NEARESTMV)
+		put_tree_prob(t, vp9.INTER_MODE_TREE[:], e.probs.inter_mode[inter_ctx][:], mode - vp9.NEARESTMV)
 		t.counts.inter_mode[inter_ctx][mode - vp9.NEARESTMV] += 1
 		if mode == vp9.NEWMV do put_mv(t, mv, predictor)
 	}
@@ -341,9 +435,9 @@ write_tx_size :: proc(t: ^Tile, r, c, size, tx: int) #no_bounds_check {
 	ctx := above + left > max_tx ? 1 : 0
 	probs := e.probs.tx[max_tx][ctx][:]
 	switch max_tx {
-	case vp9.TX_32X32: put_tree(&t.b, vp9.TX_SIZE_32_TREE[:], probs, tx)
-	case vp9.TX_16X16: put_tree(&t.b, vp9.TX_SIZE_16_TREE[:], probs, tx)
-	case: put_tree(&t.b, vp9.TX_SIZE_8_TREE[:], probs, tx)
+	case vp9.TX_32X32: put_tree_prob(t, vp9.TX_SIZE_32_TREE[:], probs, tx)
+	case vp9.TX_16X16: put_tree_prob(t, vp9.TX_SIZE_16_TREE[:], probs, tx)
+	case: put_tree_prob(t, vp9.TX_SIZE_8_TREE[:], probs, tx)
 	}
 	t.counts.tx_size[max_tx][ctx][tx] += 1
 }
@@ -364,11 +458,10 @@ put_tokens :: proc(t: ^Tile, p, x, y, tx, tx_type: int, quant: []i32, nz_count, 
 	}
 	ctx := int(above) + int(left)
 	if nz_count == 0 {
-		put_bool(&t.b, 0, probs[0][ctx][0])
+		put_prob(t, 0, &probs[0][ctx][0])
 		counts_more[0][ctx][0] += 1
 		return
 	}
-	b := t.b
 	counts_token := &t.counts.token[tx][plane_type][is_inter]
 	scan := vp9.scan_entries(tx, tx_type)
 	eob := 0
@@ -389,30 +482,26 @@ put_tokens :: proc(t: ^Tile, p, x, y, tx, tx_type: int, quant: []i32, nz_count, 
 		pr := &probs[band][ctx]
 		if check_eob {
 			more := int(c < eob)
-			put_bool(&b, more, pr[0])
+			put_prob(t, more, &pr[0])
 			counts_more[band][ctx][more] += 1
 			if more == 0 do break
 		}
 		qval := int(quant[pos])
 		value := abs(qval)
 		token := value <= 4 ? value : value < 67 ? 4 + int(31 - intrinsics.count_leading_zeros(u32(value - 3))) : 10
-		put_bool(&b, int(token != 0), pr[1])
+		put_prob(t, int(token != 0), &pr[1])
 		if token != 0 {
-			put_bool(&b, int(token != 1), pr[2])
-			if token >= 2 {
-				pareto := vp9.pareto_row(pr[2])
-				put_tree(&b, vp9.TOKEN_TREE[:], pareto[:], token, 4, 2)
-			}
+			put_prob(t, int(token != 1), &pr[2])
+			if token >= 2 do put_tree_pareto(t, &pr[2], token)
 			extra := &vp9.EXTRA_BITS[token]
 			count := int(extra[1])
 			v := value - int(extra[2])
 			cat_probs := &vp9.CAT_PROBS[extra[0]]
-			for k in 0 ..< count do put_bool(&b, v >> uint(count - 1 - k) & 1, cat_probs[k])
-			put_bool(&b, int(qval < 0), 128)
+			for k in 0 ..< count do put_fixed(t, v >> uint(count - 1 - k) & 1, cat_probs[k])
+			put_fixed(t, int(qval < 0), 128)
 		}
 		counts_token[band][ctx][min(2, token)] += 1
 		cache[pos] = vp9.ENERGY_CLASS[token]
 		check_eob = token != 0
 	}
-	t.b = b
 }

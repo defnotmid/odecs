@@ -40,7 +40,8 @@ Decoder :: struct {
 	skip_rasl:       bool,
 	max_reorder:     int,
 	max_latency:     int,
-	max_dec_pic_buf: int,}
+	max_dec_pic_buf: int,
+}
 
 Active_Ctu :: union {
 	^Ctu_Decoder(u8),

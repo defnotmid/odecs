@@ -50,6 +50,10 @@ video.destroy(&w)
   - **Native H.264** is Constrained Baseline: CAVLC, I/P.
   - **Vulkan H.264** is High: CABAC, I/P.
   - **H.265** is Main.
+- **Speed:** `ultrafast` prefers encode speed over size. Native H.264 then
+  encodes in 0.55-0.58 of the time for 1% smaller to 32% larger files at
+  equal quality, native H.265 in 0.32-0.37 of the time for 28-66% larger.
+  VP9 and the hardware encoders do not use it yet.
 - **Encoder selection:** `preference` chooses Automatic, Native or
   Require_Hardware. `video_backend` reports what was selected. The optional
   `native_options` (worker pool, slices/tiles) and `gpu_context` pass through

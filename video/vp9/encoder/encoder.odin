@@ -98,6 +98,8 @@ init_encoder :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
 		}
 		err = reserve(&t.b.data, max(64, (t.end_col - t.first_col) * 8 * e.sb_rows * 64 * 8))
 		if err != nil do return .Out_Of_Memory
+		err = reserve(&t.syms, max(256, (t.end_col - t.first_col) * 8 * e.sb_rows * 64 * 16))
+		if err != nil do return .Out_Of_Memory
 	}
 	err = reserve(&e.packet, e.sb_cols * e.sb_rows * 64 * 64 * 8)
 	if err != nil do return .Out_Of_Memory
@@ -134,16 +136,24 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 	}
 	filter_frame(e)
 	extend_borders(e)
+	e.counts = {}
+	for &t in e.tiles do vp9.add_counts(&e.counts, &t.counts)
+	saved := e.probs
 	build_compressed_header(e)
+	if e.config.pool != nil && e.config.pool.run != nil {
+		e.config.pool.run(e.config.pool, len(e.tiles), flush_tiles, raw_data(e.tiles))
+	} else {
+		flush_tiles(raw_data(e.tiles), 0, len(e.tiles))
+	}
 	// A failed append leaves the reference and frame counter untouched.
 	failed := e.header.failed
 	for t in e.tiles do failed ||= t.b.failed
-	if failed do return nil, false, .Out_Of_Memory
+	if failed {e.probs = saved; return nil, false, .Out_Of_Memory}
 	clear(&e.packet)
-	if !build_uncompressed_header(e) do return nil, false, .Out_Of_Memory
+	if !build_uncompressed_header(e) {e.probs = saved; return nil, false, .Out_Of_Memory}
 	total := len(e.packet) + len(e.header.data)
 	for t in e.tiles do total += 4 + len(t.b.data)
-	if reserve(&e.packet, total) != nil do return nil, false, .Out_Of_Memory
+	if reserve(&e.packet, total) != nil {e.probs = saved; return nil, false, .Out_Of_Memory}
 	append(&e.packet, ..e.header.data[:])
 	for t, i in e.tiles {
 		if i + 1 < len(e.tiles) {
@@ -152,13 +162,13 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 		}
 		append(&e.packet, ..t.b.data[:])
 	}
-	e.counts = {}
 	for &t in e.tiles {
-		vp9.add_counts(&e.counts, &t.counts)
 		t.prev_origin_mv = e.keyframe || t.first_col >= e.mi_cols ? {} : e.mi[t.first_col].sub_mvs[0][3]
 	}
+	vp9.load_probs(&e.probs, &saved)
 	vp9.adapt_coef_probs(&e.probs, &e.counts, e.keyframe, e.last_keyframe)
 	if !e.keyframe {
+		vp9.load_probs2(&e.probs, &saved)
 		vp9.adapt_noncoef_probs(&e.probs, &e.counts, false, e.config.base_q_idx != 0, false)
 	}
 	e.last_keyframe = e.keyframe
@@ -180,7 +190,7 @@ destroy_encoder :: proc(e: ^Encoder) {
 	context.allocator = e.allocator
 	for p in 0 ..< 3 {delete(e.planes_storage[p]); delete(e.reference_storage[p]); delete(e.source[p])}
 	for &t in e.tiles {
-		delete(t.b.data); delete(t.above_partition)
+		delete(t.b.data); delete(t.syms); delete(t.above_partition)
 		for a in t.above_nonzero do delete(a)
 	}
 	delete(e.tiles); delete(e.mi); delete(e.filter_cells); delete(e.packet); delete(e.header.data)
@@ -223,5 +233,14 @@ encode_tiles :: proc(data: rawptr, first, end: int) {
 	for &t in tiles {
 		context.allocator = t.e.allocator
 		encode_tile(&t)
+	}
+}
+
+@(private)
+flush_tiles :: proc(data: rawptr, first, end: int) {
+	tiles := (cast([^]Tile)data)[first:end]
+	for &t in tiles {
+		context.allocator = t.e.allocator
+		flush_tile(&t)
 	}
 }

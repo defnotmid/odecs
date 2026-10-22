@@ -1484,12 +1484,15 @@ encode_picture :: proc(enc: ^Encoder, poc: int, slice_type: Slice_Type, out: ^[d
 
 	// In-loop deblocking runs after the whole picture is reconstructed, so
 	// intra prediction saw unfiltered neighbours exactly like the decoder.
-	if enc.config.deblock do deblock_frame(enc)
-
-	// SAO is applied in place to the deblocked picture, reading the pre-SAO
-	// neighbours from enc.sao_src (the decoder's one-CTB lag is irrelevant
-	// because every edge read comes from pre-SAO samples).
-	if enc.config.sao do sao_apply_frame(enc)
+	// When SAO is enabled, enc.sao_src already holds the deblocked picture.
+	if enc.config.sao {
+		copy(enc.rec.y.data, enc.sao_src.y.data)
+		copy(enc.rec.u.data, enc.sao_src.u.data)
+		copy(enc.rec.v.data, enc.sao_src.v.data)
+		sao_apply_frame(enc)
+	} else if enc.config.deblock {
+		deblock_frame(enc)
+	}
 
 	// The suffix picture hash covers the filtered reconstruction, so it is
 	// emitted once the in-loop filters have run (D.2 orders it after the

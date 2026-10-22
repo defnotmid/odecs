@@ -334,6 +334,7 @@ eval_inter_leaf :: proc(
 	// Skip: merge vector with no residual signalled. This only needs motion
 	// compensation, so it is cheap and also identifies the best predictor for
 	// the merge-with-residual candidate below.
+	early_limit := skip_early_limit(enc, size)
 	best_merge_sse := max(u64)
 	best_merge_k: Maybe(int)
 	for k in 0 ..< n_uniq {
@@ -371,9 +372,10 @@ eval_inter_leaf :: proc(
 			best_merge_sse = sse
 			best_merge_k = k
 		}
+		if enc.config.ultrafast && sse <= early_limit * 2 do break
 	}
 
-	if best_merge_sse <= skip_early_limit(enc, size) {
+	if best_merge_sse <= (enc.config.ultrafast ? early_limit * 4 : early_limit) {
 		restore_trial(enc, pre)
 		if b, ok := best.?; ok {
 			restore_inter_best(RQT, enc, x, y, size, b)
@@ -621,6 +623,7 @@ eval_inter_leaf_b :: proc(
 		}
 	}
 
+	early_limit := skip_early_limit(enc, size)
 	best_merge_sse := max(u64)
 	best_merge_k: Maybe(int)
 	for k in 0 ..< n_uniq {
@@ -658,9 +661,10 @@ eval_inter_leaf_b :: proc(
 			best_merge_sse = sse
 			best_merge_k = k
 		}
+		if enc.config.ultrafast && sse <= early_limit * 2 do break
 	}
 
-	if best_merge_sse <= skip_early_limit(enc, size) {
+	if best_merge_sse <= (enc.config.ultrafast ? early_limit * 4 : early_limit) {
 		restore_trial(enc, pre)
 		if b, ok := best.?; ok {
 			restore_inter_best(RQT, enc, x, y, size, b)
@@ -831,6 +835,40 @@ eval_inter_leaf_b :: proc(
 	return {cost = max(f64), early_skip = false}
 }
 
+// Ultrafast: whether a CU is heterogeneous enough to split without trying it
+// whole. Intra: a quadrant differs from its two-sample shifts (texture);
+// inter: the quadrants' zero-motion SADs differ by more than the noise
+// expected at this QP (the shape of the VP9 encoder's should_split).
+@(private)
+should_split_cu :: proc(enc: ^Encoder, x, y, size: int) -> bool #no_bounds_check {
+	half := size / 2
+	area := u32(half * half)
+	scale := u32(1) << uint(enc.bit_depth - 8)
+	src := enc.source.y
+	if enc.slice_type == .I || enc.config.intra_only {
+		p0 := src.offset + y * src.stride + x
+		p1 := src.offset + (y + half - 2) * src.stride + x + half - 2
+		v_diff :=
+			sad_u16(src.data[p0:], src.stride, src.data[p0 + 2 * src.stride:], src.stride, half, half) +
+			sad_u16(src.data[p1:], src.stride, src.data[p1 + 2 * src.stride:], src.stride, half, half)
+		h_diff :=
+			sad_u16(src.data[p0:], src.stride, src.data[p0 + 2:], src.stride, half, half) +
+			sad_u16(src.data[p1:], src.stride, src.data[p1 + 2:], src.stride, half, half)
+		return min(v_diff, h_diff) > area * scale
+	}
+	ref := &enc.refs[0][0]
+	s0 := sad_int_luma(enc, ref, x, y, half, half, 0, 0)
+	s1 := sad_int_luma(enc, ref, x + half, y, half, half, 0, 0)
+	s2 := sad_int_luma(enc, ref, x, y + half, half, half, 0, 0)
+	s3 := sad_int_luma(enc, ref, x + half, y + half, half, half, 0, 0)
+	if enc.qp <= 4 do return s0 + s1 + s2 + s3 > 0
+	min_s := min(min(s0, s1), min(s2, s3))
+	max_s := max(max(s0, s1), max(s2, s3))
+	q := u32(max(4, int(enc.qp - 12))) * scale
+	noise := (area * q) >> 2
+	return max_s > min_s + noise || max_s > noise * 3
+}
+
 // Split candidate: signal the flag and recurse into the four children.
 eval_split :: proc($RQT: bool, enc: ^Encoder, x, y: int, depth: u8, trial: ^Cabac) -> f64 {
 	size := CTU_WIDTH >> depth
@@ -885,30 +923,66 @@ decide_cu :: proc($RQT: bool, enc: ^Encoder, x, y: int, depth: u8, trial: ^Cabac
 		return cost
 	}
 
-	pre: Node_State = ---
+	// Ultrafast decides top-down: a heterogeneous CU splits without being
+	// tried whole, and intra is tried only when inter is poor. The tools it
+	// does not model (RQT, AMP, PCM, forced modes) take the full search.
+	fast_tree :=
+		enc.config.ultrafast &&
+		!RQT &&
+		!enc.config.rqt &&
+		!enc.config.intra_rqt &&
+		!enc.config.amp &&
+		!enc.config.pcm &&
+		enc.config.forced_mode < 0
+
+	if fast_tree {
+		if depth < MAX_CU_DEPTH && should_split_cu(enc, x, y, size) {
+			return eval_split(RQT, enc, x, y, depth, trial)
+		}
+		if enc.slice_type != .I && !enc.config.intra_only {
+			pre_trial := save_trial(enc)
+			r := eval_inter_leaf(RQT, enc, x, y, depth, trial)
+			if r.early_skip || r.cost <= f64(size * size) * enc.lambda * 2.0 {
+				return r.cost
+			}
+			best_state: Node_State = ---
+			save_node(enc, x, y, depth, &best_state)
+			restore_trial(enc, pre_trial)
+			icost := eval_intra_leaf(RQT, enc, x, y, depth, trial, r.cost)
+			if icost < r.cost do return icost
+			restore_node(enc, x, y, depth, &best_state)
+			return r.cost
+		}
+		return eval_intra_leaf(RQT, enc, x, y, depth, trial, max(f64))
+	}
+
+	pre_trial := save_trial(enc)
 	best_state: Node_State = ---
-	save_node(enc, x, y, depth, &pre)
 	best_cost := max(f64)
+	best_in_place := false
 
 	// Inter runs first: a skip good enough to commit stops the node before the
 	// intra mode search and the split recursion.
 	if enc.slice_type != .I && !enc.config.intra_only {
-		// save_node only copied the initial state; no rollback is needed yet.
 		r := eval_inter_leaf(RQT, enc, x, y, depth, trial)
 		// The inter evaluator already restored its winning reconstruction/CU
 		// records and incoming trial state. An early skip has no comparison left.
 		if r.early_skip do return r.cost
 		if r.cost < best_cost {
 			best_cost = r.cost
-			save_node(enc, x, y, depth, &best_state)
+			best_in_place = true
 		}
 	}
 
-	restore_node(enc, x, y, depth, &pre)
+	if best_in_place {
+		save_node(enc, x, y, depth, &best_state)
+		best_in_place = false
+	}
+	restore_trial(enc, pre_trial)
 	cost := eval_intra_leaf(RQT, enc, x, y, depth, trial, best_cost)
 	if cost < best_cost {
 		best_cost = cost
-		save_node(enc, x, y, depth, &best_state)
+		best_in_place = true
 	}
 
 	// PCM can only win when the raw samples cost less than the best candidate;
@@ -919,24 +993,34 @@ decide_cu :: proc($RQT: bool, enc: ^Encoder, x, y: int, depth: u8, trial: ^Cabac
 	   f64(pcm_raw_bits(CTU_WIDTH >> depth, enc.bit_depth, enc.config.chroma_format)) *
 			   enc.lambda <
 		   best_cost {
-		restore_node(enc, x, y, depth, &pre)
+		if best_in_place {
+			save_node(enc, x, y, depth, &best_state)
+			best_in_place = false
+		}
+		restore_trial(enc, pre_trial)
 		cost = eval_intra_pcm(RQT, enc, x, y, depth, trial)
 		if cost < best_cost {
 			best_cost = cost
-			save_node(enc, x, y, depth, &best_state)
+			best_in_place = true
 		}
 	}
 
 	if depth < MAX_CU_DEPTH {
-		restore_node(enc, x, y, depth, &pre)
+		if best_in_place {
+			save_node(enc, x, y, depth, &best_state)
+			best_in_place = false
+		}
+		restore_trial(enc, pre_trial)
 		cost = eval_split(RQT, enc, x, y, depth, trial)
 		if cost < best_cost {
 			best_cost = cost
-			save_node(enc, x, y, depth, &best_state)
+			best_in_place = true
 		}
 	}
 
-	restore_node(enc, x, y, depth, &best_state)
+	if !best_in_place {
+		restore_node(enc, x, y, depth, &best_state)
+	}
 	return best_cost
 }
 

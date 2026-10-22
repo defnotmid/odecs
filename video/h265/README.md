@@ -52,6 +52,7 @@ bitstream only when enabled):
 - **Formats:** 10-bit, and 4:0:0, 4:2:2 and 4:4:4.
 - **Rate control:** CQP, ABR, CBR or CRF; level selection.
 - **Signalling:** VUI colour and timing, HRD parameters, and recovery-point, decoded-picture-hash and mastering-display SEIs.
+- **Speed:** `ultrafast` decides the CU tree top-down, tries four intra modes and searches motion with a diamond refined to half-pel: 0.32-0.37 of the time for 28-66% larger output at equal quality.
 
 Not yet:
 - the buffering-period and picture-timing SEIs;

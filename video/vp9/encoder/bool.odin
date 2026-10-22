@@ -77,15 +77,3 @@ tree_path :: proc(tree: []i8, node, symbol: int) -> (bits, count: int, found: bo
 	}
 	return 0, 0, false
 }
-
-@(private)
-put_tree :: proc(b: ^Bool_Writer, tree: []i8, probs: []u8, symbol: int, start: int = 0, prob_offset: int = 0) {
-	path, n, ok := tree_path(tree, start, symbol)
-	assert(ok)
-	node := start
-	for i := n - 1; i >= 0; i -= 1 {
-		bit := path >> uint(i) & 1
-		put_bool(b, bit, probs[(node >> 1) - prob_offset])
-		node = int(tree[node + bit])
-	}
-}

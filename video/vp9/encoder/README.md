@@ -59,29 +59,32 @@ need not reproduce its coefficients. Lossless reverses the normative WHT's
 lifting steps exactly. Reconstruction dequantizes the emitted coefficients
 and applies the decoder's inverse transform, prediction and filter.
 
-All probabilities remain the defaults. `error_resilient_mode=1` implies
-`frame_parallel_decoding_mode=1`, so there is no backward adaptation or
-previous-frame MV prediction to mirror. There are no forward probability
-updates, segmentation, compound refs, alt-ref/lookahead, bitrate control,
-RD partition selection or inter-frame intra decisions yet.
+Probabilities adapt as libvpx's do. With `error_resilient_mode=0` and
+`refresh_frame_context=1`, each frame's symbol counts adapt the context
+backward for the next frame (key frames restore the defaults). The
+compressed header also sends forward updates for this frame (coefficient,
+skip, transform size, inter mode, reference, intra mode, partition and
+motion vector probabilities), each only where it pays for its own bits on
+this frame's counts. Tiles stage their symbols, and code them in parallel
+on the pool once the header has settled the probabilities. There is no
+segmentation, compound refs, alt-ref/lookahead, bitrate control, RD
+partition selection or inter-frame intra decisions yet.
 These omissions are important compression-efficiency limits, not syntax gaps.
 
 ### Planned: compression
 
-Files are about 11x libvpx's (good preset, cpu-used 4) at matched PSNR on
-the 320x180 animation clip, and a transparent 640x360 clip is about 3.5x the
-H.265 straight-alpha file. In order of expected gain per effort, each
-measured with `tests/vp9_quality_check.sh`:
+Files are about 1.6 to 1.9 times libvpx's (good preset, cpu-used 4) at
+matched PSNR on the 320x180 animation clip. In order of expected gain per
+effort, each measured with `tests/vp9_quality_check.sh`:
 
 1. Skip flags and zero residuals for inter blocks (static backgrounds are
    most of animation).
 2. Rate-distortion partition choice instead of fixed block sizes.
-3. Probability adaptation: forward updates or backward adaptation.
-4. Intra blocks in inter frames, and all ten intra directions.
-5. Later: alt-ref (hidden) frames and compound prediction, which need
+3. Intra blocks in inter frames, and all ten intra directions.
+4. Later: alt-ref (hidden) frames and compound prediction, which need
    lookahead and reordering.
 
-Items 1 to 3 should close most of the gap.
+Items 1 and 2 should close most of the gap.
 
 ## Alpha and WebM
 
@@ -152,19 +155,18 @@ Container overhead and alpha bytes are excluded from the payload comparison.
 
 | Encoder | Setting | Payload bytes | PSNR (dB) |
 | --- | --- | ---: | ---: |
-| Native | q=100, 32x32 blocks | 77,596 | 40.574 |
-| libvpx | good, cpu-used=4, CRF 50 | 7,071 | 40.885 |
-| libvpx | good, cpu-used=4, CRF 51 | 6,772 | 40.410 |
-| Native | q=0, lossless | 58,114 | infinity |
+| Native | q=100, 32x32 blocks | 14,252 | 43.333 |
+| libvpx | good, cpu-used=4, CRF 44 | 8,793 | 43.874 |
+| libvpx | good, cpu-used=4, CRF 48 | 7,531 | 41.964 |
+| Native | q=0, lossless | 22,189 | infinity |
 | libvpx | lossless | 19,235 | infinity |
 
 Libvpx's two lossy points bracket native quality: the native size gap is
-**11.0–11.5x** there, not a claim that CRF and q are equivalent. The exactly
-matched lossless gap is **3.02x**. Libvpx uses one worker, GOP 120, no lag,
+**1.6–1.9x** there, not a claim that CRF and q are equivalent. The exactly
+matched lossless gap is **1.15x**. Libvpx uses one worker, GOP 120, no lag,
 one-pass CQ and good/cpu-used 4. Comparisons decode to raw planes before
 PSNR to avoid millisecond WebM timestamp rounding pairing different frames.
-Lossless happens to be smaller than native lossy on this fixture; neither
-result should be generalized to camera footage.
+Neither result should be generalized to camera footage.
 
 ## Performance
 

@@ -124,6 +124,8 @@ main :: proc() {
 			config.gop_size = integer(next_value(&i, os.args[i]))
 		case "--refs":
 			config.refs = integer(next_value(&i, os.args[i]))
+		case "--ultrafast":
+			config.ultrafast = true
 		case:
 			fmt.eprintln("unknown option:", os.args[i])
 			os.exit(2)

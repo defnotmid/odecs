@@ -240,6 +240,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			transfer            = config.color.transfer,
 			matrix_coefficients = config.color.matrix_coeffs,
 			full_range          = config.color.full_range,
+			ultrafast           = config.ultrafast,
 		}
 		if config.frame_rate_den > 0 do avc_config.fps = f32(f64(config.frame_rate_num) / f64(config.frame_rate_den))
 		if err := avce.init_encoder(s.avc_encoder, avc_config); err != .None do return map_avc_encoder_error(session, err)
@@ -278,6 +279,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			transfer = config.color.transfer,
 			matrix_coeffs = config.color.matrix_coeffs,
 			full_range = config.color.full_range,
+			ultrafast = config.ultrafast,
 		}
 		if config.alpha {
 			hevc_config.layer = .Base_With_Alpha

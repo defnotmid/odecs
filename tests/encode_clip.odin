@@ -65,6 +65,8 @@ main :: proc() {
 			config.slice_count = next(&i)
 		case "--exhaustive":
 			config.exhaustive_intra = true
+		case "--ultrafast":
+			config.ultrafast = true
 		case "--verbose":
 			verbose = true
 		case:

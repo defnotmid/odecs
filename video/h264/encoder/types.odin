@@ -27,6 +27,7 @@ Encoder_Config :: struct {
 	transfer:            u8,
 	matrix_coefficients: u8,
 	full_range:          bool,
+	ultrafast:           bool, // prefer speed over size: one reference, 16x16 motion, earlier inter decisions
 }
 
 // A reconstructed picture used as reference
@@ -135,4 +136,6 @@ Slice_Task :: struct {
 	next_macroblock:   int,
 	work_limit:        int,
 	skip_run:          int,
+	last_inter_mv:     [2]i16,
+	last_search_mv:    [2]i16,
 }

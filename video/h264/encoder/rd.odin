@@ -878,6 +878,7 @@ evaluate_inter_candidate :: proc(
 		&reconstruction.y[row * 16 * reconstruction.y_stride + column * 16],
 		reconstruction.y_stride,
 		false,
+		macroblock_index,
 	)
 	code_chroma_residual(task, macroblock, &candidate.choice, macroblock_index, false)
 	score_macroblock_candidate(

@@ -36,7 +36,8 @@ h264.init_encoder(&encoder, {width = 1920, height = 1080, qp = 26,
 ```
 
 - **Bitstream:** I and P pictures, CAVLC, constant QP or bitrate control, periodic IDRs, a fixed number of slices (`slice_count`, default 4) independent of the worker count.
-- **Search:** integer motion search, then half- and quarter-sample refinement on reference planes interpolated once per picture; intra 4x4 and 16x16 chosen before residual coding; candidates compared by reconstruction distortion and actual CAVLC bits.
+- **Search:** integer motion search from the neighbours' and the previous macroblock's vectors (a poorly predicted macroblock also descends from a grid out to three search radii, for pans faster than the radius), then half- and quarter-sample refinement on reference planes interpolated once per picture; intra 4x4 and 16x16 chosen before residual coding; candidates compared by reconstruction distortion and actual CAVLC bits.
+- **Speed:** `ultrafast` searches one reference and 16x16 motion only, and settles on inter sooner: 0.55-0.58 of the time for 1% smaller to 32% larger output at equal quality.
 
 ### Editing: checkpoints
 

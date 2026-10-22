@@ -112,6 +112,12 @@ Config :: struct {
 	// alpha_channel_use_idc 1; VP9 colour is always straight).
 	alpha:                           bool,
 	alpha_premultiplied:             bool,
+	// encode: prefer encode speed over size. Against the default at equal
+	// quality (BD-rate over QP 22-34 on four 720p and 1080p clips), native
+	// H.264 takes 0.55-0.58 of the time for 1% smaller to 32% larger output
+	// and H.265 0.32-0.37 of the time for 28-66% larger. VP9 and the
+	// hardware encoders do not use it yet.
+	ultrafast:                       bool,
 }
 
 // Strides and lengths are in bytes. Each slice starts at the visible origin;
