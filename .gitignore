@@ -14,11 +14,8 @@ test_encoded_output.264
 # THIRD_PARTY_REFERENCES.md): never committed.
 /third_party/
 
-# The demo's render and its large inputs (demo/README.md says where they
-# come from).
+# The demo's render (its fetched media: demo/media/.gitignore).
 /demo/demo.mp4
-/demo/media/bryce.webp
-/demo/media/transparent.mov
 
 # Personal Claude Code settings
 .claude/settings.local.json

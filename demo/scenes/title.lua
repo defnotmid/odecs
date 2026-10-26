@@ -25,7 +25,7 @@ local function render(f, lb)
     stops = { { 0, "#2a1a0c" }, { 0.6, "#120c08" }, { 1, ui.BG } } } }
   local push = slam <= lb and (1 - soft(lb - slam)) * 0.25 or 0
   for i, c in ipairs(CHIPS) do
-    local at = (i - 1) * 0.25
+    local at = T.CHIPS[i]
     if lb >= at then
       local s = snap(lb - at)
       local x, y = SPOTS[i][1], SPOTS[i][2]

@@ -1,9 +1,9 @@
--- odecs in 26 seconds: an onimite script (Odin + Lua video framework,
+-- odecs in 28 seconds: an onimite script (Odin + Lua video framework,
 -- https://github.com/defnotmid/onimite) showing the codecs it decodes and
 -- encodes with. Music included: the soundtrack is an odawg song
--- (track.lua), 120 BPM, and every cut and pop sits on its grid (beat.lua,
+-- (track.lua), 112 BPM, and every cut and pop sits on its grid (beat.lua,
 -- timeline.lua): the picture pumps on the kicks the drums really play and
--- flashes on the impacts. Numbers on screen come from odecs' docs (facts.lua).
+-- flashes on the timpani. Numbers on screen come from odecs' docs (facts.lua).
 --
 --     onimite render demo/video.lua -o demo/demo.mp4
 
@@ -22,13 +22,13 @@ local SCENES = {
 
 local SECTIONS = { "01 / TITLE", "02 / ALPHA VIDEO", "03 / WEBP", "04 / DECODE + ENCODE", "05 / OUTRO" }
 
--- Cuts that glitch for three frames. The impacts flash; inspect checks the
--- song really hits there.
+-- Cuts that glitch for three frames. The timpani hits flash; inspect checks
+-- the song really hits there.
 local GLITCH_CUTS = { T.ALPHA, T.WEBP, T.ENCODE, T.ENCODE + 4, T.ENCODE + 8, T.OUTRO }
-cue("impact", score.hits { part = "fx", note = "C2" }, { hit = "score" })
+cue("impact", score.hits { part = "timpani", note = "F2" }, { hit = "score" })
 
 local KICK = { part = "drums", note = "kick", decay = 9 }
-local IMPACT = { part = "fx", note = "C2", decay = 5 }
+local IMPACT = { part = "timpani", note = "F2", decay = 5 }
 
 local function energy(f, b)
   local s = 1 + score.pulse(f, KICK) * 0.008
@@ -73,10 +73,9 @@ end
 video {
   width = 1920, height = 1080, fps = beat.FPS, background = ui.BG,
   audio = { { "score", fade_out = 0.5 } },
-  -- the song mixes near -21 LUFS: lifted to about -15 under the limiter
+  -- the song mixes near -23 LUFS: lifted to about -14 under the limiter
   -- (audio analyze in README.md)
-  master_gain_db = 7,
-  limiter = { ceiling_db = -1.5 },
+  master_gain_db = 9.5,
   render = function(f)
     local b = beat.gbeat(f)
     rect { x = 0, y = 0, w = 1920, h = 1080, fill = ui.BG }

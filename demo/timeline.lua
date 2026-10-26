@@ -1,7 +1,7 @@
 -- Where things happen, in beats from the start of the video (4 beats a
 -- bar), read from the song (track.lua): its sections are the scenes, its
--- blips and stutters the pops the picture answers to, so picture and sound
--- share one list.
+-- marimba, xylophone and pizzicato notes the pops the picture answers to,
+-- so picture and sound share one list.
 
 local score = require("track")
 
@@ -21,13 +21,14 @@ T.TITLE, T.ALPHA, T.WEBP, T.ENCODE, T.OUTRO = at("title"), at("alpha"), at("webp
 T.END = at("tail") -- the last hit
 T.TOTAL = score.beat(score.duration)
 
+T.CHIPS = hits("marimba", "title")            -- title: a chip lands on each note of the hook
 T.TITLE_SLAM = at("slam") - T.TITLE           -- the wordmark lands
 do
-  local pops = hits("blips", "alpha")         -- alpha: the ProRes, then the VP9 numbers (a blip and its fifth each)
+  local pops = hits("pops", "alpha")          -- alpha: the ProRes, then the VP9 numbers (a note and its fifth each)
   T.ALPHA_FACTS = { pops[1], pops[3] }
 end
-T.WEBP_FACT = hits("blips", "webp")[1]        -- webp: the decode numbers
-T.SHRINKS = hits("glitch", "encode")          -- encode: one bar per chart, bars shrink on beat 3
+T.WEBP_FACT = hits("pops", "webp")[1]         -- webp: the decode numbers
+T.SHRINKS = hits("stabs", "encode")           -- encode: one bar per chart, bars shrink on beat 3
 T.WORDMARK = at("outro@1m") - T.OUTRO
 
 return T
