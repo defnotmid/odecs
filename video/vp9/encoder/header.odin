@@ -2,16 +2,44 @@ package vp9_encoder
 
 import vp9 ".."
 
+// Bit cost of a boolean decision in 1/256-bit units (prob_bits(p) for bit 0,
+// prob_bits(256 - p) for bit 1), tabulated once for all probabilities 1..255.
 @(private)
-prob_bits :: proc(p: u8) -> u32 {
-	x := u32(p) << 8
-	res := u32(0)
-	for x <= 32768 {x <<= 1; res += 256}
-	for b in 0 ..< 8 {
-		x = u32((u64(x) * u64(x)) >> 16)
-		if x <= 32768 {x <<= 1; res += 128 >> uint(b)}
+BIT_COSTS: [2][256]u16
+
+@(private, init)
+init_bit_costs :: proc "contextless" () {
+	for p in 1 ..< 256 {
+		x := u32(p) << 8
+		res := u32(0)
+		for x <= 32768 {x <<= 1; res += 256}
+		for b in 0 ..< 8 {
+			x = u32((u64(x) * u64(x)) >> 16)
+			if x <= 32768 {x <<= 1; res += 128 >> uint(b)}
+		}
+		BIT_COSTS[0][p] = u16(res)
+		BIT_COSTS[1][256 - p] = u16(res)
 	}
-	return res
+}
+
+@(private)
+prob_bits :: #force_inline proc "contextless" (p: u8) -> u32 #no_bounds_check {
+	return u32(BIT_COSTS[0][p])
+}
+
+@(private)
+bit_cost :: #force_inline proc "contextless" (bit: int, p: u8) -> u32 #no_bounds_check {
+	return u32(BIT_COSTS[bit][p])
+}
+
+@(private)
+code_bit_cost :: #force_inline proc "contextless" (code: Tree_Code, probs: [^]u8) -> u32 #no_bounds_check {
+	cost: u32
+	for i in 0 ..< int(code.count) {
+		bit := int(code.bits >> uint(i) & 1)
+		cost += u32(BIT_COSTS[bit][probs[code.nodes[i]]])
+	}
+	return cost
 }
 
 @(private)

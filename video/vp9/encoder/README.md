@@ -27,18 +27,22 @@ vp9e.destroy_encoder(&e)
 - `base_q_idx`: 0..255, **not** H.264/HEVC QP. Zero is exactly lossless.
 - `keyframe_interval`: zero selects 120. Frame zero is a keyframe, followed
   by keyframes at multiples of the interval. No lookahead, delay or reorder.
-- `block_log2`: zero selects 3 (8x8); 3, 4, 5 select fixed 8, 16, 32-pixel
-  partitions. Edge constraints subdivide them. Lossy transforms use the
-  block's largest legal size; lossless always uses 4x4 WHT.
-- `search_range`: zero selects 16; otherwise 1..64 pixels. Coarse-to-fine
-  integer diamond search, then half-/quarter-pixel refinement, using SAD
-  with a simple quantizer-dependent vector penalty. LAST is the only ref.
+- `block_log2`: zero selects 4 (16x16); 3, 4, 5, 6 permit partitions up to 8,
+  16, 32, or 64 pixels, subdivided by quadrant SAD against the quantizer noise
+  and edge constraints. Lossy transforms use the block's largest legal size, or
+  4x4 on 8x8 blocks; lossless always uses 4x4 WHT.
+- `search_range`: zero selects 16; otherwise 1..64 pixels. Spatial and
+  co-located temporal predictors (`NEARESTMV`, `NEARMV`, `ZEROMV`, `NEWMV`),
+  coarse-to-fine integer diamond search, then leaf-only half-/quarter-pixel
+  8-tap refinement using SAD plus exact motion-vector bit cost from per-frame
+  cost tables. LAST is the only ref.
 - `tile_cols_log2`: clipped to the specification's width-dependent limits.
   Zero normally means one tile; 2 permits four at 1080p. Tiles run on the
   caller's `common.Work_Pool`. A nil pool executes exactly the same tile
   jobs serially, and produces identical bytes. The codec creates no threads.
 - Loop-filter level is `(q + 4)/8`, capped at 63; lossless disables it.
-  `disable_loop_filter` disables it explicitly. Filtering is currently serial.
+  `disable_loop_filter` disables it explicitly. Filtering runs in wavefronts
+  on `pool` when present.
 - Init captures the allocator and allocates persistent buffers and tile
   scratch. Destroy uses that allocator. Destroy before reinitializing. Do
   not share an encoder between concurrent calls or mutate its configuration.
@@ -50,14 +54,22 @@ vp9e.destroy_encoder(&e)
 
 ## Bitstream and analysis
 
-Shown key/inter frames, single-reference motion (zero, nearest, new), and
-DC/vertical/horizontal/true-motion keyframe prediction. Lossy luma uses
-DCT/ADST 4..16 and DCT 32, chroma DCT; VP9 has no 32-point ADST. The shared
-forward transform is a fixed-point transpose analysis basis made from the
-normative synthesis constants; it is not a port of libvpx's encoder and
-need not reproduce its coefficients. Lossless reverses the normative WHT's
-lifting steps exactly. Reconstruction dequantizes the emitted coefficients
-and applies the decoder's inverse transform, prediction and filter.
+Shown key/inter frames, single-reference motion (`ZEROMV`, `NEARESTMV`,
+`NEARMV`, `NEWMV`), and DC/vertical/horizontal/true-motion keyframe prediction.
+Lossy luma uses DCT/ADST 4..16 and DCT 32, chroma DCT; VP9 has no 32-point
+ADST. The shared forward transform is a fixed-point transpose analysis basis
+made from the normative synthesis constants; it is not a port of libvpx's
+encoder and need not reproduce its coefficients. Lossless reverses the
+normative WHT's lifting steps exactly. Reconstruction dequantizes the emitted
+coefficients and applies the decoder's inverse transform, prediction and
+filter.
+
+Per-block state is stored in per-reader columnar grids matching the decoder:
+`Motion` for 2-D spatial and co-located temporal motion vector prediction,
+`Filter_Cell` for loop filtering, and 1-D `Edge_Context` along tile top and
+superblock left edges for syntax context derivation. Tree codes and bit cost
+tables are flat lookup tables built at init, with per-frame motion-vector
+component cost tables updated once per inter frame.
 
 Probabilities adapt as libvpx's do. With `error_resilient_mode=0` and
 `refresh_frame_context=1`, each frame's symbol counts adapt the context
@@ -69,22 +81,20 @@ this frame's counts. Tiles stage their symbols, and code them in parallel
 on the pool once the header has settled the probabilities. There is no
 segmentation, compound refs, alt-ref/lookahead, bitrate control, RD
 partition selection or inter-frame intra decisions yet.
-These omissions are important compression-efficiency limits, not syntax gaps.
+These omissions are compression-efficiency limits, not syntax gaps.
 
 ### Planned: compression
 
 Files are larger than libvpx's (good preset, cpu-used 4) at equal PSNR: the
-BD-rate is in [BENCHMARKS.md](../../../BENCHMARKS.md). In order of expected
-gain per effort, each measured with `bash tests/compare.sh run encode/vp9`:
+BD-rate is in [BENCHMARKS.md](../../../BENCHMARKS.md). Remaining compression
+work, measured with `bash tests/compare.sh run encode/vp9`:
 
-1. Skip flags and zero residuals for inter blocks (static backgrounds are
-   most of animation).
-2. Rate-distortion partition choice instead of fixed block sizes.
-3. Intra blocks in inter frames, and all ten intra directions.
-4. Later: alt-ref (hidden) frames and compound prediction, which need
-   lookahead and reordering.
-
-Items 1 and 2 should close most of the gap.
+1. Full rate-distortion partition search across 64x64..8x8 (including
+   rectangular `PARTITION_HORZ` / `PARTITION_VERT` leaves).
+2. Intra blocks in inter frames, and all ten intra directions.
+3. Multiple references (`GOLDEN`, `ALTREF`) and compound prediction.
+4. Alt-ref (hidden) frames and lookahead with temporal filtering.
+5. Segmentation and adaptive per-segment quantizer deltas.
 
 ## Alpha and WebM
 
@@ -113,15 +123,15 @@ It runs `odin test` with `-vet -strict-style` on the encoder, shared VP9 and
 WebM packages (Odin exposes vet as a flag, not an `odin vet` subcommand).
 FFmpeg, libvpx, Chromium and Node are test oracles/tools only.
 
-- Native unit matrix: eight sizes, seven quantizers spanning 0..255, three
+- Native unit matrix: eight sizes, seven quantizers spanning 0..255, four
   partition sizes, five frames each (including keyframe resets). Lossless
   equals source. Four-tile serial/pool packets are byte-identical; padded
   input strides are covered. A separate bool test checks 20,000 decisions
   against the specification's bit-at-a-time subdivision. Wrapping/negative
   strides are rejected, and injected allocation failures leave the encoder
   reusable with byte-identical output afterwards.
-- Oracle matrix: 105 alpha cases, eight frames each: 1x1, 7x5, 17x19, 64x64,
-  65x67, 257x73, 1025x67; q=0,1,32,100,255; blocks=8,16,32. Encoder
+- Oracle matrix: 140 alpha cases, eight frames each: 1x1, 7x5, 17x19, 64x64,
+  65x67, 257x73, 1025x67; q=0,1,32,100,255; blocks=8,16,32,64. Encoder
   reconstruction equals native VP9, movie planar output, FFmpeg native VP9
   and libvpx colour decode byte for byte. FFmpeg decodes both the standalone
   alpha stream and actual WebM BlockAdditional alpha, matching reconstruction.
@@ -160,24 +170,16 @@ rounding pairing different frames; payload bytes exclude the container.
 
 ## Performance
 
-AMD Ryzen 9 9900X3D, Odin `dev-2026-10-nightly:84bc3fc21`, `-o:speed`, four
-bitstream tile columns, 32x32 partitions, search radius 16, GOP 120. The
-fixture is generated outside the timed region. Time is only `encode_frame`
-(colour plus alpha when present): excludes initialization, source generation,
-PSNR, muxing, decoding and I/O. These are codec throughput, not end-to-end
-render/export numbers. The current figures, at one worker and four on the
-1080p synthetic animation (the best of three after a warmup, unpinned) and
-against libvpx on camera footage, are in
+Time in the benchmark harness is only `encode_frame` (colour plus alpha when
+present): it excludes initialization, source generation, PSNR, muxing,
+decoding and I/O. The current figures, at one worker and four on the 1080p
+synthetic animation and against libvpx on camera footage, are in
 [BENCHMARKS.md](../../../BENCHMARKS.md) (`bash tests/compare.sh run encode/vp9`).
 
-How the encoder got there, every step byte-identical to the previous output
-across 8 sizes x 4 quantizers x 3 partitions, flat/noise and 1080p:
+Key implementation details:
 
-- Size specialization: 16-frame q=100 instructions from 88.7 to 70.8
-  billion, cycles from 15.4 to 12.7 billion.
-- An exact exit when the search reaches zero cost (no candidate can improve
-  it): eight-frame lossless colour+alpha instructions from 35.7 to 10.4
-  billion, cycles from 6.78 to 2.38 billion.
+- Size-specialized inner loops and an exact early exit when the search reaches
+  zero SAD.
 - Each tile stages its input columns once per frame into an aligned,
   edge-replicated source plane. Pictures live inside an 80-sample replicated
   border, extended once after filtering. Block loops, intra costs and motion
@@ -186,18 +188,11 @@ across 8 sizes x 4 quantizers x 3 partitions, flat/noise and 1080p:
 - The forward transform pairs reflected samples (DCT symmetry checked at
   init), runs the column pass on `#simd` rows in exact i32, and keeps exact
   i64 row sums, halving the products.
-
-| 1080p, one worker | instructions | cycles | fps |
-| --- | ---: | ---: | ---: |
-| q=100, before | 71.1 G | 12.7 G | 7.12 |
-| q=100, staged source + bordered reference | 45.8 G | 8.22 G | 11.24 |
-| q=100, paired SIMD forward transform | 33.8 G | 6.03 G | 15.79 |
-| q=0 colour+alpha, before | 10.5 G | 2.29 G | 21.79 |
-| q=0 colour+alpha, final | 8.29 G | 1.96 G | 26.01 |
-
-(`perf stat` counts are whole-process, including source generation/PSNR.)
-Four tiles cap the pool speedup at four workers, and the loop filter is
-serial.
+- Flat `BIT_COSTS`, `Tree_Code` and per-frame motion-vector component cost
+  tables replace recursive tree walks and 16-step fixed-point probability
+  loops; per-reader columnar `Motion`, `Filter_Cell` and `Edge_Context` grids
+  replace the `Mode_Info` grid.
+- Four tiles and wavefront loop filtering scale across the pool.
 
 ## Movie writer
 

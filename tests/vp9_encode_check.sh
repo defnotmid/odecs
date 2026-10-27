@@ -11,7 +11,7 @@ odin build tests/vp9_encode_check.odin -file -o:speed -vet -strict-style -out:.w
 for size in '1 1' '7 5' '17 19' '64 64' '65 67' '257 73' '1025 67'; do
 	read -r w h <<< "$size"
 	for q in 0 1 32 100 255; do
-		for block in 3 4 5; do
+		for block in 3 4 5 6; do
 			p=".work/vp9-encode/${w}x${h}-q${q}-b${block}"
 			.work/vp9-encode/check "$p" "$w" "$h" "$q" 4 8 1 animation "$block"
 			ffmpeg -v error -y -threads 1 -i "$p.webm" -fps_mode passthrough -pix_fmt yuv420p -f rawvideo "$p.ffmpeg.yuv"

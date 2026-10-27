@@ -2,8 +2,8 @@ id	label	odecs	reference	unit	ratio	against	date	revision	machine	load	basis
 decode/aac	AAC-LC, 128 kb/s stereo, 320 s	141.850	79.611	ms	1.78	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.21	320.635000s
 decode/webp-lossy	WebP lossy, 1920×1080	9.284	7.220	ms	1.29	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54	
 decode/vorbis	Vorbis, quality 5 stereo, 320 s (best of several)	183.67	273.59	ms	0.67	libvorbis 1.3.7	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79	320.635000s
-encode/vp9-animation/bd-rate	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, q 60 to 180 against cq-level 36 to 60	82.91		% BD-rate		libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48	
-encode/vp9-animation/lossless	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, lossless	22189	19235	bytes	1.15	libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48	
+encode/vp9-animation/bd-rate	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, q 60 to 180 against cq-level 36 to 60	44.71		% BD-rate		libvpx 1.17.0	2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	
+encode/vp9-animation/lossless	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, lossless	21699	19235	bytes	1.13	libvpx 1.17.0	2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	
 alpha/transparent/fps-1t	fframes transparent.mov, 640×360 ProRes 4444, 1 thread, frames through RGBA	695.8		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28	30fps
 alpha/transparent/seek-1t	fframes transparent.mov, 640×360 ProRes 4444, 1 thread, random frame_at seek	1.36		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28	
 alpha/transparent/fps-8t	fframes transparent.mov, 640×360 ProRes 4444, 8 threads, frames through RGBA	3514.5		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28	30fps
@@ -82,12 +82,12 @@ encode/h264/bd-rate	H.264, 1080p, 54 frames, one core, 4 slices (x264: baseline 
 encode/h264-16/speed	H.264, 1080p, 54 frames, 16 slices on 16 workers, QP 27	176.5	225.6	fps	1.28	x264 0.165 (b35605a), medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	9.94	25fps
 encode/h265/speed	H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular), QP 27	4.8	8.2	fps	1.71	x265 4.2, medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.57	25fps
 encode/h265/bd-rate	H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular), QP 22 to 37	38.61		% BD-rate		x265 4.2, medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.57	
-encode/vp9/speed	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 100 against cq-level 25	23.669	6.8	fps	0.29	libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48	25fps
-encode/vp9/bd-rate	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 60 to 180 against cq-level 15 to 45	208.65		% BD-rate		libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48	
-encode/vp9-workers/q100-1w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 1 worker	117.806		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28	30fps
-encode/vp9-workers/q100-4w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 4 workers	306.741		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28	30fps
-encode/vp9-workers/lossless-alpha-1w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 1 worker	95.943		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28	30fps
-encode/vp9-workers/lossless-alpha-4w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 4 workers	259.971		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28	30fps
+encode/vp9/speed	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 100 against cq-level 25	31.892	6.9	fps	0.22	libvpx 1.17.0	2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	25fps
+encode/vp9/bd-rate	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 60 to 180 against cq-level 15 to 45	38.37		% BD-rate		libvpx 1.17.0	2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	
+encode/vp9-workers/q100-1w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 1 worker	93.614		fps			2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	30fps
+encode/vp9-workers/q100-4w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 4 workers	260.734		fps			2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	30fps
+encode/vp9-workers/lossless-alpha-1w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 1 worker	87.484		fps			2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	30fps
+encode/vp9-workers/lossless-alpha-4w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 4 workers	246.619		fps			2026-10-28	2fa8a09f+471b8d	AMD Ryzen 9 9900X3D	3.32	30fps
 encode/aac/speed	AAC-LC, 48 kHz stereo, 192 kb/s, 320 s, one stream	738.499	3782.937	ms	0.20	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46	320.6350s
 encode/aac/snr	AAC-LC, 48 kHz stereo, 192 kb/s, 320 s, SNR after FFmpeg's decoder	44.778474	36.663649	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46	
 encode/aac-fixture/44k-mono/speed	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, one stream	12.940	67.815	ms	0.19	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46	12s

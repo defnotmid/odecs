@@ -14,8 +14,8 @@ choose_intra :: proc(t: ^Tile, r, c, size, tx: int) -> int #no_bounds_check {
 	best := max(i64)
 	x, y := c * 8, r * 8
 	max_x, max_y := e.mi_cols * 8, e.mi_rows * 8
-	above := r > 0 ? int(e.mi[(r - 1) * e.mi_cols + c].sub_modes[2]) : vp9.DC_PRED
-	left := c > t.first_col ? int(e.mi[r * e.mi_cols + c - 1].sub_modes[1]) : vp9.DC_PRED
+	above := r > 0 ? int(t.above_context[c].y_mode) : vp9.DC_PRED
+	left := c > t.first_col ? int(t.left_context[r & 7].y_mode) : vp9.DC_PRED
 	q := i64(max(4, int(vp9.ac_q(8, e.config.base_q_idx))))
 	frame, stride := e.planes[0], e.strides[0]
 	source, s_stride := e.source[0], e.source_strides[0]

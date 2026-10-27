@@ -483,7 +483,7 @@ encode_h264_16() {
 vp9_point() { # odecs|libvpx q|cq: writes BYTES:PSNR to $OUT/vp9-<enc>-<q>.point
 	local log out=$OUT/vp9-$1-$2
 	if [ "$1" = odecs ]; then
-		log=$("$BIN/odecs_vp9" "$out" $W $H "$2" 1 $FRAMES 0 "$IN/encode.yuv" 5 120)
+		log=$("$BIN/odecs_vp9" "$out" $W $H "$2" 1 $FRAMES 0 "$IN/encode.yuv" 0 120)
 		ffmpeg -v error -y -i "$out.webm" -pix_fmt yuv420p -f rawvideo "$out.yuv"
 	else
 		log=$(ROUNDS=1 "$BIN/reference_vp9_encode" "$IN/encode.yuv" $W $H $FRAMES "$2" 120 "$out.ivf")
@@ -501,7 +501,7 @@ encode_vp9() {
 	for q in 60 100 140 180; do ours+=${ours:+,}$(cat "$OUT/vp9-odecs-$q.point"); done
 	for cq in 15 25 35 45; do theirs+=${theirs:+,}$(cat "$OUT/vp9-libvpx-$cq.point"); done
 	for i in 1 2 3 4 5 6 7; do
-		runs+=("$(pinned "$BIN/odecs_vp9" - $W $H 100 1 $FRAMES 0 "$IN/encode.yuv" 5 120 | field fps)")
+		runs+=("$(pinned "$BIN/odecs_vp9" - $W $H 100 1 $FRAMES 0 "$IN/encode.yuv" 0 120 | field fps)")
 	done
 	local label="VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref)"
 	record encode/vp9/speed "$label, q 100 against cq-level 25" "$(printf '%s\n' "${runs[@]}" | median)" \
@@ -576,7 +576,7 @@ encode_vp9_animation() {
 	mkdir -p "$OUT"
 	for i in 0 1 2 3; do
 		q=${qs[$i]} cq=${cqs[$i]}
-		log=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-$q" $w $h "$q" 1 $n 0 animation 5 120)
+		log=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-$q" $w $h "$q" 1 $n 0 animation 0 120)
 		ffmpeg -v error -y -i "$OUT/vp9-anim-odecs-$q.webm" -pix_fmt yuv420p -f rawvideo "$OUT/vp9-anim-odecs-$q.yuv"
 		ours+=${ours:+,}$(echo "$log" | field bytes):$(psnr "$src" $w $h $n "$OUT/vp9-anim-odecs-$q.yuv")
 		out=$OUT/vp9-anim-libvpx-$cq.ivf
@@ -584,7 +584,7 @@ encode_vp9_animation() {
 		ffmpeg -v error -y -i "$out" -pix_fmt yuv420p -f rawvideo "$out.yuv"
 		theirs+=${theirs:+,}$(echo "$log" | field bytes):$(psnr "$src" $w $h $n "$out.yuv")
 	done
-	lossless_ours=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-0" $w $h 0 1 $n 0 animation 5 120 | field bytes)
+	lossless_ours=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-0" $w $h 0 1 $n 0 animation 0 120 | field bytes)
 	log=$(ROUNDS=1 "$BIN/reference_vp9_encode" "$src" $w $h $n lossless 120 "$OUT/vp9-anim-libvpx-lossless.ivf")
 	ffmpeg -v error -y -i "$OUT/vp9-anim-libvpx-lossless.ivf" -pix_fmt yuv420p -f rawvideo "$OUT/vp9-anim-libvpx-lossless.yuv"
 	cmp "$src" "$OUT/vp9-anim-libvpx-lossless.yuv"
@@ -601,10 +601,10 @@ encode_vp9_workers() {
 	for spec in "100|16|0|q100|q 100 colour, 16 frames" "0|8|1|lossless-alpha|lossless colour and alpha, 8 frames"; do
 		IFS='|' read -r q frames alpha id kind <<<"$spec"
 		for workers in 1 4; do
-			"$BIN/odecs_vp9" - $W $H 100 "$workers" 4 0 animation 5 120 > /dev/null
+			"$BIN/odecs_vp9" - $W $H 100 "$workers" 4 0 animation 0 120 > /dev/null
 			best=0
 			for r in 1 2 3; do
-				fps=$("$BIN/odecs_vp9" - $W $H "$q" "$workers" "$frames" "$alpha" animation 5 120 | field fps)
+				fps=$("$BIN/odecs_vp9" - $W $H "$q" "$workers" "$frames" "$alpha" animation 0 120 | field fps)
 				best=$(awk -v a="$best" -v b="$fps" 'BEGIN {print (b > a ? b : a)}')
 			done
 			record "encode/vp9-workers/$id-${workers}w" "VP9, the 1080p synthetic animation, $kind, $(plural "$workers" worker)" "$best" "" fps "" 30fps

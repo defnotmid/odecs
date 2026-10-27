@@ -13,7 +13,7 @@ roundtrip :: proc(t: ^testing.T) {
 	defer common.destroy_static_pool(&pool)
 	for size in ([][2]int{{1,1}, {7,5}, {8,8}, {17,19}, {64,64}, {65,67}, {257,73}, {513,65}}) {
 		for q in ([]int{0,1,4,32,100,200,255}) {
-			for block_log2 in 3 ..= 5 do if !roundtrip_case(t, &pool.work_pool, size, q, block_log2) do return
+			for block_log2 in 3 ..= 6 do if !roundtrip_case(t, &pool.work_pool, size, q, block_log2) do return
 		}
 	}
 }

@@ -10,7 +10,7 @@ Encoder_Config :: struct {
 	width, height: int,
 	base_q_idx: int, // 0..255; zero is exactly lossless
 	keyframe_interval: int, // zero selects 120
-	block_log2: int, // 3..5: fixed 8, 16 or 32 pixel partitions; zero selects 8
+	block_log2: int, // 3..6: 8, 16, 32 or 64 pixel partitions; zero selects 4 (16)
 	disable_loop_filter: bool,
 	search_range: int, // integer pixels; zero selects 16
 	tile_cols_log2: int, // clipped to the VP9 limits for the width
@@ -21,6 +21,24 @@ Encoder_Config :: struct {
 // vector reaches at most 64 samples (32 in chroma) beyond its block, plus the
 // 8-tap filter's 3/4 samples, so no analysis or prediction read needs clamping.
 BORDER :: 80
+
+// What motion vector prediction reads of an 8x8 cell (6.4.21, 6.5.1): its
+// vector, whether it was inter-coded, and its mode for the inter mode context.
+@(private)
+Motion :: struct {
+	mv:       vp9.Mv,
+	y_mode:   u8,
+	is_inter: bool,
+}
+
+// What a block's syntax contexts read of the neighbouring 8x8 cell above or
+// to the left: its mode, transform size and skip flag.
+@(private)
+Edge_Context :: struct {
+	y_mode:  u8,
+	tx_size: u8,
+	skip:    bool,
+}
 
 Encoder :: struct {
 	config: Encoder_Config,
@@ -33,12 +51,15 @@ Encoder :: struct {
 	// The input staged per superblock row by each tile: aligned, edges replicated.
 	source: [3][]u8,
 	source_strides: [3]int,
-	mi: []vp9.Mode_Info,
-	filter_cells: []vp9.Filter_Cell, // beside mi: what the loop filter reads
+	// Per 8x8 cell, mi_rows x mi_cols, each grid holding what one reader needs.
+	motion, prev_motion: []Motion,
+	filter_cells: []vp9.Filter_Cell,
 	filter_levels: vp9.Filter_Levels,
 	mi_cols, mi_rows, sb_cols, sb_rows: int,
 	probs: vp9.Probabilities,
 	counts: vp9.Counts,
+	mv_joint_cost: [vp9.MV_JOINTS]u16,
+	mv_comp_cost: [2][2][MAX_MV + 1]u16,
 	forward: vp9.Forward_Transforms,
 	tiles: []Tile,
 	packet: [dynamic]u8,
@@ -50,11 +71,11 @@ Encoder :: struct {
 // Init owns all persistent buffers with the calling allocator. The encoder
 // must not move during encode_frame; no worker creates threads or publishes data.
 init_encoder :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
-	if e == nil || config.width <= 0 || config.height <= 0 || config.width > 65536 || config.height > 65536 || config.base_q_idx < 0 || config.base_q_idx > 255 || config.keyframe_interval < 0 || config.tile_cols_log2 < 0 || config.search_range < 0 || config.search_range > 64 || (config.block_log2 != 0 && (config.block_log2 < 3 || config.block_log2 > 5)) do return .Invalid_Argument
+	if e == nil || config.width <= 0 || config.height <= 0 || config.width > 65536 || config.height > 65536 || config.base_q_idx < 0 || config.base_q_idx > 255 || config.keyframe_interval < 0 || config.tile_cols_log2 < 0 || config.search_range < 0 || config.search_range > 64 || (config.block_log2 != 0 && (config.block_log2 < 3 || config.block_log2 > 6)) do return .Invalid_Argument
 	e^ = {config = config, allocator = context.allocator}
 	if e.config.keyframe_interval == 0 do e.config.keyframe_interval = 120
 	if e.config.search_range == 0 do e.config.search_range = 16
-	if e.config.block_log2 == 0 do e.config.block_log2 = 3
+	if e.config.block_log2 == 0 do e.config.block_log2 = 4
 	vp9.init_forward_transforms(&e.forward)
 	e.mi_cols, e.mi_rows = (config.width + 7) / 8, (config.height + 7) / 8
 	e.sb_cols, e.sb_rows = (e.mi_cols + 7) / 8, (e.mi_rows + 7) / 8
@@ -65,7 +86,9 @@ init_encoder :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
 	ok := false
 	defer if !ok do destroy_encoder(e)
 	err: mem.Allocator_Error
-	e.mi, err = make([]vp9.Mode_Info, e.mi_cols * e.mi_rows)
+	e.motion, err = make([]Motion, e.mi_cols * e.mi_rows)
+	if err != nil do return .Out_Of_Memory
+	e.prev_motion, err = make([]Motion, e.mi_cols * e.mi_rows)
 	if err != nil do return .Out_Of_Memory
 	e.filter_cells, err = make([]vp9.Filter_Cell, e.mi_cols * e.mi_rows)
 	if err != nil do return .Out_Of_Memory
@@ -91,6 +114,8 @@ init_encoder :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
 		t.first_col = ((i * e.sb_cols) >> uint(e.config.tile_cols_log2)) * 8
 		t.end_col = min(e.mi_cols, (((i + 1) * e.sb_cols) >> uint(e.config.tile_cols_log2)) * 8)
 		t.above_partition, err = make([]u8, e.sb_cols * 8)
+		if err != nil do return .Out_Of_Memory
+		t.above_context, err = make([]Edge_Context, e.sb_cols * 8)
 		if err != nil do return .Out_Of_Memory
 		for p in 0 ..< 3 {
 			t.above_nonzero[p], err = make([]u8, e.sb_cols * (p > 0 ? 8 : 16))
@@ -122,11 +147,16 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 	context.allocator = e.allocator
 	e.input, e.input_strides = planes, strides
 	e.keyframe = e.frames % u64(e.config.keyframe_interval) == 0
-	if e.keyframe do vp9.default_probabilities(&e.probs)
+	if e.keyframe {
+		vp9.default_probabilities(&e.probs)
+	} else {
+		build_mv_costs(e)
+	}
 	for &t in e.tiles {
 		t.e = e
 		t.counts = {}
 		for &v in t.above_partition do v = 0
+		for &v in t.above_context do v = {}
 		for &a in t.above_nonzero do for &v in a do v = 0
 	}
 	if e.config.pool != nil && e.config.pool.run != nil {
@@ -162,9 +192,6 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 		}
 		append(&e.packet, ..t.b.data[:])
 	}
-	for &t in e.tiles {
-		t.prev_origin_mv = e.keyframe || t.first_col >= e.mi_cols ? {} : e.mi[t.first_col].sub_mvs[0][3]
-	}
 	vp9.load_probs(&e.probs, &saved)
 	vp9.adapt_coef_probs(&e.probs, &e.counts, e.keyframe, e.last_keyframe)
 	if !e.keyframe {
@@ -172,6 +199,7 @@ encode_frame :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int) -> (packet: 
 		vp9.adapt_noncoef_probs(&e.probs, &e.counts, false, e.config.base_q_idx != 0, false)
 	}
 	e.last_keyframe = e.keyframe
+	e.motion, e.prev_motion = e.prev_motion, e.motion
 	for p in 0 ..< 3 {
 		e.planes[p], e.reference[p] = e.reference[p], e.planes[p]
 		e.planes_storage[p], e.reference_storage[p] = e.reference_storage[p], e.planes_storage[p]
@@ -190,10 +218,10 @@ destroy_encoder :: proc(e: ^Encoder) {
 	context.allocator = e.allocator
 	for p in 0 ..< 3 {delete(e.planes_storage[p]); delete(e.reference_storage[p]); delete(e.source[p])}
 	for &t in e.tiles {
-		delete(t.b.data); delete(t.syms); delete(t.above_partition)
+		delete(t.b.data); delete(t.syms); delete(t.above_partition); delete(t.above_context)
 		for a in t.above_nonzero do delete(a)
 	}
-	delete(e.tiles); delete(e.mi); delete(e.filter_cells); delete(e.packet); delete(e.header.data)
+	delete(e.tiles); delete(e.motion); delete(e.prev_motion); delete(e.filter_cells); delete(e.packet); delete(e.header.data)
 	e^ = {}
 }
 
