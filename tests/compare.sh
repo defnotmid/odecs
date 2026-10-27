@@ -29,7 +29,7 @@ WORK=$(realpath "$WORK")
 REF=$WORK/ref BIN=$WORK/bin IN=$WORK/inputs OUT=$WORK/out
 TSV=BENCHMARKS.tsv DOC=BENCHMARKS.md
 VECTORS=${VECTORS:-.work/opusfx/vectors/opus_newvectors}
-HEADER=$'id\tlabel\todecs\treference\tunit\tratio\tagainst\tdate\trevision\tmachine\tload'
+HEADER=$'id\tlabel\todecs\treference\tunit\tratio\tagainst\tdate\trevision\tmachine\tload\tbasis'
 
 FFMPEG="FFmpeg n9.0.2"
 LIBVPX="libvpx 1.17.0"
@@ -210,9 +210,11 @@ revision() {
 	if [ -n "$delta" ]; then echo "$base+$(printf '%s' "$delta" | sha256sum | cut -c1-6)"; else echo "$base"; fi
 }
 
-# record ID LABEL ODECS REFERENCE UNIT AGAINST: one row, replacing the
+# record ID LABEL ODECS REFERENCE UNIT AGAINST [BASIS]: one row, replacing the
 # row with the same id. The ratio is odecs' cost against the reference:
-# above 1, odecs is slower (time) or larger (size).
+# above 1, odecs is slower (time) or larger (size). BASIS is what the time
+# covers, for the multiple of real time: seconds of media for a time ("320s"),
+# or the clip's frame rate for frames per second or ms per frame ("25fps").
 record() {
 	local ratio="" machine=$MACHINE row
 	if [ -z "$3" ] || { [ -n "$6" ] && [ "$5" != "% BD-rate" ] && [ -z "$4" ]; }; then
@@ -224,8 +226,8 @@ record() {
 	fps) [ -n "$4" ] && ratio=$(awk -v a="$3" -v b="$4" 'BEGIN {printf "%.2f", b / a}') ;;
 	esac
 	[[ $1 == gpu/* ]] && machine="$GPU_NAME, $MACHINE"
-	row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4" "$5" "$ratio" "$6" \
-		"$(date +%F)" "$REVISION" "$machine" "$(cut -d' ' -f1 /proc/loadavg)")
+	row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4" "$5" "$ratio" "$6" \
+		"$(date +%F)" "$REVISION" "$machine" "$(cut -d' ' -f1 /proc/loadavg)" "${7:-}")
 	[ -s "$TSV" ] || echo "$HEADER" > "$TSV"
 	awk -F'\t' -v id="$1" -v row="$row" '$1 == id {print row; done = 1; next} {print} END {if (!done) print row}' \
 		"$TSV" > "$TSV.new"
@@ -237,6 +239,7 @@ record() {
 field() { sed -n "s/^\(.*[ :]\)\{0,1\}$1=\([^ ]*\).*/\2/p"; }
 median() { sort -g | awk '{v[NR] = $1} END {print NR % 2 ? v[(NR + 1) / 2] : (v[NR / 2] + v[NR / 2 + 1]) / 2}'; }
 pinned() { taskset -c "$CPU" "$@"; }
+duration() { echo "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$1")s"; }
 plural() { if [ "$1" = 1 ]; then echo "1 $2"; else echo "$1 ${2}s"; fi; }
 
 # psnr SOURCE.yuv W H FRAMES DECODED.yuv: FFmpeg's sample-weighted Y, U, V PSNR.
@@ -280,9 +283,10 @@ DECODE=(
 )
 
 decode_one() { # id file kind label against decoder threads
-	local path=$IN/$2 ours theirs on=(pinned)
+	local path=$IN/$2 ours theirs on=(pinned) basis=""
 	[ "$2" = bryce.webp ] && path=.work/webpfx/testdata/bryce.webp
 	[ -n "$7" ] && on=(env THREADS="$7")
+	[ "$3" != image ] && basis=$(duration "$path")
 	ours=$("${on[@]}" "$BIN/odecs_decode" "$path" "$3")
 	if [ "$3" = image ]; then
 		theirs=$("${on[@]}" "$BIN/reference_webp" "$path")
@@ -293,7 +297,7 @@ decode_one() { # id file kind label against decoder threads
 	awk -v a="$(echo "$ours" | sed -n 's/.* \(frames\|samples\|pixels\)=\([0-9]*\).*/\2/p')" \
 		-v b="$(echo "$theirs" | sed -n 's/.* \(frames\|samples\|pixels\)=\([0-9]*\).*/\2/p')" \
 		'BEGIN {d = a - b; exit !(b > 0 && (d < 0 ? -d : d) <= b / 1000)}' || { echo "$1: unit counts differ" >&2; return 1; }
-	record "decode/$1" "$4" "$(echo "$ours" | field codec_ms)" "$(echo "$theirs" | field codec_ms)" ms "$5"
+	record "decode/$1" "$4" "$(echo "$ours" | field codec_ms)" "$(echo "$theirs" | field codec_ms)" ms "$5" "$basis"
 }
 
 # The WebP corpus, every file pinned to the core, medians summed by kind.
@@ -371,7 +375,7 @@ decode_vorbis() {
 	[[ $line == *FAIL* ]] && { echo "$line" >&2; return 1; }
 	record decode/vorbis "Vorbis, quality 5 stereo, 320 s (best of several)" \
 		"$(echo "$line" | sed -n 's/.*; \([0-9.]*\) ms (libvorbis.*/\1/p')" \
-		"$(echo "$line" | sed -n 's/.*(libvorbis \([0-9.]*\)).*/\1/p')" ms "libvorbis 1.3.7"
+		"$(echo "$line" | sed -n 's/.*(libvorbis \([0-9.]*\)).*/\1/p')" ms "libvorbis 1.3.7" "$(duration "$IN/vorbis.ogg")"
 }
 
 # Independent streams of one decoder thread each on fixed CPU slots (an
@@ -390,13 +394,14 @@ decode_streams() { # codec file label reference-decoder
 			return 1
 		fi
 		record "decode/streams-$1/$n" "$3, $(plural "$n" stream) of one decoder thread each" \
-			"$(echo "$ours" | field aggregate_fps)" "$(echo "$theirs" | field aggregate_fps)" fps "$FFMPEG $4"
+			"$(echo "$ours" | field aggregate_fps)" "$(echo "$theirs" | field aggregate_fps)" fps "$FFMPEG $4" "${CLIP_FPS}fps"
 	done
 }
 
 # Encoding -----------------------------------------------------------------
 
 W=1920 H=1080 FRAMES=54
+CLIP_FPS=25 # OpenH264's 1080p fixture, which every video input comes from
 
 # check_stream CODEC STREAM: FFmpeg and our decoder agree; its PSNR.
 check_stream() {
@@ -453,7 +458,7 @@ encode_sweep() {
 		label="H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular)"
 	fi
 	record "encode/$codec/speed" "$label, QP 27" "$(field fps < "$OUT/$codec-odecs-27.$codec.log")" \
-		"$(field fps < "$OUT/$codec-x-27.$codec.log")" fps "$against"
+		"$(field fps < "$OUT/$codec-x-27.$codec.log")" fps "$against" "${CLIP_FPS}fps"
 	record "encode/$codec/bd-rate" "$label, QP 22 to 37" "$("$BIN/bd_rate" "$ours" "$theirs" | field bd_rate)" "" "% BD-rate" "$against"
 }
 
@@ -468,7 +473,7 @@ encode_h264_16() {
 	theirs=$("$BIN/x264" "$IN/encode.yuv" $W $H $FRAMES 16 16 27 "$OUT/x264-16.264")
 	check_stream h264 "$OUT/h264-16.264" > /dev/null
 	record encode/h264-16/speed "H.264, 1080p, 54 frames, 16 slices on 16 workers, QP 27" \
-		"$(echo "$ours" | field fps)" "$(echo "$theirs" | field fps)" fps "$X264, medium with the same tools"
+		"$(echo "$ours" | field fps)" "$(echo "$theirs" | field fps)" fps "$X264, medium with the same tools" "${CLIP_FPS}fps"
 }
 
 # Ours at q 60 to 180 against libvpx at cq-level 15 to 45, one core, one
@@ -500,7 +505,7 @@ encode_vp9() {
 	done
 	local label="VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref)"
 	record encode/vp9/speed "$label, q 100 against cq-level 25" "$(printf '%s\n' "${runs[@]}" | median)" \
-		"$(pinned "$BIN/reference_vp9_encode" "$IN/encode.yuv" $W $H $FRAMES 25 120 "$OUT/vp9-libvpx-timed.ivf" | field fps)" fps "$LIBVPX"
+		"$(pinned "$BIN/reference_vp9_encode" "$IN/encode.yuv" $W $H $FRAMES 25 120 "$OUT/vp9-libvpx-timed.ivf" | field fps)" fps "$LIBVPX" "${CLIP_FPS}fps"
 	record encode/vp9/bd-rate "$label, q 60 to 180 against cq-level 15 to 45" \
 		"$("$BIN/bd_rate" "$ours" "$theirs" | field bd_rate)" "" "% BD-rate" "$LIBVPX"
 }
@@ -519,7 +524,7 @@ encode_aac() {
 	done
 	local label="AAC-LC, 48 kHz stereo, 192 kb/s, 320 s"
 	record encode/aac/speed "$label, one stream" "$(echo "$ours" | grep -m1 codec_ms= | field codec_ms)" \
-		"$(echo "$theirs" | grep -m1 'aggregate' | field codec_ms)" ms "$FFMPEG aac"
+		"$(echo "$theirs" | grep -m1 'aggregate' | field codec_ms)" ms "$FFMPEG aac" "$(awk -v b="$(stat -c %s "$IN/source.s16le")" 'BEGIN {printf "%.4f", b / 192000}')s"
 	record encode/aac/snr "$label, SNR after FFmpeg's decoder" "${snr[0]}" "${snr[1]}" dB "$FFMPEG aac"
 }
 
@@ -540,14 +545,14 @@ encode_aac_fixture() {
 				ours=$(pinned "$BIN/odecs_audio" encode "$src" "$rate" "$ch" "$bits" 1 "$OUT/aac-$id-odecs.aac")
 				theirs=$(pinned "$BIN/reference_audio" encode "$src" "$rate" "$ch" "$bits" 1 "$OUT/aac-$id-ffmpeg.aac")
 				record "encode/aac-fixture/$id/speed" "$label, one stream" "$(echo "$ours" | grep -m1 codec_ms= | field codec_ms)" \
-					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac"
+					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac" 12s
 			else
 				ours=$(taskset -c "$MULTI_CPUS" "$BIN/odecs_audio" encode "$src" "$rate" "$ch" "$bits" 16 "$OUT/aac-$id-odecs-16.aac")
 				theirs=$(taskset -c "$MULTI_CPUS" "$BIN/reference_audio" encode "$src" "$rate" "$ch" "$bits" 16 "$OUT/aac-$id-ffmpeg-16.aac")
 				cmp "$OUT/aac-$id-odecs.aac" "$OUT/aac-$id-odecs-16.aac"
 				cmp "$OUT/aac-$id-ffmpeg.aac" "$OUT/aac-$id-ffmpeg-16.aac"
 				record "encode/aac-fixture/$id/speed-16" "$label, 16 independent streams" "$(echo "$ours" | grep -m1 codec_ms= | field codec_ms)" \
-					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac"
+					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac" 192s
 			fi
 		done
 		for enc in odecs ffmpeg; do
@@ -602,7 +607,7 @@ encode_vp9_workers() {
 				fps=$("$BIN/odecs_vp9" - $W $H "$q" "$workers" "$frames" "$alpha" animation 5 120 | field fps)
 				best=$(awk -v a="$best" -v b="$fps" 'BEGIN {print (b > a ? b : a)}')
 			done
-			record "encode/vp9-workers/$id-${workers}w" "VP9, the 1080p synthetic animation, $kind, $(plural "$workers" worker)" "$best" "" fps ""
+			record "encode/vp9-workers/$id-${workers}w" "VP9, the 1080p synthetic animation, $kind, $(plural "$workers" worker)" "$best" "" fps "" 30fps
 		done
 	done
 }
@@ -628,7 +633,7 @@ alpha_one() { # id file label
 			seek+=("$(echo "$out" | sed -n 's/.*latency median \([0-9.]*\) ms.*/\1/p')")
 		done
 		record "alpha/$1/fps-${threads}t" "$3, $(plural "$threads" thread), frames through RGBA" \
-			"$(printf '%s\n' "${fps[@]}" | median)" "" fps ""
+			"$(printf '%s\n' "${fps[@]}" | median)" "" fps "" 30fps
 		record "alpha/$1/seek-${threads}t" "$3, $(plural "$threads" thread), random frame_at seek" \
 			"$(printf '%s\n' "${seek[@]}" | median)" "" ms ""
 	done
@@ -649,15 +654,15 @@ gpu_decode() {
 			runs=()
 			for r in 1 2 3; do runs+=("$("$BIN/gpu_decode$depth" "$IN/$file" | sed -n 's/.*frames, \([0-9.]*\) ms\/frame.*/\1/p')"); done
 			ours=$(printf '%s\n' "${runs[@]}" | median)
-			record "gpu/decode-$id/depth$depth" "$label, video.Reader planar, $(plural "$depth" picture) in flight" "$ours" "" ms/frame ""
+			record "gpu/decode-$id/depth$depth" "$label, video.Reader planar, $(plural "$depth" picture) in flight" "$ours" "" ms/frame "" "${CLIP_FPS}fps"
 		done
 		record "gpu/decode-$id/ffmpeg-vulkan" "$label, three pictures in flight against FFmpeg's Vulkan Video, frames downloaded" \
-			"$ours" "$(per_frame "$(HWACCEL=vulkan "$BIN/reference_decode" "$IN/$file" video "$decoder")")" ms/frame "$FFMPEG Vulkan Video"
+			"$ours" "$(per_frame "$(HWACCEL=vulkan "$BIN/reference_decode" "$IN/$file" video "$decoder")")" ms/frame "$FFMPEG Vulkan Video" "${CLIP_FPS}fps"
 		if [ "$id" = av1 ]; then
 			record gpu/decode-av1/dav1d-1t "$label, three pictures in flight against dav1d on one core" \
-				"$ours" "$(per_frame "$(pinned "$BIN/reference_decode" "$IN/$file" video libdav1d)")" ms/frame "dav1d 1.5.4"
+				"$ours" "$(per_frame "$(pinned "$BIN/reference_decode" "$IN/$file" video libdav1d)")" ms/frame "dav1d 1.5.4" "${CLIP_FPS}fps"
 			record gpu/decode-av1/dav1d-all "$label, three pictures in flight against dav1d on every core" \
-				"$ours" "$(per_frame "$(THREADS=$(nproc) "$BIN/reference_decode" "$IN/$file" video libdav1d)")" ms/frame "dav1d 1.5.4"
+				"$ours" "$(per_frame "$(THREADS=$(nproc) "$BIN/reference_decode" "$IN/$file" video libdav1d)")" ms/frame "dav1d 1.5.4" "${CLIP_FPS}fps"
 		fi
 	done
 }
@@ -675,11 +680,11 @@ gpu_encode() {
 			ours=$(echo "$out" | sed -n 's/.*, \([0-9.]*\) ms\/frame.*/\1/p')
 			ours_bytes=$(echo "$out" | sed -n 's/.*; \([0-9]*\) bytes.*/\1/p')
 			record "gpu/encode-$codec/depth$depth" "$name, 900 1080p I420 frames through video.Writer, $(plural "$depth" picture) in flight" \
-				"$ours" "" ms/frame ""
+				"$ours" "" ms/frame "" 30fps
 		done
 		theirs=$("$BIN/reference_vulkan_encode" $codec)
 		record "gpu/encode-$codec/ffmpeg-vulkan" "$name, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder" \
-			"$ours" "$(echo "$theirs" | field ms_per_frame)" ms/frame "$FFMPEG Vulkan Video"
+			"$ours" "$(echo "$theirs" | field ms_per_frame)" ms/frame "$FFMPEG Vulkan Video" 30fps
 		record "gpu/encode-$codec/ffmpeg-vulkan-bytes" "$name, 900 1080p frames at QP 23, size (odecs in MP4)" \
 			"$ours_bytes" "$(echo "$theirs" | field bytes)" bytes "$FFMPEG Vulkan Video"
 	done
@@ -758,27 +763,41 @@ doc() {
 		return a >= 100 ? sprintf("%.0f", v) : a >= 10 ? sprintf("%.1f", v) : sprintf("%.2f", v)
 	}
 	function measured(i) { return date[i] " · " rev[i] " · load " load[i] }
+	# How many times faster than real time a value is, from what it covers.
+	function realtime(v, u, b,   x) {
+		if (v == "" || b == "") return ""
+		if (b ~ /fps$/) {
+			b = substr(b, 1, length(b) - 3)
+			x = u == "fps" ? v / b : u == "ms/frame" ? 1000 / (v * b) : ""
+		} else if (b ~ /s$/ && u == "ms") x = substr(b, 1, length(b) - 1) * 1000 / v
+		if (x == "") return ""
+		return (x >= 100 ? sprintf("%.0f", x) : x >= 10 ? sprintf("%.1f", x) : sprintf("%.2f", x)) "×"
+	}
+	function realtimes(i,   a, b) {
+		a = realtime(odecs[i], unit[i], basis[i]); b = realtime(reference[i], unit[i], basis[i])
+		return b == "" ? a : a " / " b
+	}
 	function table(prefix, title, intro,   i, k, n) {
 		for (i = 1; i <= rows; i++) if (index(id[i], prefix) == 1) n++
 		if (!n) return
 		print "## " title "\n\n" intro "\n"
 		if (prefix == "alpha/") {
-			print "| Figure | odecs | Unit | Machine | Measured |\n| --- | --- | --- | --- | --- |"
+			print "| Figure | odecs | Unit | × real time | Machine | Measured |\n| --- | --- | --- | --- | --- | --- |"
 			for (k = 1; k <= ncase; k++) for (i = 1; i <= rows; i++) if (rank[i] == k && index(id[i], prefix) == 1)
-				printf "| %s | %s | %s | %s | %s |\n", label[i], num(odecs[i]), unit[i], machine[i], measured(i)
+				printf "| %s | %s | %s | %s | %s | %s |\n", label[i], num(odecs[i]), unit[i], realtimes(i), machine[i], measured(i)
 		} else {
-			print "| Input | odecs | Reference | Unit | Ratio | Reference implementation | Machine | Measured |"
-			print "| --- | --- | --- | --- | --- | --- | --- | --- |"
+			print "| Input | odecs | Reference | Unit | Ratio | × real time (odecs / reference) | Reference implementation | Machine | Measured |"
+			print "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
 			for (k = 1; k <= ncase; k++) for (i = 1; i <= rows; i++) if (rank[i] == k && index(id[i], prefix) == 1)
-				printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", label[i],
+				printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", label[i],
 					unit[i] == "% BD-rate" ? sprintf("%+.1f%%", odecs[i]) : num(odecs[i]), num(reference[i]),
-					unit[i], ratio[i], against[i], machine[i], measured(i)
+					unit[i], ratio[i], realtimes(i), against[i], machine[i], measured(i)
 		}
 		print ""
 	}
 	NR > 1 {
 		rows++; id[rows] = $1; label[rows] = $2; odecs[rows] = $3; reference[rows] = $4; unit[rows] = $5
-		ratio[rows] = $6; against[rows] = $7; date[rows] = $8; rev[rows] = $9; machine[rows] = $10; load[rows] = $11
+		ratio[rows] = $6; against[rows] = $7; date[rows] = $8; rev[rows] = $9; machine[rows] = $10; load[rows] = $11; basis[rows] = $12
 	}
 	END {
 		# Rows in the order of their cases (the longest case id each row id
@@ -800,7 +819,10 @@ doc() {
 		print "rerun a case to replace its rows (`bash tests/compare.sh run decode/vp9`), never edit this file."
 		print "The references are built from their pinned sources (THIRD_PARTY_REFERENCES.md). A ratio above 1"
 		print "means odecs is slower, or for frame rates that the reference is faster. Measured gives the date,"
-		print "the odecs revision (`+` and a hash when the working copy had changes) and the load average.\n"
+		print "the odecs revision (`+` and a hash when the working copy had changes) and the load average."
+		print "× real time is how many times faster than playback each side runs: the length of the media over"
+		print "the time taken, video at its clip'\''s frame rate (25 fps for the camera clips, 30 for the synthetic"
+		print "ones); for independent streams it is how many real-time streams run at once.\n"
 		table("decode/", "Decoding", "One thread pinned to one core, packets or the file resident in memory, opening the decoder not timed; the median of seven after a warmup unless the input says otherwise. The video is OpenH264'\''s 1080p fixture looped three times; the audio is the 320 s of decoded RFC 8251 Opus test vectors; both are encoded with x264, x265, libvpx, `prores_ks`, libwebp, `mjpeg` and FFmpeg'\''s audio encoders.")
 		table("encode/", "Encoding", "Resident input, a fresh encoder per round, the median of seven. Speed is at one operating point; BD-rate is odecs'\''s size change at equal PSNR (FFmpeg'\''s sample-weighted Y, U, V) over four, piecewise-linear in log rate: negative means odecs is smaller. Every stream is decoded by FFmpeg and by odecs, identically. The video is OpenH264'\''s 54-frame 1080p fixture.")
 		table("alpha/", "Alpha video (odecs only)", "`tests/movie_alpha.odin` through `video.Reader`, file input, frames converted to RGBA; the clips are `tests/alpha_fixtures.sh --large`'\''s. One thread pinned to one core; eight threads unpinned. Medians of five runs; seeks are the median of 40 random `frame_at` calls.")
