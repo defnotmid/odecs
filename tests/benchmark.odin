@@ -66,13 +66,16 @@ main :: proc() {
 	}
 	out := make([dynamic]u8, 0, 4 * 1024 * 1024)
 	defer delete(out)
-	frame_times := make([]f64, frames * 7)
+	// ROUNDS (1 to 7, default 7): one round when only the stream matters.
+	rounds := 7
+	if v, ok := strconv.parse_int(os.get_env("ROUNDS", context.temp_allocator)); ok do rounds = clamp(v, 1, 7)
+	frame_times := make([]f64, frames * rounds)
 	defer delete(frame_times)
 	totals, initializations, first_frames, steady: [7]f64
 	gpu_times: [7]f64
 	baseline: []u8
 	defer delete(baseline)
-	for rep in 0 ..< 7 {
+	for rep in 0 ..< rounds {
 		st: avc_enc.Encoder_State
 		t := time.tick_now()
 		avc_enc.init_encoder(
@@ -118,12 +121,13 @@ main :: proc() {
 		   0 {baseline = make([]u8, len(out)); copy(baseline, out[:])} else if len(baseline) != len(out) || mem.compare(baseline, out[:]) != 0 {fmt.eprintln("nondeterministic encoded output"); os.exit(1)}
 	}
 	if write_err := os.write_entire_file(os.args[8], out[:]); write_err != nil {fmt.eprintln(write_err); os.exit(1)}
-	slice.sort(totals[:])
-	slice.sort(initializations[:])
-	slice.sort(first_frames[:])
-	slice.sort(steady[:])
+	slice.sort(totals[:rounds])
+	slice.sort(initializations[:rounds])
+	slice.sort(first_frames[:rounds])
+	slice.sort(steady[:rounds])
 	slice.sort(frame_times)
-	slice.sort(gpu_times[:])
+	slice.sort(gpu_times[:rounds])
+	m := rounds / 2
 	fmt.printfln(
 		"oicu encode: frames=%d workers=%d slices=%d qp=%d bytes=%d init_ms=%.3f codec_ms=%.3f fps=%.1f first_frame_ms=%.3f steady_fps=%.1f frame_p50_ms=%.3f frame_p95_ms=%.3f",
 		frames,
@@ -131,13 +135,13 @@ main :: proc() {
 		min(slices, (h + 15) / 16),
 		qp,
 		len(out),
-		initializations[3],
-		totals[3],
-		f64(frames) * 1000 / totals[3],
-		first_frames[3],
-		f64(frames - 1) * 1000 / steady[3],
+		initializations[m],
+		totals[m],
+		f64(frames) * 1000 / totals[m],
+		first_frames[m],
+		f64(frames - 1) * 1000 / steady[m],
 		frame_times[len(frame_times) / 2],
 		frame_times[len(frame_times) * 95 / 100],
 	)
-	if use_gpu do fmt.printfln("GPU deblock device_ms=%.3f (codec_ms includes host access, packing, dispatch, fences; frame transfers=0)", gpu_times[3])
+	if use_gpu do fmt.printfln("GPU deblock device_ms=%.3f (codec_ms includes host access, packing, dispatch, fences; frame transfers=0)", gpu_times[m])
 }

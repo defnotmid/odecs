@@ -74,5 +74,6 @@ start trim to the first two packets, so in-spec streams agree.
 
 ## Speed
 
-The 15 fixtures decode in 46 ms in total, against libvorbis' 64 ms (0.72×):
-one core, `-microarch:native`, each side's best of five.
+Decode speed on one core against libvorbis 1.3.7 (320 s of music at quality 5,
+each side's best of five) is in [BENCHMARKS.md](../../BENCHMARKS.md)
+(`bash tests/compare.sh run decode/vorbis`).

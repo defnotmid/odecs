@@ -77,16 +77,9 @@ Against stb_image the same files are at least 58 dB PSNR. The fuzz pass
 
 ## Speed
 
-Measured on a Ryzen 9 9900X3D, one core, in millions of cycles per 1080p
-decode. libjpeg-turbo is the pinned 3.1.2 with its SIMD (AVX2), decoding into
-a reused buffer, as `decode_into` does.
-
-| File | odecs, `-microarch:native` | odecs, `x86-64-v3` (AVX2) | odecs, default target | libjpeg-turbo | stb_image |
-| --- | --- | --- | --- | --- | --- |
-| 4:2:0 baseline | 13.9 | 17.0 | 21.9 | 14.4 | 22.8 |
-| 4:4:4 baseline | 20.7 | 24.4 | 29.4 | 21.6 | 34.8 |
-| 4:2:0 progressive | 42.9 | 45.2 | 51.3 | 40.0 | 64.3 |
-
-With the suite's usual `-microarch:native`, odecs runs with
-libjpeg-turbo. Built for AVX2 only, it is about 1.15× slower: libjpeg-turbo's
-hand-written 16-bit IDCT is the difference.
+1080p decode times on one core against libjpeg-turbo 3.1.2 with its SIMD
+(AVX2), decoding into a reused buffer as `decode_into` does, with odecs built
+for this machine (`-microarch:native`), for `x86-64-v3` (AVX2) and for any
+x86-64, and against stb_image, are in [BENCHMARKS.md](../../BENCHMARKS.md)
+(`bash tests/compare.sh run 'decode/(jpeg|stb)'`). Built for AVX2 only, the gap
+to libjpeg-turbo is its hand-written 16-bit IDCT.

@@ -68,14 +68,9 @@ The gate checks:
 - **Animations** (lossless, lossy, mixed, opaque, and one that blends semi-transparent frames over a frame disposed to transparent): every canvas identical to `anim_dump`'s. `anim_dump` writes fully transparent pixels as transparent black, so ours are compared the same way.
 - **Fuzzing:** 3,000 rounds of mutated and truncated files through every entry point, under AddressSanitizer with leak checking.
 
-Speed against libwebp 1.6.0 (`WebPDecodeRGBA`, `-O3`, its SSE2/SSE4.1/AVX2 code), on one core, over the corpus:
-
-| | Ours | libwebp |
-| --- | --- | --- |
-| 43 lossless files | 60.7 ms | 54.8 ms (ours faster on 34) |
-| 88 lossy files | 276 ms | 201 ms |
-| 11158×2156 lossy | 223 ms | 162 ms |
-| 2048×2048 lossless, random alpha | 55 ms | 48 ms |
+Speed against libwebp 1.6.0 (`WebPDecodeRGBA`, `-O3`, its SSE2/SSE4.1/AVX2 code)
+on one core, per image and summed over the corpus, is in
+[BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run decode/webp`).
 
 Lossy decoding is bound by the boolean entropy decoder, as libwebp's scalar
 code is. Most of the remaining gap is libwebp's SIMD inverse transforms and

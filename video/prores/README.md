@@ -50,12 +50,6 @@ and the 12-bit 4:4:4 output layout. Fixtures and the comparison:
 
 ## Performance
 
-1080p, decoding only, frames in memory, best of 5 on a 24-thread Ryzen
-(other load on the machine):
-
-| Clip | 1 thread | 16 threads | FFmpeg 1 / 16 threads |
-| --- | --- | --- | --- |
-| 422 HQ | 255 fps | 1414 fps | 211 / 983 fps |
-| 4444 + 16-bit alpha | 91 fps | 591 fps | 70 / 392 fps |
-
-FFmpeg's figures include its demuxing.
+1080p decode speed against FFmpeg's `prores`, on one pinned core and with 16
+threads each (packets in memory, decoding only), is in
+[BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run decode/prores`).

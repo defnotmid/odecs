@@ -71,7 +71,6 @@ device addresses (Linux and Windows loaders).
 - `tests/test_compute.odin`: GPU boundary strengths and every filtered pixel against the CPU filter.
 - `bash tests/x264_matrix.sh`, `bash tests/encoder_matrix.sh`, `bash tests/vectors.sh`: x264 streams over the supported features, including High 10 and High 4:2:2 at 8 and 10 bits (and the expected refusals), our encoder's streams, and reference vectors, decoded pixel-identically to FFmpeg.
 
-Encoder speed, 1080p, 16 slices on 16 workers (Ryzen 9 9900X3D, 2026-09-10):
-144 fps at QP 26, against 221 fps for x264 `medium` with the same tools. x264
-also used 21% fewer bytes at about the same PSNR, so rate/distortion
-efficiency is the open work.
+Speed against x264 `medium` with the same tools (one core, and 16 slices on 16
+workers) and size at equal quality (BD-rate over QP 22 to 37) are in
+[BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run encode/h264`).

@@ -48,11 +48,11 @@ MP4 `fLaC`) and `parse_metadata` reads the configuration they carry.
   it is verified), bisects over verified frames to within 64 KiB, then steps
   frame by frame; opening and seeking never read the whole file. When
   streaminfo has no sample count, `total_samples` finds the last frame.
-- **Speed** (one thread, 60 s files): 16-bit stereo level 8 decodes in 34 ms
-  plus 3 ms of frame finding, 24-bit 96 kHz in 60 + 12 ms; FFmpeg takes
-  33 and 73 ms for the same files end to end. Unrolling LPC orders up to 12
-  at compile time (`$N` recursion) and taking cached Rice codewords with a
-  single refill account for 16 + 14 ms and 53 + 28 ms of those totals.
+- **Speed:** the decode time is mostly LPC prediction, unrolled for orders up
+  to 12 at compile time (`$N` recursion), and Rice decoding, which takes
+  cached codewords with a single refill. Speed against FFmpeg (16-bit stereo,
+  and 24-bit 96 kHz at level 8) is in [BENCHMARKS.md](../../BENCHMARKS.md)
+  (`bash tests/compare.sh run decode/flac`).
 
 `bash tests/flac_check.sh` decodes 22 fixtures from the reference encoder
 and FFmpeg (8 to 32 bits, mono to 7.1, compression levels 0 to 12, LPC

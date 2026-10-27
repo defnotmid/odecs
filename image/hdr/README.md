@@ -31,6 +31,9 @@ map it.
 
 `tests/image_check.sh` compares ImageMagick's and ffmpeg's `.hdr` files (RLE
 and flat, narrow and 32768 wide, and the `#?RGBE` signature) with
-`stbi_loadf`: all are bit-identical, and the decode is 2 to 10 times faster.
+`stbi_loadf`: all are bit-identical. Speed against stb_image (1080p RLE files
+from FFmpeg and ImageMagick, and FFmpeg's flat 32768-wide one) is in
+[BENCHMARKS.md](../../BENCHMARKS.md)
+(`bash tests/compare.sh run decode/stb`).
 `odin test image/hdr` covers both scanline kinds, every exponent and the
 refusals.

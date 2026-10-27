@@ -1,12 +1,14 @@
-// odecs half of tests/decode_benchmark.sh: one track of a file, demuxed once
+// odecs half of tests/compare.sh's decode cases: one track of a file, demuxed once
 // by video.Reader's containers into resident packets, then decoded by the
 // native provider through media, a fresh session per round. Decode and drain
 // are timed (opening the session is not), median of seven after a warmup.
 // Frames or samples are counted, never touched. An image is a WebP file
-// decoded whole to RGBA, its bytes resident.
-//   decode_benchmark FILE video|audio|image
+// decoded whole to RGBA, its bytes resident. THREADS=n gives the native
+// provider a pool of n workers (the caller and n - 1 threads).
+//   [THREADS=n] decode_benchmark FILE video|audio|image
 package decode_benchmark
 
+import common "../common"
 import flac "../audio/flac"
 import media "../media"
 import native "../media/native"
@@ -19,6 +21,7 @@ import webp "../image/webp"
 import "core:fmt"
 import "core:os"
 import "core:slice"
+import "core:strconv"
 import "core:time"
 
 ROUNDS :: 8 // the first is a warmup
@@ -56,7 +59,13 @@ main :: proc() {
 	} else {
 		config = audio_track(&r, &packets)
 	}
-	providers := [1]media.Provider{native.provider()}
+	pool: common.Static_Pool
+	options: native.Options
+	if threads, _ := strconv.parse_int(os.get_env("THREADS", context.temp_allocator)); threads > 1 {
+		common.init_static_pool(&pool, threads - 1)
+		options.pool = &pool.work_pool
+	}
+	providers := [1]media.Provider{native.provider(&options)}
 	count: Count
 	receiver := media.Receiver{video = on_video, audio = on_audio, user = &count}
 	times: [ROUNDS - 1]f64

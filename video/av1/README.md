@@ -60,12 +60,8 @@ It checks three things:
 
 The gate also confirms that the RADV case above is refused.
 
-A real 10-bit 720p60 file (7650 frames) decodes to an MD5 identical to libdav1d's. On the RX 9070 XT, the first 1500 frames take (best of five, on a loaded machine):
-
-| decoder | ms/frame |
-|---|---|
-| `video.Reader`, planar, 3 frames in flight, native-width planes | 0.82 |
-| `video.Reader`, one at a time, u16 planes | 2.33 |
-| FFmpeg Vulkan with download (whole file) | 1.24 |
-| dav1d, one thread | 1.6 |
-| dav1d, all threads (3.6 cores busy) | 0.93 |
+A real 10-bit 720p60 file (7650 frames) decoded to an MD5 identical to libdav1d's.
+Decode time per frame through `video.Reader` (one picture in flight and three),
+against FFmpeg's Vulkan Video with each frame downloaded and against dav1d on
+one core and on every core, is in [BENCHMARKS.md](../../BENCHMARKS.md), on a
+720p 10-bit clip encoded with SVT-AV1 (`bash tests/compare.sh run gpu/decode`).

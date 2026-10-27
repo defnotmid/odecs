@@ -43,7 +43,7 @@ static void pin(int cpu) {
 }
 static void digest(Job &j) {
     auto f=j.frame;
-    if(f->format!=AV_PIX_FMT_YUV420P || (f->width|f->height)&1) fail("verification requires even 8-bit YUV420");
+    if((f->format!=AV_PIX_FMT_YUV420P && f->format!=AV_PIX_FMT_YUVJ420P) || (f->width|f->height)&1) fail("verification requires even 8-bit YUV420");
     for(int c=0;c<3;++c) {
         int w=c?f->width/2:f->width, h=c?f->height/2:f->height;
         for(int y=0;y<h;++y) for(int x=0;x<w;++x)

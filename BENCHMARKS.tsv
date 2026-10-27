@@ -1,0 +1,118 @@
+id	label	odecs	reference	unit	ratio	against	date	revision	machine	load
+decode/aac	AAC-LC, 128 kb/s stereo, 320 s	141.850	79.611	ms	1.78	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.21
+decode/webp-lossy	WebP lossy, 1920×1080	9.284	7.220	ms	1.29	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54
+decode/vorbis	Vorbis, quality 5 stereo, 320 s (best of several)	183.67	273.59	ms	0.67	libvorbis 1.3.7	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+encode/vp9-animation/bd-rate	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, q 60 to 180 against cq-level 36 to 60	82.91		% BD-rate		libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48
+encode/vp9-animation/lossless	VP9, a 320x180 synthetic animation (gradient, moving rectangle, text-like strokes), 30 frames, one core, lossless	22189	19235	bytes	1.15	libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48
+alpha/transparent/fps-1t	fframes transparent.mov, 640×360 ProRes 4444, 1 thread, frames through RGBA	695.8		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28
+alpha/transparent/seek-1t	fframes transparent.mov, 640×360 ProRes 4444, 1 thread, random frame_at seek	1.36		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28
+alpha/transparent/fps-8t	fframes transparent.mov, 640×360 ProRes 4444, 8 threads, frames through RGBA	3514.5		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28
+alpha/transparent/seek-8t	fframes transparent.mov, 640×360 ProRes 4444, 8 threads, random frame_at seek	0.33		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.28
+decode/prores-422hq-16t	ProRes 422 HQ, 1080p, 16 threads	173.874	139.380	ms	1.25	FFmpeg n9.0.2 prores	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.23
+decode/prores-4444-16t	ProRes 4444, 10-bit, 16 threads	246.049	251.460	ms	0.98	FFmpeg n9.0.2 prores	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.21
+decode/flac-24-96	FLAC, 24-bit 96 kHz stereo, level 8	223.615	275.484	ms	0.81	FFmpeg n9.0.2 flac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54
+decode/opus-voip16	Opus speech (libopus voip), 16 kb/s mono	235.183	166.979	ms	1.41	FFmpeg n9.0.2 opus	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.46
+decode/opus-voip16-libopus	Opus speech (libopus voip), 16 kb/s mono	235.394	226.342	ms	1.04	libopus 1.6.1	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.46
+decode/opus-voip32	Opus speech (libopus voip), 32 kb/s stereo	359.767	251.822	ms	1.43	FFmpeg n9.0.2 opus	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.50
+decode/opus-voip32-libopus	Opus speech (libopus voip), 32 kb/s stereo	360.365	372.724	ms	0.97	libopus 1.6.1	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54
+decode/jpeg-420	JPEG baseline 4:2:0, quality 85, 1920×1080	2.70	2.74	ms	0.99	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-420/x86-64-v3	JPEG baseline 4:2:0, quality 85, 1920×1080, odecs built for x86-64-v3	3.34	2.73	ms	1.22	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-420/default	JPEG baseline 4:2:0, quality 85, 1920×1080, odecs built for default	4.18	2.73	ms	1.53	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-444	JPEG baseline 4:4:4, quality 92, 1920×1080	3.99	3.97	ms	1.01	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-444/x86-64-v3	JPEG baseline 4:4:4, quality 92, 1920×1080, odecs built for x86-64-v3	4.70	3.96	ms	1.19	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-444/default	JPEG baseline 4:4:4, quality 92, 1920×1080, odecs built for default	5.59	3.97	ms	1.41	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-progressive	JPEG progressive 4:2:0, quality 85, 1920×1080	8.14	7.49	ms	1.09	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-progressive/x86-64-v3	JPEG progressive 4:2:0, quality 85, 1920×1080, odecs built for x86-64-v3	8.65	7.69	ms	1.12	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/jpeg-progressive/default	JPEG progressive 4:2:0, quality 85, 1920×1080, odecs built for default	9.26	7.51	ms	1.23	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/stb/png-rgb8	PNG, 8-bit RGB, 1920×1080	30.34	33.45	ms	0.91	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/stb/png-rgba8	PNG, 8-bit RGBA, 1920×1080	34.88	29.17	ms	1.20	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/stb/gif	GIF, 256 colours, 1920×1080	5.88	10.13	ms	0.58	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/stb/jpeg-420	JPEG baseline 4:2:0, 1920×1080	2.77	4.27	ms	0.65	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/stb/jpeg-progressive	JPEG progressive 4:2:0, 1920×1080	8.20	12.35	ms	0.66	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/stb/hdr-ffmpeg	Radiance HDR, RLE scanlines (FFmpeg), 1920×1080	5.71	13.84	ms	0.41	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/stb/hdr-wide	Radiance HDR, flat 32768×3 scanlines (FFmpeg)	0.04	0.60	ms	0.07	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+gpu/decode-h264/depth1	1080p H.264, B-frames, 162 frames, video.Reader planar, 1 picture in flight	2.75		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.56
+gpu/decode-h264/depth3	1080p H.264, B-frames, 162 frames, video.Reader planar, 3 pictures in flight	1.81		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.52
+gpu/decode-h264/ffmpeg-vulkan	1080p H.264, B-frames, 162 frames, three pictures in flight against FFmpeg's Vulkan Video, frames downloaded	1.81	2.157	ms/frame	0.84	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.39
+gpu/decode-h265/depth1	1080p H.265, 162 frames, video.Reader planar, 1 picture in flight	2.46		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.52
+gpu/decode-h265/depth3	1080p H.265, 162 frames, video.Reader planar, 3 pictures in flight	1.40		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.72
+gpu/decode-h265/ffmpeg-vulkan	1080p H.265, 162 frames, three pictures in flight against FFmpeg's Vulkan Video, frames downloaded	1.40	1.873	ms/frame	0.75	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.58
+gpu/decode-av1/depth1	720p 10-bit AV1 (SVT-AV1), 162 frames, video.Reader planar, 1 picture in flight	1.91		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.54
+gpu/decode-av1/depth3	720p 10-bit AV1 (SVT-AV1), 162 frames, video.Reader planar, 3 pictures in flight	1.12		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.57
+gpu/decode-av1/ffmpeg-vulkan	720p 10-bit AV1 (SVT-AV1), 162 frames, three pictures in flight against FFmpeg's Vulkan Video, frames downloaded	1.12	1.539	ms/frame	0.73	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.57
+gpu/decode-av1/dav1d-1t	720p 10-bit AV1 (SVT-AV1), 162 frames, three pictures in flight against dav1d on one core	1.12	2.585	ms/frame	0.43	dav1d 1.5.4	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.53
+gpu/decode-av1/dav1d-all	720p 10-bit AV1 (SVT-AV1), 162 frames, three pictures in flight against dav1d on every core	1.12	1.118	ms/frame	1.00	dav1d 1.5.4	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.53
+gpu/encode-h264/depth1	H.264, 900 1080p I420 frames through video.Writer, 1 picture in flight	2.548		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.33
+gpu/encode-h264/depth3	H.264, 900 1080p I420 frames through video.Writer, 3 pictures in flight	2.012		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.20
+gpu/encode-h264/ffmpeg-vulkan	H.264, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder	2.012	1.820	ms/frame	1.11	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.34
+gpu/encode-h264/ffmpeg-vulkan-bytes	H.264, 900 1080p frames at QP 23, size (odecs in MP4)	57667402	58185060	bytes	0.99	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.34
+gpu/encode-h265/depth1	H.265, 900 1080p I420 frames through video.Writer, 1 picture in flight	2.063		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.29
+gpu/encode-h265/depth3	H.265, 900 1080p I420 frames through video.Writer, 3 pictures in flight	1.531		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.17
+gpu/encode-h265/ffmpeg-vulkan	H.265, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder	1.531	1.330	ms/frame	1.15	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.24
+gpu/encode-h265/ffmpeg-vulkan-bytes	H.265, 900 1080p frames at QP 23, size (odecs in MP4)	67301934	74640222	bytes	0.90	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.24
+decode/h264-high	H.264 High, 8-bit, 1080p, 162 frames	1392.979	1062.725	ms	1.31	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.83
+decode/h264-high10	H.264 High 10, 4:2:0	1501.686	1190.028	ms	1.26	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.62
+decode/h264-high422	H.264 High 4:2:2, 10-bit	1730.765	1384.757	ms	1.25	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.58
+decode/hevc-main	HEVC Main, 1080p	1411.587	1146.610	ms	1.23	FFmpeg n9.0.2 hevc	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.50
+decode/hevc-main10	HEVC Main 10	1544.904	1269.304	ms	1.22	FFmpeg n9.0.2 hevc	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.48
+decode/vp9-p0	VP9 profile 0, 1080p	1085.914	802.050	ms	1.35	FFmpeg n9.0.2 vp9	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.45
+decode/vp9-p0-libvpx	VP9 profile 0, 1080p	1056.422	860.122	ms	1.23	libvpx 1.17.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.13
+decode/vp9-p2	VP9 profile 2, 10-bit	1208.984	1016.115	ms	1.19	FFmpeg n9.0.2 vp9	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.81
+decode/vp9-p2-libvpx	VP9 profile 2, 10-bit	1205.449	1222.140	ms	0.99	libvpx 1.17.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.58
+decode/prores-422hq	ProRes 422 HQ, 1080p	1836.819	1721.763	ms	1.07	FFmpeg n9.0.2 prores	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.35
+decode/prores-4444	ProRes 4444, 10-bit	2534.031	3081.034	ms	0.82	FFmpeg n9.0.2 prores	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.23
+decode/alac	ALAC, 16-bit stereo	371.467	447.989	ms	0.83	FFmpeg n9.0.2 alac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.33
+decode/flac	FLAC, 16-bit stereo, level 5	222.276	138.189	ms	1.61	FFmpeg n9.0.2 flac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.33
+decode/mp3	MP3, 192 kb/s stereo	161.565	122.608	ms	1.32	FFmpeg n9.0.2 mp3float	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54
+decode/opus	Opus, 128 kb/s stereo	394.647	327.695	ms	1.20	FFmpeg n9.0.2 opus	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.46
+decode/opus-libopus	Opus, 128 kb/s stereo	396.552	410.291	ms	0.97	libopus 1.6.1	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.50
+decode/webp-lossless	WebP lossless, 1920×1080	16.117	15.968	ms	1.01	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.58
+decode/webp-bryce	WebP lossy, 11158×2156 (the corpus's bryce.webp, also the demo's)	200.772	166.501	ms	1.21	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.58
+decode/webp-corpus-lossless	WebP corpus, its 43 lossless files (libwebp-test-data), summed	60.215	56.069	ms	1.07	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/webp-corpus-lossy	WebP corpus, its 88 lossy files (libwebp-test-data), summed	249.75	206.831	ms	1.21	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77
+decode/stb/hdr-imagemagick	Radiance HDR, RLE scanlines (ImageMagick), 1920×1080	6.03	14.32	ms	0.42	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79
+decode/streams-h264/1	1080p H.264 High, 162 frames, 1 stream of one decoder thread each	116.4	152.5	fps	1.31	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	1.90
+decode/streams-h264/12	1080p H.264 High, 162 frames, 12 streams of one decoder thread each	1086.0	1617.9	fps	1.49	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	5.69
+decode/streams-h264/16	1080p H.264 High, 162 frames, 16 streams of one decoder thread each	1090.1	1716.4	fps	1.57	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	10.52
+decode/streams-h265/1	1080p HEVC Main, 162 frames, 1 stream of one decoder thread each	112.6	140.7	fps	1.25	FFmpeg n9.0.2 hevc	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	8.32
+decode/streams-h265/12	1080p HEVC Main, 162 frames, 12 streams of one decoder thread each	879.0	1245.8	fps	1.42	FFmpeg n9.0.2 hevc	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	11.33
+decode/streams-h265/16	1080p HEVC Main, 162 frames, 16 streams of one decoder thread each	966.2	1448.6	fps	1.50	FFmpeg n9.0.2 hevc	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	13.90
+encode/h264/speed	H.264, 1080p, 54 frames, one core, 4 slices (x264: baseline profile, one reference, a keyframe every 15), QP 27	29.5	31.3	fps	1.06	x264 0.165 (b35605a), medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	9.41
+encode/h264/bd-rate	H.264, 1080p, 54 frames, one core, 4 slices (x264: baseline profile, one reference, a keyframe every 15), QP 22 to 37	3.78		% BD-rate		x264 0.165 (b35605a), medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	9.41
+encode/h264-16/speed	H.264, 1080p, 54 frames, 16 slices on 16 workers, QP 27	176.5	225.6	fps	1.28	x264 0.165 (b35605a), medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	9.94
+encode/h265/speed	H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular), QP 27	4.8	8.2	fps	1.71	x265 4.2, medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.57
+encode/h265/bd-rate	H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular), QP 22 to 37	38.61		% BD-rate		x265 4.2, medium with the same tools	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.57
+encode/vp9/speed	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 100 against cq-level 25	23.669	6.8	fps	0.29	libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48
+encode/vp9/bd-rate	VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref), q 60 to 180 against cq-level 15 to 45	208.65		% BD-rate		libvpx 1.17.0	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.48
+encode/vp9-workers/q100-1w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 1 worker	117.806		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28
+encode/vp9-workers/q100-4w	VP9, the 1080p synthetic animation, q 100 colour, 16 frames, 4 workers	306.741		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28
+encode/vp9-workers/lossless-alpha-1w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 1 worker	95.943		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28
+encode/vp9-workers/lossless-alpha-4w	VP9, the 1080p synthetic animation, lossless colour and alpha, 8 frames, 4 workers	259.971		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.28
+encode/aac/speed	AAC-LC, 48 kHz stereo, 192 kb/s, 320 s, one stream	738.499	3782.937	ms	0.20	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac/snr	AAC-LC, 48 kHz stereo, 192 kb/s, 320 s, SNR after FFmpeg's decoder	44.778474	36.663649	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/44k-mono/speed	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, one stream	12.940	67.815	ms	0.19	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/44k-mono/speed-16	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, 16 independent streams	20.534	102.858	ms	0.20	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/44k-mono/snr-tone_chirp	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, SNR of the tone and chirp third after FFmpeg's decoder	45.563841	23.279543	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/44k-mono/snr-transient	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, SNR of the transient third after FFmpeg's decoder	22.550434	17.920670	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/44k-mono/snr-noise	AAC-LC, the 12 s fixture, 44.1 kHz mono, 64 kb/s, SNR of the noise third after FFmpeg's decoder	4.095092	4.452755	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/48k-stereo/speed	AAC-LC, the 12 s fixture, 48 kHz stereo, 128 kb/s, one stream	26.216	192.552	ms	0.14	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.46
+encode/aac-fixture/48k-stereo/speed-16	AAC-LC, the 12 s fixture, 48 kHz stereo, 128 kb/s, 16 independent streams	40.948	281.807	ms	0.15	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.70
+encode/aac-fixture/48k-stereo/snr-tone_chirp	AAC-LC, the 12 s fixture, 48 kHz stereo, 128 kb/s, SNR of the tone and chirp third after FFmpeg's decoder	23.723958	20.524405	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.70
+encode/aac-fixture/48k-stereo/snr-transient	AAC-LC, the 12 s fixture, 48 kHz stereo, 128 kb/s, SNR of the transient third after FFmpeg's decoder	24.061914	18.503379	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.70
+encode/aac-fixture/48k-stereo/snr-noise	AAC-LC, the 12 s fixture, 48 kHz stereo, 128 kb/s, SNR of the noise third after FFmpeg's decoder	3.627785	4.024047	dB		FFmpeg n9.0.2 aac	2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.70
+alpha/prores4444/fps-1t	ProRes 4444 + alpha, 1080p, 1 thread, frames through RGBA	89.4		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.45
+alpha/prores4444/seek-1t	ProRes 4444 + alpha, 1080p, 1 thread, random frame_at seek	11.23		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.45
+alpha/prores4444/fps-8t	ProRes 4444 + alpha, 1080p, 8 threads, frames through RGBA	328.6		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.73
+alpha/prores4444/seek-8t	ProRes 4444 + alpha, 1080p, 8 threads, random frame_at seek	3.42		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.73
+alpha/prores422hq/fps-1t	ProRes 422 HQ, 1080p, 1 thread, frames through RGBA	224.8		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.39
+alpha/prores422hq/seek-1t	ProRes 422 HQ, 1080p, 1 thread, random frame_at seek	4.45		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.39
+alpha/prores422hq/fps-8t	ProRes 422 HQ, 1080p, 8 threads, frames through RGBA	779.3		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.19
+alpha/prores422hq/seek-8t	ProRes 422 HQ, 1080p, 8 threads, random frame_at seek	1.56		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	4.19
+alpha/vp9-alpha/fps-1t	VP9 + alpha stream, GOP 30, 1080p, 1 thread, frames through RGBA	133.2		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.58
+alpha/vp9-alpha/seek-1t	VP9 + alpha stream, GOP 30, 1080p, 1 thread, random frame_at seek	72.27		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.58
+alpha/vp9-alpha/fps-8t	VP9 + alpha stream, GOP 30, 1080p, 8 threads, frames through RGBA	311.4		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.68
+alpha/vp9-alpha/seek-8t	VP9 + alpha stream, GOP 30, 1080p, 8 threads, random frame_at seek	39.25		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.68
+alpha/vp9/fps-1t	VP9, GOP 60, two-pass, 1080p, 1 thread, frames through RGBA	274.3		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.33
+alpha/vp9/seek-1t	VP9, GOP 60, two-pass, 1080p, 1 thread, random frame_at seek	75.88		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.33
+alpha/vp9/fps-8t	VP9, GOP 60, two-pass, 1080p, 8 threads, frames through RGBA	603.8		fps			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.40
+alpha/vp9/seek-8t	VP9, GOP 60, two-pass, 1080p, 8 threads, random frame_at seek	31.13		ms			2026-10-27	f38150cd+d015dd	AMD Ryzen 9 9900X3D	3.40

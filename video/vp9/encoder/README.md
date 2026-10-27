@@ -73,9 +73,9 @@ These omissions are important compression-efficiency limits, not syntax gaps.
 
 ### Planned: compression
 
-Files are about 1.6 to 1.9 times libvpx's (good preset, cpu-used 4) at
-matched PSNR on the 320x180 animation clip. In order of expected gain per
-effort, each measured with `tests/vp9_quality_check.sh`:
+Files are larger than libvpx's (good preset, cpu-used 4) at equal PSNR: the
+BD-rate is in [BENCHMARKS.md](../../../BENCHMARKS.md). In order of expected
+gain per effort, each measured with `bash tests/compare.sh run encode/vp9`:
 
 1. Skip flags and zero residuals for inter blocks (static backgrounds are
    most of animation).
@@ -103,8 +103,7 @@ WebM mapping, not a second video track. Safari needs the separate HEVC path.
 
 ```sh
 bash tests/vp9_encode_check.sh
-bash tests/vp9_quality_check.sh
-bash tests/vp9_encode_timing.sh
+bash tests/compare.sh run encode/vp9   # size and speed against libvpx
 # Optional real clip sanity check:
 VP9_CAMERA=/path/to/clip.mov bash tests/vp9_encode_check.sh
 ```
@@ -147,26 +146,17 @@ FFmpeg, libvpx, Chromium and Node are test oracles/tools only.
 
 ## Size and quality
 
-30 frames of a deterministic 320x180 vector-like fixture: grayscale gradient,
-moving flat rectangle, text-like strokes. The source SHA-256 is
-`8697cb9ba0b5fe58a1716fe7a616541b012799a4f7e675341a5ad1a143af1147`.
-PSNR is the sample-weighted Y/U/V MSE, not the average of per-frame dB.
-Container overhead and alpha bytes are excluded from the payload comparison.
-
-| Encoder | Setting | Payload bytes | PSNR (dB) |
-| --- | --- | ---: | ---: |
-| Native | q=100, 32x32 blocks | 14,252 | 43.333 |
-| libvpx | good, cpu-used=4, CRF 44 | 8,793 | 43.874 |
-| libvpx | good, cpu-used=4, CRF 48 | 7,531 | 41.964 |
-| Native | q=0, lossless | 22,189 | infinity |
-| libvpx | lossless | 19,235 | infinity |
-
-Libvpx's two lossy points bracket native quality: the native size gap is
-**1.6–1.9x** there, not a claim that CRF and q are equivalent. The exactly
-matched lossless gap is **1.15x**. Libvpx uses one worker, GOP 120, no lag,
-one-pass CQ and good/cpu-used 4. Comparisons decode to raw planes before
-PSNR to avoid millisecond WebM timestamp rounding pairing different frames.
-Neither result should be generalized to camera footage.
+`bash tests/compare.sh run encode/vp9` measures the size against libvpx
+(one worker, good/cpu-used 4, one-pass constant quality, no lag, GOP 120) as
+BD-rate, the size change at equal PSNR, over four quantizers each: on
+OpenH264's 1080p camera clip, and on 30 frames of a deterministic 320x180
+vector-like fixture (grayscale gradient, moving flat rectangle, text-like
+strokes; source SHA-256
+`8697cb9ba0b5fe58a1716fe7a616541b012799a4f7e675341a5ad1a143af1147`), where
+it also compares the two lossless sizes. The figures are in
+[BENCHMARKS.md](../../../BENCHMARKS.md). PSNR is FFmpeg's sample-weighted
+Y/U/V figure over decoded raw planes, which avoids millisecond WebM timestamp
+rounding pairing different frames; payload bytes exclude the container.
 
 ## Performance
 
@@ -175,8 +165,10 @@ bitstream tile columns, 32x32 partitions, search radius 16, GOP 120. The
 fixture is generated outside the timed region. Time is only `encode_frame`
 (colour plus alpha when present): excludes initialization, source generation,
 PSNR, muxing, decoding and I/O. These are codec throughput, not end-to-end
-render/export numbers. Best of three after a warmup, 1080p, unpinned workers;
-`tests/vp9_encode_timing.sh` prints every trial.
+render/export numbers. The current figures, at one worker and four on the
+1080p synthetic animation (the best of three after a warmup, unpinned) and
+against libvpx on camera footage, are in
+[BENCHMARKS.md](../../../BENCHMARKS.md) (`bash tests/compare.sh run encode/vp9`).
 
 How the encoder got there, every step byte-identical to the previous output
 across 8 sizes x 4 quantizers x 3 partitions, flat/noise and 1080p:
@@ -204,20 +196,8 @@ across 8 sizes x 4 quantizers x 3 partitions, flat/noise and 1080p:
 | q=0 colour+alpha, final | 8.29 G | 1.96 G | 26.01 |
 
 (`perf stat` counts are whole-process, including source generation/PSNR.)
-One worker versus caller + three pool threads (four tiles):
-
-| 1080p workload | 1 worker | 4 workers |
-| --- | ---: | ---: |
-| q=100 colour, 16 frames | 15.78 fps | 48.52 fps |
-| q=0 lossless colour + alpha, 8 frames | 26.01 fps | 72.77 fps |
-
-Four-worker lossless varied 60.4–72.8 fps between trials. Four tiles cap the
-pool speedup, and the loop filter is serial.
-
-For scale, on the same 8-frame 1080p source with one thread, libvpx
-realtime/cpu-used 8 ran at about 78 fps (43.2 dB, 427 KB at CRF 40) and
-good/cpu-used 4 at about 10.7 fps (48.7 dB, 172 KB). Native q=60 gives 44.7 dB
-in 935 KB. Native output is still several times larger than libvpx's.
+Four tiles cap the pool speedup at four workers, and the loop filter is
+serial.
 
 ## Movie writer
 

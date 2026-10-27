@@ -32,18 +32,19 @@ under -1.
 
 ## Facts on screen
 
-Every number is in `facts.lua`, copied from odecs' docs; nothing was
-measured for this video:
+`facts.lua` reads every measured number from `BENCHMARKS.tsv` at load, the
+file `bash tests/compare.sh run` writes (BENCHMARKS.md shows the same rows);
+nothing is copied by hand or measured for this video. A missing row stops the
+render with the case to run.
 
-| on screen | source |
+| on screen | BENCHMARKS.tsv rows |
 | --- | --- |
-| ProRes 4444 + alpha, 1080p: 88 fps 1 thread, 322 fps 8 threads | `video/README.md`, Performance (frames through RGBA, file input) |
-| VP9 + alpha stream, 1080p: 72 fps, 183 fps | same table |
-| 11158 × 2156 lossy WebP: 223 ms on one core, libwebp 1.6.0 162 ms | `image/webp/README.md`, speed against libwebp |
-| all 131 corpus files RGBA-identical to dwebp | `image/webp/README.md`, the gate checks |
-| Vulkan Video decode, ms per frame, one at a time → three in flight: 1080p H.264 2.45 → 1.05, 1080p H.265 2.36 → 1.00, 720p 10-bit AV1 2.33 → 0.82 | `media/vulkan/README.md`, video.Reader on the RX 9070 XT |
-| Vulkan Video encode, 900 1080p frames: H.264 3.64 → 2.01, HEVC 3.59 → 1.56 ms per frame | `media/vulkan/README.md`, three pictures in flight (`tests/movie_encode_timing.odin`) |
-| native H.264 encoder: 144 fps at QP 26, x264 medium 221 fps | `video/h264/README.md`, 1080p, 16 slices on 16 workers |
+| ProRes 4444 + alpha and VP9 + alpha stream, 1080p, frames per second at 1 and 8 threads | `alpha/prores4444/fps-1t`, `-8t`; `alpha/vp9-alpha/fps-1t`, `-8t` |
+| 11158 × 2156 lossy WebP on one core, against libwebp 1.6.0 | `decode/webp-bryce` |
+| all 131 corpus files RGBA-identical to dwebp | `image/webp/README.md`, the gate checks (not a measurement) |
+| Vulkan Video decode, ms per frame, one picture in flight → three: 1080p H.264, 1080p H.265, 720p 10-bit AV1 | `gpu/decode-h264`, `-h265`, `-av1`, `/depth1` and `/depth3` |
+| Vulkan Video encode, 900 1080p frames, the same: H.264, HEVC | `gpu/encode-h264`, `-h265`, `/depth1` and `/depth3` |
+| native H.264 encoder, 16 slices on 16 workers, QP 27, against x264 medium with the same tools | `encode/h264-16/speed` |
 
 ## The soundtrack
 

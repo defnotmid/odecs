@@ -33,13 +33,10 @@ the crop origin. At 8 bits the luma plane is the readback buffer itself and
 only the interleaved chroma is split; P010 is shifted down in one pass.
 `append_frame_samples` writes a frame tightly (yuv420p/yuv420p10le).
 
-Through `video.Reader` (best of five on the RX 9070 XT):
-
-| stream | one picture at a time, u16 planes | three in flight, native-width planes |
-|---|---|---|
-| 1080p H.264, B-frames | 2.45 ms/frame | 1.05 |
-| 1080p H.265 | 2.36 | 1.00 |
-| 720p 10-bit AV1 | 2.33 | 0.82 |
+Decode time per frame through `video.Reader`, one picture in flight against
+three (`-define:ODECS_DECODE_DEPTH`), and against FFmpeg's Vulkan Video with
+each frame downloaded, is in [BENCHMARKS.md](../../BENCHMARKS.md)
+(`bash tests/compare.sh run gpu/decode`, `tests/movie_decode_timing.odin`).
 
 H.265 binds every picture its RPS keeps, the Foll sets included, as FFmpeg
 does. RADV's firmware loses what an unbound slot held, and the leading
@@ -74,10 +71,11 @@ queued (nil before that). After the last picture, call `flush_encoder` or
 the call returns, and Surface input waits only for its GPU copy, so both input
 borrows still end with the call. The bitstream is identical at every depth.
 The common Vulkan media adapter uses three pictures in flight and flushes them
-in `drain`. 900 1080p I420 frames through `video.Writer` on an RX 9070 XT
+in `drain` (`-define:ODECS_ENCODE_DEPTH` sets the depth). When it came in, 900 1080p I420 frames through `video.Writer` on an RX 9070 XT
 (`tests/movie_encode_timing.odin`): H.264 3.64 → 2.01 ms/frame, HEVC 3.59 →
-1.56 ms/frame, with identical MP4 bytes; the hardware encoder is now the bound
-(the encoding thread is about 30% busy).
+1.56 ms/frame, with identical MP4 bytes; the hardware encoder became the bound
+(the encoding thread about 30% busy). The current figures at depths 1 and 3
+are in [BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run gpu/encode`).
 
 Host pixel staging is allocated only on the first validated host encode. A
 surface-only encoder has no mapped raw-pixel upload buffer. Device decoding also

@@ -1,4 +1,4 @@
-// Development-only libwebp oracle for tests/decode_benchmark.sh: one WebP
+// Development-only libwebp oracle for tests/compare.sh: one WebP
 // file resident, WebPDecodeRGBA timed, median of seven after a warmup.
 //   reference_webp FILE
 #define _POSIX_C_SOURCE 200809L

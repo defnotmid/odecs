@@ -27,6 +27,10 @@ refs=(
 	"libjpeg-turbo https://github.com/libjpeg-turbo/libjpeg-turbo.git 4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 	"libvorbis    https://gitlab.xiph.org/xiph/vorbis.git            0657aee69dec8508a0011f47f3b69d7538e9d262"
 	"libogg       https://gitlab.xiph.org/xiph/ogg.git               be05b13e98b048f0b5a0f5fa8ce514d56db5f822"
+	"x264         https://code.videolan.org/videolan/x264.git          b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+	"x265         https://bitbucket.org/multicoreware/x265_git.git     e444744c03978c1fb4e037168967020cf2648427"
+	"dav1d        https://code.videolan.org/videolan/dav1d.git         54706fc6bc0cdecab7e9593974a4039cc038fca7"
+	"Vulkan-Headers https://github.com/KhronosGroup/Vulkan-Headers.git 73814d006638aa00bd553215b054f0f02e457e22"
 )
 
 fetch() { # name upstream commit

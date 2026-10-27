@@ -162,7 +162,7 @@ main :: proc() {
 	out := make([dynamic]u8, 0, 4 * 1024 * 1024)
 	defer delete(out)
 
-	// Borrow one persistent caller-owned pool across all seven fresh encoders.
+	// Borrow one persistent caller-owned pool across all the fresh encoders.
 	// Pool construction and shutdown are outside both reported timers.
 	pool: common.Static_Pool
 	pool_on := workers > 1
@@ -175,6 +175,9 @@ main :: proc() {
 		fmt.eprintln(benchmark_support.pin_error_description(err)); os.exit(2)
 	}
 
+	// ROUNDS (1 to 7, default 7): one round when only the stream matters.
+	rounds := 7
+	if v, ok := strconv.parse_int(os.get_env("ROUNDS", context.temp_allocator)); ok do rounds = clamp(v, 1, 7)
 	times, init_times: [7]f64
 	baseline: []u8
 	defer delete(baseline)
@@ -182,7 +185,7 @@ main :: proc() {
 	search_worker_capacity := 1
 	actual_wpp := false
 
-	for r in 0 ..< len(times) {
+	for r in 0 ..< rounds {
 		clear(&out)
 		t := time.tick_now()
 
@@ -224,17 +227,18 @@ main :: proc() {
 	}
 
 	if output_path != "" && os.write_entire_file(output_path, out[:]) != nil do os.exit(1)
-	slice.sort(times[:])
-	slice.sort(init_times[:])
+	slice.sort(times[:rounds])
+	slice.sort(init_times[:rounds])
+	m := rounds / 2
 	fmt.printfln(
 		"oicu h265 encode: frames=%d bytes=%d init_ms=%.3f codec_ms=%.3f fps=%.1f min_ms=%.3f max_ms=%.3f requested_workers=%d pool_threads=%d search_worker_capacity=%d tiles=%dx%d wpp=%v",
 		frames,
 		len(out),
-		init_times[3],
-		times[3],
-		f64(frames) * 1000 / times[3],
+		init_times[m],
+		times[m],
+		f64(frames) * 1000 / times[m],
 		times[0],
-		times[6],
+		times[rounds - 1],
 		workers,
 		pool.n_threads,
 		search_worker_capacity,

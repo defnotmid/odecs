@@ -258,24 +258,17 @@ video.close_reader(&r)
   (Vulkan Video only), Ogg Opus and Vorbis, `.wav`, `.flac` and `.mp3`. VP8 is
   not decoded.
 - **VP9 seek cost:** a far seek decodes from the previous keyframe. At
-  1080p, a 60-frame GOP and one thread, that is up to about 0.5 s; encode
+  1080p, a 60-frame GOP and one thread, that is up to about 0.2 s; encode
   overlays with a short GOP (`-g 30` or less) when they will be scrubbed.
 
 ## Performance
 
-Reading alpha video at 1920x1080 (`tests/movie_alpha.odin`: frames through
-RGBA including conversion, file input; seeks are random `frame_at` calls;
-other load on the machine, 8-thread figures are best of several runs):
+Reading alpha video at 1920x1080 through `video.Reader` (frames through RGBA
+including conversion, file input, at 1 and 8 threads, and random `frame_at`
+seeks) is measured by `bash tests/compare.sh run alpha/` with
+`tests/movie_alpha.odin`; the figures are in [BENCHMARKS.md](../BENCHMARKS.md).
 
-| Clip | 1 thread | 8 threads | `frame_at` median (1 / 8 threads) |
-| --- | --- | --- | --- |
-| ProRes 4444 + alpha | 88 fps | 322 fps | 19 / 8 ms |
-| ProRes 422 HQ | 207 fps | 444 fps | 6.6 / 2.3 ms |
-| VP9 + alpha stream, GOP 30 | 72 fps | 183 fps | 271 / 141 ms |
-| VP9, GOP 60, two-pass | 150 fps | 293 fps | 253 / 118 ms |
-| fframes `transparent.mov` (640x360 4444) | 684 fps | 3142 fps | 1.8 / 0.4 ms |
-
-The timing harness is `tests/movie_timing.odin`, pinned to one core (AMD Ryzen 9 9900X3D 12-Core Processor,
+Colour conversion and the reader's overhead (`tests/movie_timing.odin`, pinned to one core of an AMD Ryzen 9 9900X3D,
 `-o:speed -microarch:native`), with resident input and the median of 7.
 
 | 1920x1080 | ms/frame |

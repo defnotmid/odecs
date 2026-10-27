@@ -22,11 +22,15 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [hevc.js](https://github.com/lid-labs/hevc.js) | read: HEVC decoder study | `third_party/hevc.js` | `fa6c1bb2a58fbc1e425030555ef57121717de746` | 2026-10-01 | MIT |
 | [Glint](https://github.com/CrispStrobe/glint) | read: AAC study | `third_party/glint` | `77738f3ed9b15f627196cc5bbd7f6406814ba2fb` | 2026-08-19 | MIT |
 | [Apple ALAC](https://github.com/macosforge/alac) | ported: `alac` | `third_party/alac` | `c38887c5c5e64a4b31108733bd79ca9b2496d987` | 2011-10-26 | Apache-2.0 |
-| [FFmpeg](https://github.com/FFmpeg/FFmpeg) n9.0.2 | oracle: decode reference and speed baseline (`tests/decode_benchmark.sh` builds it decoders-only, LGPL) | `third_party/ffmpeg` | `946fcce07b6dcd0331c8cc609192aeff5e1924f8` | 2026-09-18 | LGPL-2.1-or-later |
-| [libvpx](https://github.com/webmproject/libvpx) v1.17.0 | oracle: VP9 decode reference and speed baseline | `third_party/libvpx` | `6df3ec34557879fff673706f4a1d9fbd0f3a6f0e` | 2026-08-20 | BSD-3-Clause + patent grant |
+| [FFmpeg](https://github.com/FFmpeg/FFmpeg) n9.0.2 | oracle: decode reference, speed baseline and AAC encode reference (`tests/compare.sh` builds its decoders, its Vulkan Video decoding and its `aac` encoder, LGPL) | `third_party/ffmpeg` | `946fcce07b6dcd0331c8cc609192aeff5e1924f8` | 2026-09-18 | LGPL-2.1-or-later |
+| [libvpx](https://github.com/webmproject/libvpx) v1.17.0 | oracle: VP9 decode and encode reference and speed baseline | `third_party/libvpx` | `6df3ec34557879fff673706f4a1d9fbd0f3a6f0e` | 2026-08-20 | BSD-3-Clause + patent grant |
 | [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) 3.1.2 | oracle: JPEG decode reference and speed baseline; fixtures (its test images) | `third_party/libjpeg-turbo` | `4e151a4ad91001b3aa8c2ece2205c15f487ce320` | 2025-08-26 | IJG + BSD-3-Clause + zlib |
 | [libvorbis](https://gitlab.xiph.org/xiph/vorbis) 1.3.7 | oracle: Vorbis decode reference and speed baseline; the Vorbis I specification (`doc/`) | `third_party/libvorbis` | `0657aee69dec8508a0011f47f3b69d7538e9d262` | 2020-07-03 | BSD-3-Clause |
 | [libogg](https://gitlab.xiph.org/xiph/ogg) 1.3.6 | builds the libvorbis oracle | `third_party/libogg` | `be05b13e98b048f0b5a0f5fa8ce514d56db5f822` | 2025-06-16 | BSD-3-Clause |
+| [x264](https://code.videolan.org/videolan/x264) 0.165, the stable branch | oracle: H.264 encode speed and size baseline (`tests/compare.sh`; only that development harness links it) | `third_party/x264` | `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` | 2025-06-08 | GPL-2.0-or-later |
+| [x265](https://bitbucket.org/multicoreware/x265_git) 4.2 | oracle: H.265 encode speed and size baseline (`tests/compare.sh`; only that development harness links it) | `third_party/x265` | `e444744c03978c1fb4e037168967020cf2648427` | 2026-04-19 | GPL-2.0-or-later |
+| [dav1d](https://code.videolan.org/videolan/dav1d) 1.5.4 | oracle: AV1 decode speed baseline (`tests/compare.sh` links it into its FFmpeg build) | `third_party/dav1d` | `54706fc6bc0cdecab7e9593974a4039cc038fca7` | 2026-07-14 | BSD-2-Clause |
+| [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) v1.4.366 | builds the FFmpeg oracle's Vulkan Video decoding (`tests/compare.sh`); odecs uses Odin's `vendor:vulkan` | `third_party/Vulkan-Headers` | `73814d006638aa00bd553215b054f0f02e457e22` | 2026-10-23 | Apache-2.0 or MIT |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
@@ -60,3 +64,7 @@ against.
 | `third_party/libjpeg-turbo/LICENSE.md` | `2189dc45a8fe96204069f8124caa53a148dfdc193f50f584c6ca7849a6072872` |
 | `third_party/libvorbis/COPYING` | `ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a` |
 | `third_party/libogg/COPYING` | `d2ab5758336489da61c12cc5bb757da5339c4ae9001f9bb0562b4370249af814` |
+| `third_party/x264/COPYING` | `32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670` |
+| `third_party/x265/COPYING` | `d8afb1bcc7a2cfc603683b168d6987ef0a48e59e0da3693bf55c5d33b67e2b49` |
+| `third_party/dav1d/COPYING` | `dd92c3c2247c5651606fc23a5e2d6a1ebc5ace9a3e49cbde0e12f05ad1cb1ee5` |
+| `third_party/Vulkan-Headers/LICENSE.md` | `95ad366d23fadf701d355bc45fb8b82ae2d700239471d35d41286ac3b08ff903` |

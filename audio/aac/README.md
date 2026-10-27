@@ -146,22 +146,14 @@ WebM. Raw encoder output requires retained AU boundaries and ASC.
 
 ## Validation and examples
 
-The resident-input benchmark is `bash tests/aac_benchmark.sh`; its optional
-FFmpeg API oracle is development-only. Native timing, signal generation and PCM
-quality tools use Odin. Seven fresh-state rounds check output determinism.
-Persistent shared `common.Static_Pool` slots own contiguous independent-stream
-ranges; initialization remains on the caller. One stream remains serial.
-Setup and file I/O are excluded from codec timing. Optional
-`AAC_SLOT_CPUS_<count>` assigns initially permitted, distinct CPUs to fixed slots
-in both wrappers; production codecs set no affinity.
-
-In the last measurement (2026-10-26), native encode is 3.8–7.5 times
-faster than the installed FFmpeg API at those operating points, with unequal
-emitted bitrates. Stereo transient SNR on the synthetic fixture is 24.06 dB
-against FFmpeg's 18.50 dB (and 22.55 dB against 17.92 dB in mono). These
-bounded measurements do not establish general
-quality parity. Compare setup, stream count, transport, actual bitrate, tools
-and quality alongside timing.
+Encode speed against FFmpeg's `aac` (one stream on one core, and 16 independent
+streams, whose output must equal the one stream's), and SNR on each third of
+`tests/audio_fixture.odin`'s signal and on 320 s of music, are in
+[BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run encode/aac`).
+The FFmpeg encoder is built from its pinned source for that comparison only.
+Seven fresh-state rounds check output determinism; setup and file I/O are
+outside codec timing. SNR is an objective error measurement, not a perceptual
+score: compare bitrate, tools and quality alongside timing.
 
 ```sh
 odin test audio/aac

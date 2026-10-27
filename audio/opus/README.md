@@ -74,13 +74,10 @@ The MDCT tables are computed once at startup and shared by every decoder.
   - After 30 random seeks the decoder has re-converged in the pre-roll. Worst over every position: 0.007 for CELT and hybrid, 0.044 for SILK (exactly libopus restarted at the same packet), 0.02 for the surround tones. The surround LFE's 60 Hz onset in the first 250 ms is 0.118 off, as it is for libopus restarted at the same packet.
 - **Fuzzing:** a pass under AddressSanitizer, with mutated packets and losses, mutated and random multistream packets with random layouts, and mutated Ogg files.
 
-It decodes as fast as libopus 1.6.1, built with its SSE4.1 and AVX2 intrinsics, with no intrinsics, about 700× real time on one core. Vectors timed against `opus_demo`, whose times include its start-up:
-
-| Vectors | Mode | Ours | `opus_demo` |
-| --- | --- | --- | --- |
-| 01, 07, 11 | CELT | 42, 21, 31 ms | 42, 23, 32 ms |
-| 02, 03, 04 | SILK | 12, 13, 19 ms | 14, 14, 19 ms |
-| 05, 06, 12 | hybrid | 32, 31, 13 ms | 34, 34, 15 ms |
+Decode speed on one core against libopus 1.6.1 (built with its SSE4.1 and AVX2
+intrinsics; odecs uses none) and FFmpeg's `opus`, on music at 128 kb/s and on
+speech-tuned streams at 16 and 32 kb/s, is in [BENCHMARKS.md](../../BENCHMARKS.md)
+(`bash tests/compare.sh run decode/opus`).
 
 The time went into data shape:
 - **The FFT:** split real and imaginary arrays, a precomputed input permutation, and in-place stages with `[j][k]` twiddles, so every inner loop is contiguous. One butterfly stage is generic over a compile-time radix (`$P`, `#unroll`, `when`).

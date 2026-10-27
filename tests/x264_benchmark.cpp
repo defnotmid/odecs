@@ -37,7 +37,9 @@ int main(int argc,char **argv) {
     output.reserve(4*1024*1024);
     std::vector<double> times,init,first,steady,frame_times;
     int effective_workers=0,effective_slices=0;
-    for(int rep=0;rep<7;++rep) {
+    // ROUNDS (1 to 7, default 7): one round when only the stream matters.
+    int rounds=std::getenv("ROUNDS")?std::clamp(std::atoi(std::getenv("ROUNDS")),1,7):7;
+    for(int rep=0;rep<rounds;++rep) {
         auto t=Clock::now();
         x264_param_t p;
         if(x264_param_default_preset(&p,"medium",nullptr)) return 1;

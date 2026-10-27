@@ -92,41 +92,16 @@ The `tests/` scripts compare odecs with reference decoders and encoders
 (FFmpeg, libvpx, libwebp and others); they are development tools and need
 those binaries installed.
 
-## Decoding speed
+## Speed and size against the references
 
-Native decoding against FFmpeg n9.0.2, libvpx 1.17.0, libopus 1.6.1 and
-libwebp 1.6.0, all built from their pinned sources. A ratio above 1 means
-odecs is slower. Measured 2026-10-20 at v0.0.6 on one pinned core of a Ryzen 9
-9900X3D. Each figure is the median of seven runs, with packets in memory, one
-thread, and opening the decoder not timed. Other work kept the load average
-at 2–3, and a repeat run agreed within about 2%.
-
-| Input | odecs ms | Reference ms | Ratio | Reference |
-| --- | --- | --- | --- | --- |
-| AAC-LC, 128 kb/s stereo, 320 s | 140 | 78 | 1.80 | FFmpeg `aac` |
-| FLAC, 16-bit stereo, 320 s | 228 | 138 | 1.66 | FFmpeg `flac` |
-| VP9 profile 0, 1080p, 162 frames | 1271 | 796 | 1.60 | FFmpeg `vp9` (libvpx: 880 ms, 1.44) |
-| VP9 profile 2, 10-bit | 1385 | 1003 | 1.38 | FFmpeg `vp9` (libvpx: 1221 ms, 1.13) |
-| WebP lossy, 1920×1080 | 9.6 | 7.3 | 1.31 | libwebp |
-| H.264 High, 8-bit, 1080p, 162 frames | 1370 | 1059 | 1.29 | FFmpeg `h264` |
-| MP3, 192 kb/s stereo | 157 | 122 | 1.29 | FFmpeg `mp3float` |
-| HEVC Main, 1080p | 1411 | 1113 | 1.27 | FFmpeg `hevc` |
-| WebP lossy, 11158×2156 (`demo/media/bryce.webp`) | 209 | 168 | 1.24 | libwebp |
-| H.264 High 4:2:2, 10-bit | 1670 | 1355 | 1.23 | FFmpeg `h264` |
-| H.264 High 10, 4:2:0 | 1448 | 1178 | 1.23 | FFmpeg `h264` |
-| HEVC Main 10 | 1534 | 1255 | 1.22 | FFmpeg `hevc` |
-| Opus, 128 kb/s stereo | 394 | 327 | 1.20 | FFmpeg `opus` (libopus: 408 ms, 0.96) |
-| ProRes 422 HQ, 1080p | 1784 | 1721 | 1.04 | FFmpeg `prores` |
-| WebP lossless, 1920×1080 | 15.9 | 16.0 | 1.00 | libwebp |
-| ALAC, 16-bit stereo | 375 | 425 | 0.88 | FFmpeg `alac` |
-| ProRes 4444, 10-bit | 2472 | 3074 | 0.80 | FFmpeg `prores` |
-
-The video is OpenH264's 1080p fixture looped three times. The audio is the
-320 s of decoded RFC 8251 Opus test vectors. Both were encoded with x264,
-x265, libvpx, `prores_ks` and FFmpeg's audio encoders. The H.264 High 10 row
-was added once a 10-bit mb_qp_delta decoding bug was fixed, and the VP9 rows
-were measured again after its decoder was restructured (3.40× and 2.99×
-before). To rerun, use `tests/decode_benchmark.sh`.
+`bash tests/compare.sh` measures each native decoder and encoder against its
+references, on one pinned core unless a case says otherwise: FFmpeg n9.0.2
+(with its Vulkan Video decoding and encoding), libvpx, libopus, libwebp,
+libjpeg-turbo, libvorbis, dav1d, x264 and x265, all built from their pinned
+sources, and Odin's vendored stb_image. Encoders are also compared by size at
+equal quality (BD-rate). Every figure, with its date, revision, machine and
+load, is in [BENCHMARKS.md](BENCHMARKS.md), which the script writes;
+`bash tests/compare.sh run REGEX` measures one case again.
 
 ## Platforms
 

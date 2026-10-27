@@ -1,40 +1,61 @@
--- Every number on screen, with where it comes from. Paths are in the odecs
--- repository (../); nothing here is estimated or measured for this video.
+-- Every measured number on screen comes from odecs' BENCHMARKS.tsv (../),
+-- which `bash tests/compare.sh run` writes and BENCHMARKS.md shows; nothing
+-- here is estimated or measured for this video. A missing row is an error
+-- that names the case to run.
+
+local rows = {}
+local fh = assert(io.open(SCRIPT_DIR .. "/../BENCHMARKS.tsv"))
+for line in fh:lines() do
+  local id, _, odecs, reference, _, _, _, _, _, machine = line:match(("([^\t]*)\t"):rep(9) .. "([^\t]*)")
+  if id and id ~= "id" then rows[id] = { odecs = tonumber(odecs), reference = tonumber(reference), machine = machine } end
+end
+fh:close()
+
+local function bench(id)
+  return assert(rows[id], "BENCHMARKS.tsv has no " .. id .. ": bash tests/compare.sh run " .. id:match("^[^/]+/[^/]+"))
+end
+local function whole(v) return math.floor(v + 0.5) end
 
 local M = {}
 
--- movie/README.md, "Performance": reading alpha video at 1920x1080,
--- frames through RGBA including conversion, file input; 1 and 8 threads.
-M.MOVIE_SRC = "odecs movie/README.md · Performance · 1920×1080 through RGBA, file input"
-M.PRORES = { "ProRes 4444 + alpha", "88 fps", "322 fps" }
-M.VP9 = { "VP9 + alpha stream", "72 fps", "183 fps" }
+-- alpha/: tests/movie_alpha.odin through video.Reader, frames through RGBA
+-- including conversion, file input; 1 and 8 threads.
+local prores, prores8 = bench("alpha/prores4444/fps-1t"), bench("alpha/prores4444/fps-8t")
+local vp9, vp98 = bench("alpha/vp9-alpha/fps-1t"), bench("alpha/vp9-alpha/fps-8t")
+M.MOVIE_SRC = "odecs BENCHMARKS.md · alpha video · 1920×1080 through RGBA, file input · " .. prores.machine
+M.PRORES = { "ProRes 4444 + alpha", whole(prores.odecs) .. " fps", whole(prores8.odecs) .. " fps" }
+M.VP9 = { "VP9 + alpha stream", whole(vp9.odecs) .. " fps", whole(vp98.odecs) .. " fps" }
 
--- webp/README.md: the 11158x2156 lossy corpus image on one core
--- against libwebp 1.6.0 (WebPDecodeRGBA, -O3, its SIMD code), and the
--- corpus gate (all 131 files RGBA-identical to dwebp).
-M.WEBP_SRC = "odecs webp/README.md · one core, against libwebp 1.6.0 with its SSE2/SSE4.1/AVX2 code"
+-- decode/webp-bryce: the 11158x2156 lossy corpus image on one core against
+-- libwebp 1.6.0 (WebPDecodeRGBA, -O3, its SIMD code); the corpus gate
+-- (tests/webp_check.sh: all 131 files RGBA-identical to dwebp).
+local webp = bench("decode/webp-bryce")
+M.WEBP_SRC = "odecs BENCHMARKS.md · one core, against libwebp 1.6.0 with its SSE2/SSE4.1/AVX2 code"
 M.WEBP_SIZE = "11158 × 2156"
-M.WEBP_OURS, M.WEBP_LIBWEBP = "223 ms", "162 ms"
+M.WEBP_OURS, M.WEBP_LIBWEBP = whole(webp.odecs) .. " ms", whole(webp.reference) .. " ms"
 M.WEBP_CORPUS = 131
 
--- The three charts, ms per 1080p frame (lower is better) or fps:
---   media/vulkan/README.md: movie.Reader on the RX 9070 XT, best of five,
---     one picture at a time against three in flight;
---   media/vulkan/README.md: 900 1080p I420 frames through movie.Writer on an
---     RX 9070 XT (tests/movie_encode_timing.odin), before and after three
---     pictures in flight;
---   h264/README.md: the native encoder, 1080p, 16 slices on 16
---     workers (Ryzen 9 9900X3D), against x264 medium with the same tools.
+-- The three charts, ms per frame (lower is better) or fps:
+--   gpu/decode-*: video.Reader planar, one picture in flight against three;
+--   gpu/encode-*: 900 1080p I420 frames through video.Writer, the same;
+--   encode/h264-16: the native encoder, 1080p, 16 slices on 16 workers,
+--     against x264 medium with the same tools.
+local function depths(kind, codec, label)
+  return { label, bench("gpu/" .. kind .. "-" .. codec .. "/depth1").odecs, bench("gpu/" .. kind .. "-" .. codec .. "/depth3").odecs }
+end
+local gpu = bench("gpu/decode-h264/depth3").machine
+local h264 = bench("encode/h264-16/speed")
 M.CHARTS = {
   { title = "VULKAN VIDEO DECODE", unit = "ms / frame", from = "one picture at a time", to = "three in flight",
-    src = "odecs media/vulkan/README.md · movie.Reader, RX 9070 XT, best of five",
-    rows = { { "1080p H.264, B-frames", 2.45, 1.05 }, { "1080p H.265", 2.36, 1.00 }, { "720p 10-bit AV1", 2.33, 0.82 } } },
-  { title = "VULKAN VIDEO ENCODE", unit = "ms / frame", from = "before", to = "three in flight",
-    src = "odecs media/vulkan/README.md · 900 1080p frames through movie.Writer, RX 9070 XT",
-    rows = { { "H.264", 3.64, 2.01 }, { "H.265 (HEVC)", 3.59, 1.56 } } },
+    src = "odecs BENCHMARKS.md · video.Reader · " .. gpu,
+    rows = { depths("decode", "h264", "1080p H.264, B-frames"), depths("decode", "h265", "1080p H.265"),
+      depths("decode", "av1", "720p 10-bit AV1") } },
+  { title = "VULKAN VIDEO ENCODE", unit = "ms / frame", from = "one picture at a time", to = "three in flight",
+    src = "odecs BENCHMARKS.md · 900 1080p frames through video.Writer · " .. gpu,
+    rows = { depths("encode", "h264", "H.264"), depths("encode", "h265", "H.265 (HEVC)") } },
   { title = "POOLED NATIVE H.264 ENCODER", unit = "fps", fps = true,
-    src = "odecs h264/README.md · 1080p, 16 slices on 16 workers, Ryzen 9 9900X3D",
-    rows = { { "odecs native, QP 26", 144 }, { "x264 medium, same tools", 221 } } },
+    src = "odecs BENCHMARKS.md · 1080p, 16 slices on 16 workers · " .. h264.machine,
+    rows = { { "odecs native, QP 27", whole(h264.odecs) }, { "x264 medium, same tools", whole(h264.reference) } } },
 }
 
 return M

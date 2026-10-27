@@ -41,6 +41,7 @@ for _ in 0 ..< a.frame_count {
   partial transparent frames, local and global tables): identical;
 - a fuzz pass under AddressSanitizer.
 
-On a 1080p 256-colour frame, decoding is about 1.5× faster than stb.
+Speed on a 1080p 256-colour frame against stb_image is in
+[BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run decode/stb`).
 `odin test gif` covers each disposal, interlacing, a code table growing to
 10 bits, and every truncation of a file.

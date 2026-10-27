@@ -30,8 +30,8 @@ mp3.close(&r)
   subband and its windowing one 32-wide row per tap, and the IMDCTs add one
   row of their cosine tables per input line. Those loops run over contiguous
   outputs, vectorise as written, and doubled decode speed over the
-  dot-product form (60 s of 44.1 kHz stereo in 55 ms on one thread; FFmpeg
-  takes 28–46 ms).
+  dot-product form. Speed against FFmpeg is in
+  [BENCHMARKS.md](../../BENCHMARKS.md) (`bash tests/compare.sh run decode/mp3`).
 - **Files:** ID3v2 tags (several), ID3v1, APE and other trailing data are
   skipped. Every frame is indexed at open from its 4-byte header, read
   through a 64 KiB window, and must match the first frame's version and

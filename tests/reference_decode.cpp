@@ -1,8 +1,10 @@
-// Development-only FFmpeg oracle for tests/decode_benchmark.sh: one stream of
-// any container, its packets resident, a fresh one-thread decoder per round,
-// decode and flush timed (opening the decoder is not), median of seven after
-// a warmup. Frames or samples are counted, never touched.
-//   reference_decode FILE video|audio [decoder]   (decoder: e.g. libvpx-vp9)
+// Development-only FFmpeg oracle for tests/compare.sh: one stream of
+// any container, its packets resident, a fresh decoder per round (one
+// thread, or THREADS slice and frame threads), decode and flush timed
+// (opening the decoder is not), median of seven after a warmup. Frames or
+// samples are counted, never touched. HWACCEL=vulkan decodes video through
+// FFmpeg's Vulkan Video and downloads each frame to host memory, timed.
+//   [THREADS=n] [HWACCEL=vulkan] reference_decode FILE video|audio [decoder]   (decoder: e.g. libvpx-vp9)
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -12,9 +14,16 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/hwcontext.h>
 }
 using Clock = std::chrono::steady_clock;
 static void fail(const char *s) { std::fprintf(stderr, "reference decode: %s\n", s); std::exit(1); }
+
+static AVPixelFormat vulkan_format(AVCodecContext *, const AVPixelFormat *formats) {
+    for (; *formats != AV_PIX_FMT_NONE; ++formats) if (*formats == AV_PIX_FMT_VULKAN) return *formats;
+    fail("no Vulkan decoding for this stream");
+    return AV_PIX_FMT_NONE;
+}
 
 int main(int argc, char **argv) {
     if (argc < 3 || argc > 4) { std::fprintf(stderr, "usage: reference_decode FILE video|audio [decoder]\n"); return 2; }
@@ -37,18 +46,33 @@ int main(int argc, char **argv) {
     if (!codec) fail("decoder unavailable");
     AVFrame *frame = av_frame_alloc();
     std::vector<double> times;
+    int threads = std::getenv("THREADS") ? std::atoi(std::getenv("THREADS")) : 1;
+    if (threads < 1) fail("THREADS");
+    const char *hwaccel = std::getenv("HWACCEL");
+    AVBufferRef *device = nullptr;
+    if (hwaccel && (std::strcmp(hwaccel, "vulkan") || av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0) < 0))
+        fail("HWACCEL: no Vulkan device");
+    AVFrame *host = av_frame_alloc();
     long long units = 0;
     for (int round = 0; round < 8; ++round) {
         AVCodecContext *ctx = avcodec_alloc_context3(codec);
         if (!ctx || avcodec_parameters_to_context(ctx, format->streams[index]->codecpar) < 0) fail("context");
-        ctx->thread_count = 1;
-        ctx->thread_type = 0;
+        ctx->thread_count = threads;
+        ctx->thread_type = threads > 1 ? FF_THREAD_SLICE | FF_THREAD_FRAME : 0;
+        if (device) {
+            ctx->hw_device_ctx = av_buffer_ref(device);
+            ctx->get_format = vulkan_format;
+        }
         if (avcodec_open2(ctx, codec, nullptr) < 0) fail("decoder open");
         units = 0;
         auto drain = [&] {
             int r;
             while ((r = avcodec_receive_frame(ctx, frame)) >= 0) {
                 units += video ? 1 : frame->nb_samples;
+                if (device) {
+                    if (av_hwframe_transfer_data(host, frame, 0) < 0) fail("download");
+                    av_frame_unref(host);
+                }
                 av_frame_unref(frame);
             }
             if (r != AVERROR(EAGAIN) && r != AVERROR_EOF) fail("receive frame");
@@ -66,5 +90,7 @@ int main(int argc, char **argv) {
                 codec->name, video ? "frames" : "samples", units, packets.size(), times[3], times[0], times[6], av_version_info());
     for (auto p : packets) av_packet_free(&p);
     av_frame_free(&frame);
+    av_frame_free(&host);
+    av_buffer_unref(&device);
     avformat_close_input(&format);
 }
