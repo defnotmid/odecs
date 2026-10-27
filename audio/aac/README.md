@@ -155,11 +155,11 @@ Setup and file I/O are excluded from codec timing. Optional
 `AAC_SLOT_CPUS_<count>` assigns initially permitted, distinct CPUs to fixed slots
 in both wrappers; production codecs set no affinity.
 
-In the last measurement (2026-10-04), native encode is 5.7–8.3 times
+In the last measurement (2026-10-26), native encode is 3.8–7.5 times
 faster than the installed FFmpeg API at those operating points, with unequal
-emitted bitrates. Stereo transient SNR trails by
-about 5 dB at the nominal targets and by 0.894 dB in the auxiliary comparison at
-nearby emitted byte rates. These bounded measurements do not establish general
+emitted bitrates. Stereo transient SNR on the synthetic fixture is 24.06 dB
+against FFmpeg's 18.50 dB (and 22.55 dB against 17.92 dB in mono). These
+bounded measurements do not establish general
 quality parity. Compare setup, stream count, transport, actual bitrate, tools
 and quality alongside timing.
 

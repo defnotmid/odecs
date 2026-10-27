@@ -18,12 +18,13 @@ prepare_packet :: proc(e: ^Encoder, ahead_attack: bool) -> Error {
 	nominal := numerator / e.config.sample_rate
 	e.prepared_rate_remainder = numerator % e.config.sample_rate
 	extra := 0
-	if !e.options.disable_reservoir {
+	if !e.options.disable_reservoir && !e.options.constant_bit_rate {
 		// The final overlap carries the release to silence. Spend retained
 		// credit on that boundary just as on an input attack; otherwise the
 		// last audible samples pay for leakage from the abrupt release.
+		target_reservoir := min(e.reservoir_limit / 4, nominal / 2)
 		extra =
-			e.pending_attack || ahead_attack || sequence == .Short || e.flush_stage > 0 ? min(e.reservoir_bits, nominal) : e.reservoir_bits / 8
+			e.pending_attack || sequence == .Short || e.flush_stage > 0 ? min(e.reservoir_bits / 2, nominal) : (e.reservoir_bits - target_reservoir) / 8
 	}
 	maximum_packet := min(6144 * e.independent_channels, 65528)
 	budget := min(nominal + extra, maximum_packet)
@@ -110,10 +111,12 @@ validate_input :: proc(e: ^Encoder, pcm: []f32) -> Error {
 }
 
 @(private)
-retain_input :: proc(e: ^Encoder, pcm: []f32, attack: bool, energy, tail: [aac.MAX_CHANNELS]f64) {
+retain_input :: proc(e: ^Encoder, pcm: []f32, early_attack, late_attack: bool, energy, tail: [aac.MAX_CHANNELS]f64) {
 	for ch in 0 ..< e.config.channels do for i in 0 ..< e.frame_samples do e.pending[ch][i] = f64(pcm[i * e.config.channels + ch]) * 32768
-	e.pending_valid =
-		true; e.pending_attack = attack; e.input_energy = energy; e.input_tail = tail; e.input_frames += 1
+	e.pending_valid = true
+	e.pending_attack = e.pending_late_attack || early_attack
+	e.pending_late_attack = late_attack
+	e.input_energy = energy; e.input_tail = tail; e.input_frames += 1
 }
 
 @(private)
@@ -135,13 +138,13 @@ append_packet :: proc(output: ^[dynamic]u8, packet: []u8) -> Error {
 encode_frame :: proc(e: ^Encoder, pcm: []f32, output: ^[dynamic]u8) -> Error {
 	if output == nil do return .Invalid_Config
 	if err := validate_input(e, pcm); err != .None do return err
-	attack, energy, tail := detect_attack(e, pcm)
+	early_attack, late_attack, energy, tail := detect_attack(e, pcm)
 	if e.pending_valid {
-		if err := prepare_packet(e, attack); err != .None do return err
+		if err := prepare_packet(e, e.pending_late_attack || early_attack); err != .None do return err
 		if err := append_packet(output, e.packet[:]); err != .None do return err
 		commit_packet(e)
 	}
-	retain_input(e, pcm, attack, energy, tail)
+	retain_input(e, pcm, early_attack, late_attack, energy, tail)
 	return .None
 }
 
@@ -149,25 +152,25 @@ encode_frame :: proc(e: ^Encoder, pcm: []f32, output: ^[dynamic]u8) -> Error {
 // bytes==0 on the first accepted input. No frame allocation or output merge.
 encode_frame_to :: proc(e: ^Encoder, pcm: []f32, output: []u8) -> (bytes: int, err: Error) {
 	if error := validate_input(e, pcm); error != .None do return 0, error
-	attack, energy, tail := detect_attack(e, pcm)
+	early_attack, late_attack, energy, tail := detect_attack(e, pcm)
 	if e.pending_valid {
-		if error := prepare_packet(e, attack); error != .None do return 0, error
+		if error := prepare_packet(e, e.pending_late_attack || early_attack); error != .None do return 0, error
 		if len(output) < len(e.packet) do return 0, .Output_Too_Small
 		bytes = copy(output, e.packet[:]); commit_packet(e)
 	}
-	retain_input(e, pcm, attack, energy, tail)
+	retain_input(e, pcm, early_attack, late_attack, energy, tail)
 	return bytes, .None
 }
 
 // The returned AU/frame borrows retained storage until the next codec call.
 encode_frame_borrowed :: proc(e: ^Encoder, pcm: []f32) -> (packet: []u8, err: Error) {
 	if error := validate_input(e, pcm); error != .None do return nil, error
-	attack, energy, tail := detect_attack(e, pcm)
+	early_attack, late_attack, energy, tail := detect_attack(e, pcm)
 	if e.pending_valid {
-		if error := prepare_packet(e, attack); error != .None do return nil, error
+		if error := prepare_packet(e, e.pending_late_attack || early_attack); error != .None do return nil, error
 		packet = e.packet[:]; commit_packet(e)
 	}
-	retain_input(e, pcm, attack, energy, tail)
+	retain_input(e, pcm, early_attack, late_attack, energy, tail)
 	return packet, .None
 }
 
@@ -177,7 +180,7 @@ prepare_flush :: proc(e: ^Encoder) -> (have_packet: bool, err: Error) {
 	if !e.initialized do return false, .Invalid_State
 	if e.finished do return false, .None
 	if !e.pending_valid {e.finished = true; return false, .None}
-	if error := prepare_packet(e, false); error != .None do return false, error
+	if error := prepare_packet(e, e.pending_late_attack); error != .None do return false, error
 	return true, .None
 }
 
@@ -186,7 +189,7 @@ commit_flush :: proc(e: ^Encoder) {
 	commit_packet(e)
 	if e.flush_stage == 0 {
 		for ch in 0 ..< e.config.channels do for &value in e.pending[ch][:e.frame_samples] do value = 0
-		e.pending_attack = false; e.flush_stage = 1
+		e.pending_attack = e.pending_late_attack; e.pending_late_attack = false; e.flush_stage = 1
 	} else {e.pending_valid = false; e.finished = true; e.flush_stage = 2}
 }
 

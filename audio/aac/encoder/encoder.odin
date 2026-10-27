@@ -57,7 +57,8 @@ Encoder :: struct {
 	initialized,
 	finished,
 	pending_valid,
-	pending_attack:                                                                bool,
+	pending_attack,
+	pending_late_attack: bool,
 	sequence:                                                                                                            aac.Window_Sequence,
 	previous_shape:                                                                                                      u8,
 	transform:                                                                                                           aac.Transform,
@@ -205,7 +206,7 @@ reset_encoder :: proc(e: ^Encoder) {
 	if e == nil do return
 	e.previous = {}; e.pending = {}; e.input_energy = {}; e.input_tail = {}
 	e.pending_valid =
-		false; e.pending_attack = false; e.frames = 0; e.input_frames = 0; e.finished = false
+		false; e.pending_attack = false; e.pending_late_attack = false; e.frames = 0; e.input_frames = 0; e.finished = false
 	e.sequence = .Long; e.previous_shape = 0; e.reservoir_bits = 0; e.rate_remainder = 0; e.stats = {}
 	e.latm_config_sent = false; clear(&e.payload)
 	clear(&e.packet); e.flush_stage = 0

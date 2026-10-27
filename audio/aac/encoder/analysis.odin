@@ -39,7 +39,7 @@ detect_attack :: proc(
 	e: ^Encoder,
 	pcm: []f32,
 ) -> (
-	attack: bool,
+	early_attack, late_attack: bool,
 	energy, tail: [aac.MAX_CHANNELS]f64,
 ) {
 	n, channels := e.frame_samples, e.config.channels
@@ -59,28 +59,30 @@ detect_attack :: proc(
 		mean: f64
 		for value in block do mean += value / 8
 		baseline := e.input_frames == 0 ? mean * 0.2 : e.input_energy[ch]
-		for value in block {
-			if !e.lfe[ch] && value > max(0.000001, baseline * 8) do attack = true
+		for value, w in block {
+			if !e.lfe[ch] && value > max(0.000001, baseline * 8) {
+				if w < 5 {early_attack = true} else {late_attack = true}
+			}
 			// A low tail releases quickly; large attacks raise the history
 			// gradually so the next attack is still visible.
 			baseline = value < baseline ? 0.5 * (baseline + value) : 0.75 * baseline + 0.25 * value
 		}
 		energy[ch] = baseline; tail[ch] = previous
 	}
-	if e.options.disable_short_windows do attack = false
+	if e.options.disable_short_windows {early_attack = false; late_attack = false}
 	return
 }
 
 @(private)
-select_sequence :: proc(e: ^Encoder, ahead_attack: bool) -> aac.Window_Sequence {
+select_sequence :: proc(e: ^Encoder, next_short: bool) -> aac.Window_Sequence {
 	if e.options.disable_short_windows do return .Long
 	switch e.sequence {
 	case .Start:
 		return .Short
 	case .Short:
-		return e.pending_attack || ahead_attack ? .Short : .Stop
+		return e.pending_attack || next_short ? .Short : .Stop
 	case .Long, .Stop:
-		return ahead_attack || (e.frames == 0 && e.pending_attack) ? .Start : .Long
+		return next_short || (e.frames == 0 && e.pending_attack) ? .Start : .Long
 	}
 	return .Long
 }
@@ -214,65 +216,93 @@ prepare_bands :: proc(e: ^Encoder, offsets: []int, short: bool) {
 		e.band_start[g][b] = cursor
 		cursor += (offsets[b + 1] - offsets[b]) * e.group_length[g]
 	}
-	for ch in 0 ..< e.config.channels do for g in 0 ..< e.groups {
-		if e.lfe[ch] do continue
-		peaks, derivative, kurtosis: [64]f64
-		group_energy: f64
-		for b in 0 ..< e.max_sfb {
-			if e.tool[ch][g][b] >= 14 {
-				energy: f64
-				for w in e.group_start[g] ..< e.group_start[g] + e.group_length[g] do for k in offsets[b] ..< offsets[b + 1] {
-					value := e.spectrum[ch][w * e.stride + k]; energy += value * value
+	for g in 0 ..< e.groups {
+		peaks, derivative, kurtosis, tonal: [aac.MAX_CHANNELS][64]f64
+		group_energy: [aac.MAX_CHANNELS]f64
+		for ch in 0 ..< e.config.channels {
+			if e.lfe[ch] do continue
+			for b in 0 ..< e.max_sfb {
+				if e.tool[ch][g][b] >= 14 {
+					energy: f64
+					for w in e.group_start[g] ..< e.group_start[g] + e.group_length[g] do for k in offsets[b] ..< offsets[b + 1] {
+						value := e.spectrum[ch][w * e.stride + k]; energy += value * value
+					}
+					e.energy[ch][g][b] = energy
+					group_energy[ch] += energy
+					continue
 				}
-				e.energy[ch][g][b] = energy
-				group_energy += energy
-				continue
+				stats: Band_Statistics
+				packed := e.band_start[g][b]
+				for w in e.group_start[g] ..< e.group_start[g] + e.group_length[g] {
+					first, end := w * e.stride + offsets[b], w * e.stride + offsets[b + 1]
+					count := end - first
+					band_statistics_into(e.spectrum[ch][first:end], e.companded[ch][packed:packed + count], e.negative[ch][packed:packed + count], &stats)
+					packed += count
+				}
+				energy, fourth, root, peak := stats.energy, stats.fourth, stats.root, stats.peak
+				count := (offsets[b + 1] - offsets[b]) * e.group_length[g]
+				e.energy[ch][g][b] = energy; peaks[ch][b] = peak; derivative[ch][b] = root * (4.0 / 27)
+				group_energy[ch] += energy
+				kurtosis[ch][b] = energy > 0 ? f64(count) * fourth / (energy * energy) : 0
+				// Concentration is relative to this band's width: a four-bin
+				// tone cannot attain the kurtosis of a sixteen-bin band.
+				// Repeating the same spectrum across grouped short windows does
+				// not change concentration within a frequency band.
+				tonal[ch][b] = clamp((kurtosis[ch][b] - 1) / f64(max(4, offsets[b + 1] - offsets[b]) - 1), 0.0, 1.0)
 			}
-			stats: Band_Statistics
-			packed := e.band_start[g][b]
-			for w in e.group_start[g] ..< e.group_start[g] + e.group_length[g] {
-				first, end := w * e.stride + offsets[b], w * e.stride + offsets[b + 1]
-				count := end - first
-				band_statistics_into(e.spectrum[ch][first:end], e.companded[ch][packed:packed + count], e.negative[ch][packed:packed + count], &stats)
-				packed += count
-			}
-			energy, fourth, root, peak := stats.energy, stats.fourth, stats.root, stats.peak
-			count := (offsets[b + 1] - offsets[b]) * e.group_length[g]
-			e.energy[ch][g][b] = energy; peaks[b] = peak; derivative[b] = root * (4.0 / 27)
-			group_energy += energy
-			kurtosis[b] = energy > 0 ? f64(count) * fourth / (energy * energy) : 0
-			// Concentration is relative to this band's width: a four-bin
-			// tone cannot attain the kurtosis of a sixteen-bin band.
-			// Repeating the same spectrum across grouped short windows does
-			// not change concentration within a frequency band.
-			tonal := clamp((kurtosis[b] - 1) / f64(max(4, offsets[b + 1] - offsets[b]) - 1), 0.0, 1.0)
-			e.threshold[ch][g][b] = max(1.0, energy * (0.0004 * (1 - tonal) + 0.00003 * tonal))
 		}
-		for b in 0 ..< e.max_sfb {
-			if e.tool[ch][g][b] >= 14 do continue
-			threshold := e.threshold[ch][g][b]
-			// An energy envelope shared by the group keeps transform leakage
-			// from receiving the same relative precision as its audible peak.
-			// Its integrated noise allowance is bounded by group energy.
-			count := (offsets[b + 1] - offsets[b]) * e.group_length[g]
-			threshold = max(threshold, group_energy * 1e-5 * f64(count) / f64(e.stride * e.group_length[g]))
-			for source in 0 ..< e.max_sfb do threshold += e.energy[ch][g][source] * (short ? e.short_spread[b][source] : e.long_spread[b][source])
-			e.threshold[ch][g][b] = threshold
-			peak := peaks[b]
-			sf := derivative[b] > 0 ? int(math.floor(100 + (8.0 / 3) * math.log2(threshold / derivative[b]))) : 100
-			if peak > 0 do sf = max(sf, int(math.ceil(100 + 4 * math.log2(peak / 165113.494))))
-			e.base_sf[ch][g][b] = clamp(sf, 0, 255)
-			hz := f64(offsets[b]) * f64(e.config.sample_rate) / f64(2 * e.stride)
-			width := offsets[b + 1] - offsets[b]
-			if !e.options.disable_pns && e.config.bit_rate / e.config.channels < 48000 && hz >= 4000 && width >= 8 && kurtosis[b] <= 5 && peak * peak * f64(width * e.group_length[g]) <= e.energy[ch][g][b] * 10 && e.energy[ch][g][b] > 1 {
-				// A mid/side band must reconstruct before TNS; a single PNS
-				// mid plane cannot carry the ordinary MS operation.
-				ms_channel := ch
-				for element in e.layout.elements[:e.layout.element_count] do if element.kind == .CPE && (ch == element.first_channel || ch == element.first_channel + 1) {ms_channel = element.first_channel; break}
-				if !e.ms[ms_channel][g][b] {
-					e.tool[ch][g][b] = 13
-					e.base_sf[ch][g][b] = clamp(int(math.round(2 * math.log2(e.energy[ch][g][b] / f64(e.group_length[g])))), -100, 255)
-					e.work_stats.pns_bands += 1
+		for element in e.layout.elements[:e.layout.element_count] do if element.kind == .CPE {
+			left, right := element.first_channel, element.first_channel + 1
+			pair_group := max(group_energy[left], group_energy[right])
+			group_energy[left], group_energy[right] = pair_group, pair_group
+		}
+		for ch in 0 ..< e.config.channels {
+			if e.lfe[ch] do continue
+			for b in 0 ..< e.max_sfb {
+				if e.tool[ch][g][b] >= 14 do continue
+				// An energy envelope shared by the group keeps transform leakage
+				// from receiving the same relative precision as its audible peak.
+				// Its integrated noise allowance is bounded by group energy.
+				count := (offsets[b + 1] - offsets[b]) * e.group_length[g]
+				mean_energy := group_energy[ch] * f64(count) / f64(e.stride * e.group_length[g])
+				effective := math.sqrt(e.energy[ch][g][b] * mean_energy)
+				t := tonal[ch][b]
+				threshold := max(1.0, effective * (0.0004 * (1 - t) + 0.00003 * t))
+				threshold = max(threshold, mean_energy * 0.0002)
+				e.threshold[ch][g][b] = threshold
+			}
+		}
+		for element in e.layout.elements[:e.layout.element_count] do if element.kind == .CPE {
+			left, right := element.first_channel, element.first_channel + 1
+			for b in 0 ..< e.max_sfb do if e.ms[left][g][b] {
+				shared := max(e.threshold[left][g][b], e.threshold[right][g][b])
+				e.threshold[left][g][b], e.threshold[right][g][b] = shared, shared
+			}
+		}
+		for ch in 0 ..< e.config.channels {
+			if e.lfe[ch] do continue
+			for b in 0 ..< e.max_sfb {
+				if e.tool[ch][g][b] >= 14 do continue
+				threshold := e.threshold[ch][g][b]
+				for source in 0 ..< e.max_sfb do threshold += e.energy[ch][g][source] * (short ? e.short_spread[b][source] : e.long_spread[b][source])
+				threshold *= 0.0625
+				e.threshold[ch][g][b] = threshold
+				peak := peaks[ch][b]
+				sf := derivative[ch][b] > 0 ? int(math.floor(100 + (8.0 / 3) * math.log2(threshold / derivative[ch][b]))) : 100
+				if peak > 0 do sf = max(sf, int(math.ceil(100 + 4 * math.log2(peak / 165113.494))))
+				e.base_sf[ch][g][b] = clamp(sf, 0, 255)
+				hz := f64(offsets[b]) * f64(e.config.sample_rate) / f64(2 * e.stride)
+				width := offsets[b + 1] - offsets[b]
+				if !e.options.disable_pns && e.config.bit_rate / e.config.channels < 48000 && hz >= 4000 && width >= 8 && kurtosis[ch][b] <= 5 && peak * peak * f64(width * e.group_length[g]) <= e.energy[ch][g][b] * 10 && e.energy[ch][g][b] > 1 {
+					// A mid/side band must reconstruct before TNS; a single PNS
+					// mid plane cannot carry the ordinary MS operation.
+					ms_channel := ch
+					for element in e.layout.elements[:e.layout.element_count] do if element.kind == .CPE && (ch == element.first_channel || ch == element.first_channel + 1) {ms_channel = element.first_channel; break}
+					if !e.ms[ms_channel][g][b] {
+						e.tool[ch][g][b] = 13
+						e.base_sf[ch][g][b] = clamp(int(math.round(2 * math.log2(e.energy[ch][g][b] / f64(e.group_length[g])))), -100, 255)
+						e.work_stats.pns_bands += 1
+					}
 				}
 			}
 		}
