@@ -17,6 +17,7 @@
 package jpeg
 
 import "core:mem"
+import "core:slice"
 
 Error :: enum {
 	None,
@@ -60,7 +61,7 @@ Decoder :: struct {
 	data:         []u8,
 	at:           int, // the marker parser's position
 	features:     Features,
-	quant:        [4][64]u16, // natural order
+	quant:        [4][8]#simd[8]u16, // natural order
 	dc_tables:    [4]Huffman,
 	ac_tables:    [4]Huffman,
 	comps:        [4]Component,
@@ -82,7 +83,7 @@ Decoder :: struct {
 	stopped:      bool, // the scan's data ended early: its remaining blocks stay as they are
 	// Storage and the output's choices.
 	planes:       []u8,
-	coeffs:       []i16,
+	coeffs:       [][8]#simd[8]i16,
 	lines:        []u8, // a row buffer per component for upsampling
 	colour:       Colour,
 	resample:     [4]Resample,
@@ -142,12 +143,12 @@ decode_into :: proc(data: []u8, pixels: []u8, allocator := context.allocator) ->
 	}
 	blocks := 0
 	for &c in d.comps[:d.features.components] {
-		c.coeffs = blocks * 64
+		c.coeffs = blocks
 		blocks += c.stride / 8 * d.mcu_y * c.v
 	}
 	if blocks > 4 * MAX_SIDE do return .Invalid
 	err: mem.Allocator_Error
-	d.coeffs, err = make([]i16, blocks * 64, allocator)
+	d.coeffs, err = make([][8]#simd[8]i16, blocks, allocator)
 	if err != nil do return .Out_Of_Memory
 	read_scans(d) or_return
 	for band in 0 ..= d.mcu_y {
@@ -234,7 +235,8 @@ read_segment :: proc(d: ^Decoder, m: int) -> Error {
 			q := byte_at(d)
 			precision, t := q >> 4, q & 15
 			if precision > 1 || t > 3 do return .Invalid
-			for i in 0 ..< 64 do d.quant[t][DEZIGZAG[i]] = u16(precision == 1 ? u16_at(d) : byte_at(d))
+			qtable := slice.reinterpret([]u16, d.quant[t][:])
+			for i in 0 ..< 64 do qtable[DEZIGZAG[i]] = u16(precision == 1 ? u16_at(d) : byte_at(d))
 			left -= precision == 1 ? 129 : 65
 		}
 		return left == 0 ? .None : .Invalid

@@ -20,6 +20,7 @@ import core_image "core:image"
 @(require) import "core:image/png"
 @(require) import "core:image/qoi"
 @(require) import "core:image/tga"
+import "core:slice"
 
 Format :: enum {
 	Unknown,
@@ -212,7 +213,7 @@ decode_core :: proc(data: []u8, format: Format, pixels: []u8) -> Error {
 	if src.depth == 8 {
 		convert_samples(pixels[:n * 4], src.pixels.buf[:n * ch], ch)
 	} else {
-		convert_samples(pixels[:n * 4], (transmute([]u16)src.pixels.buf[:])[:n * ch], ch)
+		convert_samples(pixels[:n * 4], slice.reinterpret([]u16, src.pixels.buf[:])[:n * ch], ch)
 	}
 	return .None
 }
@@ -223,7 +224,7 @@ convert_samples :: proc(dst: []u8, src: []$S, channels: int) #no_bounds_check {
 		when S == u16 {return u8(v >> 8)} else {return u8(v)}
 	}
 	// The layout is fixed for the image: one loop per channel count.
-	out := ([^][4]u8)(raw_data(dst))[:len(dst) / 4]
+	out := slice.reinterpret([][4]u8, dst)
 	switch channels {
 	case 1:
 		for &p, i in out {v := byte_of(src[i]); p = {v, v, v, 255}}

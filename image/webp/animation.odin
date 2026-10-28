@@ -60,6 +60,7 @@ init_animation :: proc(a: ^Animation, data: []u8, pool: ^common.Work_Pool = nil,
 		if first, _ := next_chunk(&rest); first.fourcc == "VP8X" do body = rest
 		f, found := find_frame(body)
 		if !found || !bitstream_size(&f) do return .Invalid
+		if f.width != ft.width || f.height != ft.height do return .Invalid
 		append(&a.frames, f)
 	}
 	ft.frame_count = len(a.frames)

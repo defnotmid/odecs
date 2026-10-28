@@ -235,11 +235,12 @@ load_luma_block_4x4 :: #force_inline proc(
 	pixels: [^]u8,
 	stride: int,
 ) -> #simd[16]i16 #no_bounds_check {
-	rows := [4]u32 {
-		intrinsics.unaligned_load((^u32)(pixels)),
-		intrinsics.unaligned_load((^u32)(&pixels[stride])),
-		intrinsics.unaligned_load((^u32)(&pixels[2 * stride])),
-		intrinsics.unaligned_load((^u32)(&pixels[3 * stride])),
+	Row :: #simd[4]u8
+	rows := [4]Row {
+		intrinsics.unaligned_load((^Row)(pixels)),
+		intrinsics.unaligned_load((^Row)(&pixels[stride])),
+		intrinsics.unaligned_load((^Row)(&pixels[2 * stride])),
+		intrinsics.unaligned_load((^Row)(&pixels[3 * stride])),
 	}
 	return (#simd[16]i16)(transmute(#simd[16]u8)rows)
 }
@@ -249,13 +250,8 @@ store_luma_block_4x4 :: #force_inline proc(
 	stride: int,
 	samples: #simd[16]i16,
 ) #no_bounds_check {
-	when T == u8 {
-		rows := transmute([4]u32)(#simd[16]u8)(samples)
-		for row in 0 ..< 4 do intrinsics.unaligned_store((^u32)(&pixels[row * stride]), rows[row])
-	} else {
-		rows := transmute([4]#simd[4]T)(#simd[16]T)(samples)
-		for row in 0 ..< 4 do intrinsics.unaligned_store((^#simd[4]T)(&pixels[row * stride]), rows[row])
-	}
+	rows := transmute([4]#simd[4]T)(#simd[16]T)(samples)
+	for row in 0 ..< 4 do intrinsics.unaligned_store((^#simd[4]T)(&pixels[row * stride]), rows[row])
 }
 
 predict_intra_4x4 :: proc(

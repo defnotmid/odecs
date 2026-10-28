@@ -83,7 +83,7 @@ wav_reads_match_wav_read :: proc(t: ^testing.T) {
 			testing.expect(t, slice.equal(got16, want16), "i16 differs from wav.read")
 			n, e = decode_into(file[:], got32, channels)
 			testing.expect_value(t, n, FRAMES)
-			testing.expect(t, slice.equal(transmute([]u32)got32, transmute([]u32)want32), "f32 differs from wav.read")
+			testing.expect(t, slice.equal(slice.reinterpret([]u32, got32), slice.reinterpret([]u32, want32)), "f32 differs from wav.read")
 		}
 	}
 }

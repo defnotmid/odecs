@@ -2,6 +2,7 @@ package video
 
 import common "../common"
 import media "../media"
+import "core:slice"
 
 // What a Frame carries.
 Frame_Format :: enum u8 {
@@ -169,7 +170,7 @@ copy_planar_band :: proc(f: ^media.Video_Frame, p: ^Planar, y0, rows: int) {
 			if src_bits == dst_bits {
 				copy(to, from[:len(to)])
 			} else {
-				wide := ([^]u16)(raw_data(from))
+				wide := slice.reinterpret([]u16, from[:samples * 2])
 				for i in 0 ..< samples do to[i] = u8(wide[i])
 			}
 		}

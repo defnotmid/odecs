@@ -2,6 +2,7 @@ package jpeg
 
 import "base:intrinsics"
 import "core:mem"
+import "core:slice"
 
 // Huffman decoding of the scans: codes up to FAST_BITS long are found with
 // one table lookup, longer ones against the largest code of each length; an
@@ -268,17 +269,19 @@ next_interval :: proc(d: ^Decoder, b: ^Bits) -> bool {
 }
 
 @(private)
-decode_one :: #force_inline proc(d: ^Decoder, b: ^Bits, c: ^Component, bx, by: int, $K: Scan_Kind) -> Error {
+decode_one :: #force_inline proc(d: ^Decoder, b: ^Bits, c: ^Component, bx, by: int, $K: Scan_Kind) -> Error #no_bounds_check {
 	when K == .Sequential {
-		block: [64]i16
-		decode_block(b, &block, &d.dc_tables[c.dc], &d.ac_tables[c.ac], &c.dc_pred) or_return
+		block: [8]#simd[8]i16
+		decode_block(b, slice.reinterpret([]i16, block[:]), &d.dc_tables[c.dc], &d.ac_tables[c.ac], &c.dc_pred) or_return
 		idct_block(d.planes[plane_row(c, by * 8) + bx * 8:], c.stride, &block, &d.quant[c.tq])
 		return .None
 	} else {
-		block := (^[64]i16)(&d.coeffs[c.coeffs + (by * (c.stride >> 3) + bx) * 64])
+		at := c.coeffs + by * (c.stride >> 3) + bx
+		block := slice.reinterpret([]i16, d.coeffs[at][:])
 		when K == .Sequential_Kept {
 			return decode_block(b, block, &d.dc_tables[c.dc], &d.ac_tables[c.ac], &c.dc_pred)
 		} else when K == .DC_First {
+			d.coeffs[at] = {}
 			return decode_dc_first(b, block, &d.dc_tables[c.dc], &c.dc_pred, d.succ_low)
 		} else when K == .DC_Refine {
 			if get_bit(b) do block[0] += i16(1 << uint(d.succ_low))
@@ -314,8 +317,7 @@ transform_band :: proc(d: ^Decoder, m: int) #no_bounds_check {
 		for by in m * c.v ..< min((m + 1) * c.v, c.blocks_y) {
 			out := plane_row(&c, by * 8)
 			for bx in 0 ..< c.blocks_x {
-				block := (^[64]i16)(&d.coeffs[c.coeffs + (by * (c.stride >> 3) + bx) * 64])
-				idct_block(d.planes[out + bx * 8:], c.stride, block, quant)
+				idct_block(d.planes[out + bx * 8:], c.stride, &d.coeffs[c.coeffs + by * (c.stride >> 3) + bx], quant)
 			}
 		}
 	}
@@ -323,7 +325,7 @@ transform_band :: proc(d: ^Decoder, m: int) #no_bounds_check {
 
 // A baseline block's coefficients, in natural order.
 @(private)
-decode_block :: proc(b: ^Bits, block: ^[64]i16, dc, ac: ^Huffman, pred: ^int) -> Error #no_bounds_check {
+decode_block :: proc(b: ^Bits, block: []i16, dc, ac: ^Huffman, pred: ^int) -> Error #no_bounds_check {
 	t := decode_huffman(b, dc)
 	if t < 0 || t > 15 do return .Invalid
 	pred^ += t != 0 ? receive_extend(b, t) : 0
@@ -358,8 +360,7 @@ decode_block :: proc(b: ^Bits, block: ^[64]i16, dc, ac: ^Huffman, pred: ^int) ->
 }
 
 @(private)
-decode_dc_first :: proc(b: ^Bits, block: ^[64]i16, dc: ^Huffman, pred: ^int, shift: int) -> Error {
-	block^ = {}
+decode_dc_first :: proc(b: ^Bits, block: []i16, dc: ^Huffman, pred: ^int, shift: int) -> Error #no_bounds_check {
 	t := decode_huffman(b, dc)
 	if t < 0 || t > 15 do return .Invalid
 	pred^ += t != 0 ? receive_extend(b, t) : 0
@@ -368,7 +369,7 @@ decode_dc_first :: proc(b: ^Bits, block: ^[64]i16, dc: ^Huffman, pred: ^int, shi
 }
 
 @(private)
-decode_ac_first :: proc(d: ^Decoder, b: ^Bits, block: ^[64]i16, ac: ^Huffman) -> Error #no_bounds_check {
+decode_ac_first :: proc(d: ^Decoder, b: ^Bits, block: []i16, ac: ^Huffman) -> Error #no_bounds_check {
 	if d.eob_run > 0 {
 		d.eob_run -= 1
 		return .None
@@ -408,7 +409,7 @@ decode_ac_first :: proc(d: ^Decoder, b: ^Bits, block: ^[64]i16, ac: ^Huffman) ->
 // Refines the coefficients already set by one bit each and places the new
 // ones (each +-1 at this bit).
 @(private)
-decode_ac_refine :: proc(d: ^Decoder, b: ^Bits, block: ^[64]i16, ac: ^Huffman) -> Error #no_bounds_check {
+decode_ac_refine :: proc(d: ^Decoder, b: ^Bits, block: []i16, ac: ^Huffman) -> Error #no_bounds_check {
 	bit := i16(1 << uint(d.succ_low))
 	refine :: #force_inline proc(b: ^Bits, p: ^i16, bit: i16) {
 		if get_bit(b) && p^ & bit == 0 {

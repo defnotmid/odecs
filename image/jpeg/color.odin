@@ -1,7 +1,10 @@
 package jpeg
 
 import "base:intrinsics"
+import "core:slice"
 import "core:simd"
+
+#assert(ODIN_ENDIAN == .Little)
 
 // Output rows, by libjpeg-turbo's rules: each component's samples for the
 // row, upsampled to the image width, then converted to RGBA8. 2x ratios are
@@ -72,25 +75,25 @@ output_band :: proc(d: ^Decoder, m: int, pixels: []u8) #no_bounds_check {
 	for y in m * d.v_max * 8 ..< min((m + 1) * d.v_max * 8, d.features.height) {
 		rows: [4][]u8
 		for &c, k in d.comps[:n] do rows[k] = component_row(d, &c, d.resample[k], y, d.lines[k * line:][:line])[:width]
-		out := pixels[y * width * 4:][:width * 4]
+		out := slice.reinterpret([][4]u8, pixels[y * width * 4:][:width * 4])
 		switch d.colour {
 		case .Gray:
-			for v, i in rows[0] do out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3] = v, v, v, 255
+			for v, i in rows[0] do out[i] = {v, v, v, 255}
 		case .RGB:
-			for i in 0 ..< width do out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3] = rows[0][i], rows[1][i], rows[2][i], 255
+			for i in 0 ..< width do out[i] = {rows[0][i], rows[1][i], rows[2][i], 255}
 		case .YCbCr:
 			ycbcr_row(rows[0], rows[1], rows[2], out)
 		case .CMYK:
 			for i in 0 ..< width {
 				k := rows[3][i]
-				out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3] = blinn(rows[0][i], k), blinn(rows[1][i], k), blinn(rows[2][i], k), 255
+				out[i] = {blinn(rows[0][i], k), blinn(rows[1][i], k), blinn(rows[2][i], k), 255}
 			}
 		case .YCCK:
 			// YCC to the inverted CMY libjpeg gives, then as CMYK.
 			ycbcr_row(rows[0], rows[1], rows[2], out)
-			for i in 0 ..< width {
+			for &p, i in out {
 				k := rows[3][i]
-				out[i * 4], out[i * 4 + 1], out[i * 4 + 2] = blinn(255 - out[i * 4], k), blinn(255 - out[i * 4 + 1], k), blinn(255 - out[i * 4 + 2], k)
+				p = {blinn(255 - p[0], k), blinn(255 - p[1], k), blinn(255 - p[2], k), 255}
 			}
 		}
 	}
@@ -175,14 +178,13 @@ component_row :: proc(d: ^Decoder, c: ^Component, resample: Resample, y: int, li
 // libjpeg's YCbCr to RGB: the scaled constants (16 fractional bits) with
 // the rounding half added once, sixteen pixels at a time in 32-bit lanes.
 @(private)
-ycbcr_row :: proc(y, cb, cr: []u8, out: []u8) #no_bounds_check {
+ycbcr_row :: proc(y, cb, cr: []u8, out: [][4]u8) #no_bounds_check {
 	W :: #simd[16]i32
 	load :: #force_inline proc "contextless" (s: []u8, at: int) -> W {
 		return cast(W)intrinsics.unaligned_load((^#simd[16]u8)(&s[at]))
 	}
 	channel :: #force_inline proc "contextless" (v: W) -> #simd[16]u32 {return cast(#simd[16]u32)simd.clamp(v, 0, 255)}
 	by16 :: (#simd[16]u32)(16)
-	px := ([^]u32)(raw_data(out))
 	n := len(y)
 	i := 0
 	for ; i + 16 <= n; i += 16 {
@@ -192,7 +194,7 @@ ycbcr_row :: proc(y, cb, cr: []u8, out: []u8) #no_bounds_check {
 		green := yy + simd.shr(b * -22554 + 32768 - r * 46802, by16)
 		blue := yy + simd.shr(b * 116130 + 32768, by16)
 		v := channel(red) | simd.shl(channel(green), 8) | simd.shl(channel(blue), 16) | 0xFF00_0000
-		intrinsics.unaligned_store((^#simd[16]u32)(&px[i]), v)
+		intrinsics.unaligned_store((^#simd[16]u32)(&out[i]), v)
 	}
 	for ; i < n; i += 1 {
 		yy := i32(y[i])
@@ -200,7 +202,7 @@ ycbcr_row :: proc(y, cb, cr: []u8, out: []u8) #no_bounds_check {
 		red := yy + (91881 * r + 32768) >> 16
 		green := yy + (-22554 * b + 32768 - 46802 * r) >> 16
 		blue := yy + (116130 * b + 32768) >> 16
-		out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3] = u8(clamp(red, 0, 255)), u8(clamp(green, 0, 255)), u8(clamp(blue, 0, 255)), 255
+		out[i] = {u8(clamp(red, 0, 255)), u8(clamp(green, 0, 255)), u8(clamp(blue, 0, 255)), 255}
 	}
 }
 

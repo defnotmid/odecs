@@ -59,9 +59,7 @@ refill :: #force_inline proc(reader: ^Bit_Reader) #no_bounds_check {
 	val: u32
 	avail := len(reader.data) - reader.pos
 	if avail >= 4 {
-		#no_bounds_check val = bits.from_be_u32(
-			intrinsics.unaligned_load((^u32)(&reader.data[reader.pos])),
-		)
+		#no_bounds_check val = u32(intrinsics.unaligned_load((^u32be)(&reader.data[reader.pos])))
 		reader.pos += 4
 	} else {
 		#no_bounds_check for i in 0 ..< avail {

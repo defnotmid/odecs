@@ -8,6 +8,7 @@ package vp9_decoder
 
 import vp9 ".."
 import common "../../../common"
+import "core:slice"
 
 Error :: enum {
 	None,
@@ -179,7 +180,7 @@ picture_of :: proc(f: ^Frame) -> (p: Picture) {
 @(private)
 plane :: #force_inline proc(f: ^Frame, i: int, $T: typeid) -> []T #no_bounds_check {
 	bytes := f.strides[i] * f.rows[i] * size_of(T)
-	return ([^]T)(raw_data(f.storage[f.offsets[i]:]))[:bytes / size_of(T)]
+	return slice.reinterpret([]T, f.storage[f.offsets[i]:][:bytes])
 }
 
 @(private)

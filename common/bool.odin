@@ -1,7 +1,6 @@
 package common
 
 import "base:intrinsics"
-import "core:math/bits"
 
 // Boolean (arithmetic) decoder of VP8 (RFC 6386 section 7) and VP9 (section
 // 9.2), which define the same split and renormalization. `value` holds the
@@ -34,7 +33,7 @@ bool_fill_tail :: #force_no_inline proc "contextless" (b: ^Bool_Decoder) -> u64 
 // Refills load 32 stream bits once fewer than 16 remain, as the CABAC window
 // does; a decision consumes at most 7, so the window never runs dry.
 bool_fill :: #force_inline proc "contextless" (b: ^Bool_Decoder) #no_bounds_check {
-	word := b.pos + 4 <= len(b.data) ? u64(bits.from_be_u32(intrinsics.unaligned_load((^u32)(&b.data[b.pos])))) : bool_fill_tail(b)
+	word := b.pos + 4 <= len(b.data) ? u64(u32(intrinsics.unaligned_load((^u32be)(&b.data[b.pos])))) : bool_fill_tail(b)
 	b.value |= word << uint(32 - b.bits)
 	b.pos += 4
 	b.bits += 32

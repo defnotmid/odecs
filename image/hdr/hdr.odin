@@ -6,6 +6,8 @@
 // the other orientations are refused, as stb refuses them.
 package hdr
 
+import "core:slice"
+
 Error :: enum {
 	None,
 	Unsupported, // XYZE, no FORMAT line, an orientation other than -Y +X
@@ -40,8 +42,9 @@ decode_into :: proc(data: []u8, pixels: []f32) -> Error {
 	for e in 1 ..< 256 do scale[e] = transmute(f32)(e >= 10 ? u32(e - 9) << 23 : u32(1) << u32(e + 13))
 	src := data[h.offset:]
 	at := 0
+	out := slice.reinterpret([][4]f32, pixels[:w * h.height * 4])
 	for y in 0 ..< h.height {
-		row := ([^][4]f32)(raw_data(pixels))[y * w:][:w]
+		row := out[y * w:][:w]
 		// A scanline is RLE when it starts 2, 2 and its width (only widths
 		// 8 to 32767 can be); otherwise its RGBE pixels are stored as they are.
 		if w >= 8 && w < 32768 && at + 4 <= len(src) && src[at] == 2 && src[at + 1] == 2 && src[at + 2] & 0x80 == 0 {
@@ -50,7 +53,7 @@ decode_into :: proc(data: []u8, pixels: []f32) -> Error {
 			// The four channels one after another, expanded into the last
 			// quarter of the row's own floats; convert's front-to-back writes
 			// stay behind its reads.
-			rgbe := ([^][4]u8)(raw_data(row))[w * 3:][:w]
+			rgbe := slice.reinterpret([][4]u8, row)[w * 3:][:w]
 			for k in 0 ..< 4 {
 				for i := 0; i < w; {
 					if at >= len(src) do return .Invalid
@@ -72,7 +75,7 @@ decode_into :: proc(data: []u8, pixels: []f32) -> Error {
 			convert(row, rgbe, &scale)
 		} else {
 			if w * 4 > len(src) - at do return .Invalid
-			convert(row, ([^][4]u8)(raw_data(src[at:]))[:w], &scale)
+			convert(row, slice.reinterpret([][4]u8, src[at:][:w * 4]), &scale)
 			at += w * 4
 		}
 	}

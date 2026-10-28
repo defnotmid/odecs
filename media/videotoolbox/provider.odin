@@ -97,11 +97,11 @@ report :: proc(session: ^media.Session, err: Error, status: i32, pixel_format: u
 	if err == .None do return .None
 	s := (^State)(session.state)
 	delete(s.detail)
-	format := transmute([4]u8)pixel_format
+	format := transmute([4]u8)u32be(pixel_format)
 	if pixel_format == 0 {
 		s.detail = fmt.aprintf("VideoToolbox: %v (OSStatus %d)", err, status)
 	} else {
-		s.detail = fmt.aprintf("VideoToolbox: %v (OSStatus %d, pixel format %s)", err, status, [4]u8{format[3], format[2], format[1], format[0]})
+		s.detail = fmt.aprintf("VideoToolbox: %v (OSStatus %d, pixel format %s)", err, status, format)
 	}
 	session.error_detail = s.detail
 	return map_error(err)

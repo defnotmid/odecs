@@ -8,6 +8,8 @@
 // Apple-specific: elsewhere it reports .Unavailable.
 package media_videotoolbox
 
+import "core:slice"
+
 Error :: enum {
 	None,
 	Invalid_Argument,
@@ -158,7 +160,7 @@ copy_semi_planar :: proc(f: ^Frame, y_plane: []u8, y_stride: int, uv_plane: []u8
 // silicon and the copies' destinations are little-endian and aligned).
 @(private)
 samples16 :: #force_inline proc(bytes: []u8) -> []u16 {
-	return ([^]u16)(raw_data(bytes))[:len(bytes) / 2]
+	return slice.reinterpret([]u16, bytes)
 }
 
 // Hardware encoding: progressive 8-bit 4:2:0 in BT.709 limited range, I and P

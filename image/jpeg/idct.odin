@@ -12,12 +12,11 @@ import "core:simd"
 // lanes of eight row vectors, then the rows likewise after a transpose; the
 // result is libjpeg-turbo's exactly (its SIMD versions are too).
 @(private)
-idct_block :: proc(out: []u8, stride: int, block: ^[64]i16, quant: ^[64]u16) #no_bounds_check {
+idct_block :: proc(out: []u8, stride: int, block: ^[8]#simd[8]i16, quant: ^[8]#simd[8]u16) #no_bounds_check {
 	V :: #simd[8]i32
 	r: [8]V
 	#unroll for i in 0 ..< 8 {
-		coeffs := cast(V)intrinsics.unaligned_load((^#simd[8]i16)(&block[i * 8]))
-		r[i] = coeffs * cast(V)intrinsics.unaligned_load((^#simd[8]u16)(&quant[i * 8]))
+		r[i] = cast(V)block[i] * cast(V)quant[i]
 	}
 	// A block of only its DC coefficient comes out flat: both passes on one
 	// value are a shift by 5, rounded.

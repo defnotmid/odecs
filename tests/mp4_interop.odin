@@ -15,6 +15,7 @@ import video "../video"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:slice"
 import "core:strconv"
 
 main :: proc() {
@@ -117,9 +118,8 @@ main :: proc() {
 		} else {
 			reference_bytes, err := os.read_entire_file(os.args[3], context.allocator)
 			if err != nil {fmt.eprintln("cannot read", os.args[3]); os.exit(2)}
-			reference := transmute([]f32)reference_bytes
+			reference := slice.reinterpret([]f32, reference_bytes)
 			ch := r.audio.channels
-			reference = reference[:len(reference_bytes) / 4]
 			// The oracle starts at the first decoded sample; read_audio starts
 			// at movie time zero, so a delayed track leads with silence.
 			a := &r.audio.demux.tracks[r.audio.track]

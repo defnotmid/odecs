@@ -13,6 +13,7 @@ import mp3 "../audio/mp3"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:time"
 
@@ -78,7 +79,7 @@ main :: proc() {
 	if strings.has_suffix(ref_path, ".pcm") {
 		// Conformance: 16-bit output, rounded and clipped.
 		pcm := switched ? native[:] : trimmed
-		want := ([^]i16)(raw_data(ref))[:len(ref) / 2]
+		want := slice.reinterpret([]i16, ref)
 		n := min(len(want), len(pcm))
 		worst := 0
 		mse: f64
@@ -97,7 +98,7 @@ main :: proc() {
 		return
 	}
 	got := trimmed
-	want := ([^]f32)(raw_data(ref))[:len(ref) / 4]
+	want := slice.reinterpret([]f32, ref)
 	n := min(len(want), len(got))
 	worst, sum: f64
 	for i in 0 ..< n {

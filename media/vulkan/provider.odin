@@ -1,6 +1,7 @@
 package media_vulkan
 
 import media ".."
+import "core:slice"
 
 // A shared context is borrowed; keep it at a stable address until all sessions
 // opened with this provider have closed. Nil retains independent sessions.
@@ -188,7 +189,7 @@ encode_video_vulkan :: proc(
 		direct := true
 		for p in frame.planes do if p.stride % 2 != 0 || uintptr(raw_data(p.data)) % align_of(u16) != 0 do direct = false
 		if direct {
-			for p, i in frame.planes do planes[i] = {([^]u16)(raw_data(p.data))[:len(p.data) / 2], p.stride / 2}
+			for p, i in frame.planes do planes[i] = {slice.reinterpret([]u16, p.data), p.stride / 2}
 		} else {
 			// Unaligned/odd-stride byte planes remain valid API input. Normalize
 			// them into retained u16 scratch instead of casting invalid rows.

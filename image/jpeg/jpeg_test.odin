@@ -1,6 +1,7 @@
 package jpeg
 
 import "core:math/rand"
+import "core:slice"
 import "core:testing"
 
 // A 23x13 4:2:0 baseline JPEG (cjpeg -quality 60 -sample 2x2 -optimize, of
@@ -105,7 +106,7 @@ baseline_and_progressive_match_libjpeg_turbo :: proc(t: ^testing.T) {
 
 // The same IDCT arithmetic, one sample at a time, against the lanes.
 @(private = "file")
-reference_idct :: proc(block: ^[64]i16, quant: ^[64]u16) -> (out: [64]u8) {
+reference_idct :: proc(block: []i16, quant: []u16) -> (out: [64]u8) {
 	descale :: proc(x: i64, n: uint) -> i64 {return (x + 1 << (n - 1)) >> n}
 	pass :: proc(s: [8]i64) -> (x: [8]i64) {
 		z1 := (s[2] + s[6]) * 4433
@@ -139,20 +140,22 @@ reference_idct :: proc(block: ^[64]i16, quant: ^[64]u16) -> (out: [64]u8) {
 
 @(test)
 idct_matches_scalar :: proc(t: ^testing.T) {
-	quant: [64]u16
-	for &q in quant do q = u16(1 + rand.int_max(40))
+	quant: [8]#simd[8]u16
+	qtable := slice.reinterpret([]u16, quant[:])
+	for &q in qtable do q = u16(1 + rand.int_max(40))
 	for n in 0 ..< 2000 {
-		block: [64]i16
+		block: [8]#simd[8]i16
+		raw := slice.reinterpret([]i16, block[:])
 		// Dense, sparse and DC-only blocks, dequantized within the +-1024 an
 		// 8-bit image's DCT spans.
 		count := n % 3 == 0 ? 1 : n % 3 == 1 ? 6 : 64
 		for _ in 0 ..< count {
 			at := n % 3 == 0 ? 0 : rand.int_max(64)
-			block[at] = i16((rand.int_max(2048) - 1024) / int(quant[at]))
+			raw[at] = i16((rand.int_max(2048) - 1024) / int(qtable[at]))
 		}
 		out: [64]u8
 		idct_block(out[:], 8, &block, &quant)
-		want := reference_idct(&block, &quant)
+		want := reference_idct(raw, qtable)
 		if out != want {
 			testing.expectf(t, false, "block %d: %v, want %v", n, out, want)
 			return

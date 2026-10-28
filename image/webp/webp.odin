@@ -8,7 +8,10 @@ package webp
 
 import "../../common"
 import "base:intrinsics"
+import "core:slice"
 import "core:simd"
+
+#assert(ODIN_ENDIAN == .Little)
 
 Error :: enum {
 	None,
@@ -143,6 +146,7 @@ get_features :: proc(data: []u8) -> (ft: Features, err: Error) {
 	ft.has_alpha = flags & 0x10 != 0
 	ft.animated = flags & 0x02 != 0
 	ft.width, ft.height = le24(x[4:]) + 1, le24(x[7:]) + 1
+	if u64(ft.width) * u64(ft.height) >= 1 << 32 do return ft, .Invalid
 	if !ft.animated {
 		f, found := find_frame(rest)
 		if !found do return ft, .Invalid
@@ -248,7 +252,7 @@ decode_frame :: proc(f: ^Frame_Chunks, pool: ^common.Work_Pool, allocator: Alloc
 frame_into :: proc(f: ^Frame_Chunks, pixels: []u8, pool: ^common.Work_Pool, allocator: Allocator) -> Error {
 	if f.lossless {
 		// Decoded into `pixels` as ARGB words, then made RGBA bytes in place.
-		out := ([^]u32)(raw_data(pixels))[:len(pixels) / 4]
+		out := slice.reinterpret([]u32, pixels)
 		argb, w, h := decode_vp8l(f.bitstream, allocator, out) or_return
 		if raw_data(argb) != raw_data(out) do delete(argb, allocator) // a size the header did not promise
 		if w * h > len(out) || raw_data(argb) != raw_data(out) do return .Invalid
@@ -344,7 +348,7 @@ yuv_to_rgba :: proc(f: ^Yuv, alpha: []u8, out: []u8, pool: ^common.Work_Pool) {
 			upsample_row(f.u[near * f.uv_stride:][:cw], f.u[far * f.uv_stride:][:cw], u_row[:f.width])
 			upsample_row(f.v[near * f.uv_stride:][:cw], f.v[far * f.uv_stride:][:cw], v_row[:f.width])
 			a := job.alpha != nil ? job.alpha[y * f.width:][:f.width] : nil
-			dst := ([^]u32)(raw_data(job.out[y * f.width * 4:]))[:f.width]
+			dst := slice.reinterpret([][4]u8, job.out[y * f.width * 4:][:f.width * 4])
 			convert_row(f.y[y * f.y_stride:][:f.width], u_row[:f.width], v_row[:f.width], a, dst)
 		}
 	}
@@ -397,7 +401,7 @@ upsample_row :: proc(near, far: []u8, out: []u8) #no_bounds_check {
 // 16-bit lanes: high-half multiplies, saturating at 0 where the result
 // would be negative, then clamped to 255.
 @(private)
-convert_row :: proc(y, u, v, a: []u8, dst: []u32) #no_bounds_check {
+convert_row :: proc(y, u, v, a: []u8, dst: [][4]u8) #no_bounds_check {
 	W :: #simd[16]u16
 	load :: #force_inline proc(s: []u8, at: int) -> W {
 		return simd.shl(cast(W)intrinsics.unaligned_load((^#simd[16]u8)(&s[at])), 8)
@@ -428,7 +432,7 @@ convert_row :: proc(y, u, v, a: []u8, dst: []u32) #no_bounds_check {
 		r := clamp((yy + ((vv * 26149) >> 8) - 14234) >> 6, 0, 255)
 		g := clamp((yy - ((uu * 6419) >> 8) - ((vv * 13320) >> 8) + 8708) >> 6, 0, 255)
 		b := clamp((yy + ((uu * 33050) >> 8) - 17685) >> 6, 0, 255)
-		alpha := a != nil ? u32(a[x]) : 255
-		dst[x] = u32(r) | u32(g) << 8 | u32(b) << 16 | alpha << 24
+		alpha := a != nil ? a[x] : 255
+		dst[x] = {u8(r), u8(g), u8(b), alpha}
 	}
 }

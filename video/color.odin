@@ -2,7 +2,10 @@ package video
 
 import "base:intrinsics"
 import "core:math"
+import "core:slice"
 import "core:simd"
+
+#assert(ODIN_ENDIAN == .Little)
 
 // RGB <-> Y'CbCr with the BT.601/709/2020 non-constant-luminance matrices, in
 // Q16 fixed point. Conversion happens on gamma-encoded (sRGB/BT.709 transfer)
@@ -260,19 +263,19 @@ alpha_scale :: proc(a: Alpha_Plane, bit_depth: int) -> Alpha_Scale {
 
 // Writes alpha (and premultiplies) one converted row.
 @(private)
-alpha_row :: #force_inline proc(a: ^Alpha_Scale, row: int, out: [^]u32, width: int, $T: typeid, column := 0) #no_bounds_check {
+alpha_row :: #force_inline proc(a: ^Alpha_Scale, row: int, out: [][4]u8, width: int, $T: typeid, column := 0) #no_bounds_check {
 	if len(a.plane.data) == 0 do return
 	src := ([^]T)(raw_data(a.plane.data[row * a.plane.stride + column * size_of(T):]))
 	for x in 0 ..< width {
 		alpha := (u32(src[x]) * a.mul + 1 << 15) >> 16
 		px := out[x]
 		if a.plane.premultiply {
-			r := div255((px & 0xFF) * alpha)
-			g := div255((px >> 8 & 0xFF) * alpha)
-			b := div255((px >> 16 & 0xFF) * alpha)
-			px = r | g << 8 | b << 16
+			px[0] = u8(div255(u32(px[0]) * alpha))
+			px[1] = u8(div255(u32(px[1]) * alpha))
+			px[2] = u8(div255(u32(px[2]) * alpha))
 		}
-		out[x] = px & 0xFFFFFF | alpha << 24
+		px[3] = u8(alpha)
+		out[x] = px
 	}
 }
 
@@ -294,7 +297,7 @@ yuv444_to_rgba :: proc(planes: [3][]u8, strides: [3]int, width, height: int, c: 
 		vs := ([^]T)(raw_data(planes[2][row * strides[2]:]))
 		as: [^]T
 		if has_alpha do as = ([^]T)(raw_data(a.plane.data[row * a.plane.stride:]))
-		out := ([^]u32)(raw_data(dst[row * dst_stride:]))
+		out := slice.reinterpret([][4]u8, dst[row * dst_stride:][:width * 4])
 		x := 0
 		for ; x + 8 <= width; x += 8 {
 			u, v := load(us[x:]) - co, load(vs[x:]) - co
@@ -334,21 +337,21 @@ gbr_rows :: proc(planes: [3][]u8, strides: [3]int, width, height: int, a: ^Alpha
 		g := ([^]T)(raw_data(planes[0][row * strides[0]:]))
 		b := ([^]T)(raw_data(planes[1][row * strides[1]:]))
 		r := ([^]T)(raw_data(planes[2][row * strides[2]:]))
-		out := ([^]u32)(raw_data(dst[row * dst_stride:]))
-		scale :: #force_inline proc(v: T, mul: u32) -> u32 {return (u32(v) * mul + 1 << 15) >> 16}
-		for x in 0 ..< width do out[x] = scale(r[x], a.mul) | scale(g[x], a.mul) << 8 | scale(b[x], a.mul) << 16 | 0xFF000000
+		out := slice.reinterpret([][4]u8, dst[row * dst_stride:][:width * 4])
+		scale :: #force_inline proc(v: T, mul: u32) -> u8 {return u8((u32(v) * mul + 1 << 15) >> 16)}
+		for x in 0 ..< width do out[x] = {scale(r[x], a.mul), scale(g[x], a.mul), scale(b[x], a.mul), 255}
 		alpha_row(a, row, out, width, T)
 	}
 }
 
 @(private)
-pack_rgb :: #force_inline proc "contextless" (y, r, g, b: i32) -> u32 {
-	return(
-		u32(clamp((y + r) >> 16, 0, 255)) |
-		u32(clamp((y + g) >> 16, 0, 255)) << 8 |
-		u32(clamp((y + b) >> 16, 0, 255)) << 16 |
-		0xFF000000 \
-	)
+pack_rgb :: #force_inline proc "contextless" (y, r, g, b: i32) -> [4]u8 {
+	return {
+		u8(clamp((y + r) >> 16, 0, 255)),
+		u8(clamp((y + g) >> 16, 0, 255)),
+		u8(clamp((y + b) >> 16, 0, 255)),
+		255,
+	}
 }
 
 // Horizontally subsampled chroma: one chroma sample per two output pixels.
@@ -378,7 +381,7 @@ yuv_to_rgba_rows :: proc(
 		crow := row >> shift_y
 		us := ([^]T)(raw_data(planes[1][crow * strides[1]:]))
 		vs := ([^]T)(raw_data(planes[2][crow * strides[2]:]))
-		out := ([^]u32)(raw_data(dst[row * dst_stride:]))
+		out := slice.reinterpret([][4]u8, dst[row * dst_stride:][:width * 4])
 		pairs := width / 2
 		for i in 0 ..< pairs {
 			u := i32(us[i]) - co
@@ -433,7 +436,7 @@ yuv_to_rgba_generic :: proc(
 			us = ([^]T)(raw_data(planes[1][crow * strides[1]:]))
 			vs = ([^]T)(raw_data(planes[2][crow * strides[2]:]))
 		}
-		out := ([^]u32)(raw_data(dst[row * dst_stride:]))
+		out := slice.reinterpret([][4]u8, dst[row * dst_stride:][:width * 4])
 		for x in 0 ..< width {
 			u, v: i32
 			if !mono {

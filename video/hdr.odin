@@ -3,6 +3,7 @@ package video
 import media "../media"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 
 // HDR (BT.2100 PQ and HLG) and wide-gamut (BT.2020) video to SDR BT.709
 // RGBA8. Per pixel: normalized R'G'B' from Y'CbCr, the transfer's EOTF to
@@ -235,7 +236,7 @@ hdr_rows :: proc(planes: [3][]u8, strides: [3]int, width, height: int, shift_x, 
 			us = ([^]T)(raw_data(planes[1][crow * strides[1]:]))
 			vs = ([^]T)(raw_data(planes[2][crow * strides[2]:]))
 		}
-		out := ([^]u32)(raw_data(dst[row * dst_stride:]))
+		out := slice.reinterpret([][4]u8, dst[row * dst_stride:][:width * 4])
 		for x0 := 0; x0 < width; x0 += TONE_RUN {
 			n := min(TONE_RUN, width - x0)
 			r, gr, b: [TONE_RUN]f32
@@ -271,11 +272,11 @@ hdr_rows :: proc(planes: [3][]u8, strides: [3]int, width, height: int, shift_x, 
 			for i in 0 ..< n {
 				slot := light_slot(max(r[i], gr[i], b[i]))
 				k := slot < 0 ? 1 : t.gain[slot]
-				code :: #force_inline proc "contextless" (t: ^Tone_Map, v: f32) -> u32 #no_bounds_check {
+				code :: #force_inline proc "contextless" (t: ^Tone_Map, v: f32) -> u8 #no_bounds_check {
 					slot := light_slot(v)
-					return slot < 0 ? 0 : u32(t.encode[slot])
+					return slot < 0 ? 0 : t.encode[slot]
 				}
-				out[x0 + i] = code(t, r[i] * k) | code(t, gr[i] * k) << 8 | code(t, b[i] * k) << 16 | 0xFF000000
+				out[x0 + i] = {code(t, r[i] * k), code(t, gr[i] * k), code(t, b[i] * k), 255}
 			}
 		}
 		alpha_row(a, row, out, width, T)

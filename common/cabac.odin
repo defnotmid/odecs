@@ -1,7 +1,6 @@
 package common
 
 import "base:intrinsics"
-import "core:math/bits"
 
 // CABAC arithmetic decoding engine. H.264 (9.3.1.2, 9.3.3.2) and HEVC
 // (9.3.2.5, 9.3.4.3) define the same engine with the same range and state
@@ -55,7 +54,7 @@ cabac_tail_word :: proc "contextless" (data: []u8, pos: int) -> (word: u64) #no_
 cabac_refill :: #force_inline proc "contextless" (c: ^Cabac_Cursor) #no_bounds_check {
 	word: u64
 	if c.pos >= 0 && c.pos + 4 <= len(c.data) {
-		word = u64(bits.from_be_u32(intrinsics.unaligned_load((^u32)(&c.data[c.pos]))))
+		word = u64(u32(intrinsics.unaligned_load((^u32be)(&c.data[c.pos]))))
 	} else {
 		word = cabac_tail_word(c.data, c.pos)
 	}

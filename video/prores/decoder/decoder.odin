@@ -7,6 +7,7 @@ package prores_decoder
 import prores ".."
 import common "../../../common"
 import "base:intrinsics"
+import "core:slice"
 import "core:simd"
 
 // A decoded frame, valid until the next decode call on the same decoder.
@@ -193,27 +194,30 @@ decode_slice :: proc(p: ^Picture, s: ^Slice) -> prores.Error {
 	data := d[header:]
 
 	// Up to 8 macroblocks of 4 blocks per component; one component at a time.
-	coefficients: [prores.MAX_SLICE_MBS * 4 * 64]i32 = ---
+	coefficients: [prores.MAX_SLICE_MBS * 4 * 8]#simd[8]i32 = ---
 	mbs := int(s.mb_count)
 	x, y := int(s.mb_x) * 16, int(s.mb_y) * 16
 	chroma_blocks := p.chroma444 ? 4 : 2
 	for component in 0 ..< 3 {
 		blocks := mbs * (component == 0 ? 4 : chroma_blocks)
-		coeffs := coefficients[:blocks * 64]
+		coeffs := slice.reinterpret([]i32, coefficients[:blocks * 8])
 		intrinsics.mem_zero(raw_data(coeffs), len(coeffs) * size_of(i32))
 		r := common.bit_reader(data[:sizes[component]])
 		data = data[sizes[component]:]
 		decode_coefficients(&r, coeffs, uint(intrinsics.count_trailing_zeros(blocks)), p.scan) or_return
 		qmat := component == 0 ? p.luma_qmat : p.chroma_qmat
-		weights: [64]f32 = ---
-		for q, i in qmat do weights[i] = f32(q) * scale
+		weights: [8]F8 = ---
+		for v in 0 ..< 8 {
+			q := qmat[v * 8:]
+			weights[v] = F8{f32(q[0]), f32(q[1]), f32(q[2]), f32(q[3]), f32(q[4]), f32(q[5]), f32(q[6]), f32(q[7])} * scale
+		}
 		stride := p.strides[component]
 		if component == 0 {
 			// Luma blocks: top-left, top-right, bottom-left, bottom-right.
 			for mb in 0 ..< mbs {
 				dst := p.planes[0][y * stride + x + mb * 16:]
 				for b in 0 ..< 4 {
-					idct_put(coeffs[(mb * 4 + b) * 64:][:64], &weights, dst[(b >> 1) * 8 * stride + (b & 1) * 8:], stride, p.output)
+					idct_put(coefficients[(mb * 4 + b) * 8:][:8], &weights, dst[(b >> 1) * 8 * stride + (b & 1) * 8:], stride, p.output)
 				}
 			}
 		} else {
@@ -221,8 +225,8 @@ decode_slice :: proc(p: ^Picture, s: ^Slice) -> prores.Error {
 			cx := p.chroma444 ? x : x / 2
 			for column in 0 ..< blocks / 2 {
 				dst := p.planes[component][y * stride + cx + column * 8:]
-				idct_put(coeffs[column * 128:][:64], &weights, dst, stride, p.output)
-				idct_put(coeffs[column * 128 + 64:][:64], &weights, dst[8 * stride:], stride, p.output)
+				idct_put(coefficients[column * 16:][:8], &weights, dst, stride, p.output)
+				idct_put(coefficients[column * 16 + 8:][:8], &weights, dst[8 * stride:], stride, p.output)
 			}
 		}
 	}
@@ -266,7 +270,7 @@ read_codeword :: #force_inline proc(r: ^common.Bit_Reader, codebook: u8) -> u32 
 // Coefficients of one component of a slice, interleaved across its blocks:
 // every block's DC, then each scan position for every block in turn.
 @(private)
-decode_coefficients :: proc(r: ^common.Bit_Reader, out: []i32, log2_blocks: uint, scan: ^[64]u8) -> prores.Error {
+decode_coefficients :: proc(r: ^common.Bit_Reader, out: []i32, log2_blocks: uint, scan: ^[64]u8) -> prores.Error #no_bounds_check {
 	blocks := 1 << log2_blocks
 	// DC: the first absolutely, the rest as differences whose sign persists
 	// until a zero difference.
@@ -376,14 +380,14 @@ BASIS := [8][8]f32 {
 // pass weights the basis rows by each coded row's coefficients, the column
 // pass combines rows up to the last nonzero one (often only the DC row).
 @(private)
-idct_put :: proc(block: []i32, weights: ^[64]f32, dst: [^]u16, stride: int, o: Output) {
+idct_put :: proc(block: []#simd[8]i32, weights: ^[8]F8, dst: [^]u16, stride: int, o: Output) #no_bounds_check {
 	basis := transmute([8]F8)BASIS
 	rows: [8]F8
 	last := -1
 	for v in 0 ..< 8 {
-		coded := intrinsics.unaligned_load((^#simd[8]i32)(raw_data(block[v * 8:])))
+		coded := block[v]
 		if simd.reduce_or(coded) == 0 do continue
-		f := simd.to_array(cast(F8)coded * intrinsics.unaligned_load((^F8)(&weights[v * 8])))
+		f := simd.to_array(cast(F8)coded * weights[v])
 		rows[v] = F8(f[0]) * basis[0] + F8(f[1]) * basis[1] + F8(f[2]) * basis[2] + F8(f[3]) * basis[3] + F8(f[4]) * basis[4] + F8(f[5]) * basis[5] + F8(f[6]) * basis[6] + F8(f[7]) * basis[7]
 		last = v
 	}
