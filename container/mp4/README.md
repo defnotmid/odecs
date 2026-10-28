@@ -2,7 +2,7 @@
 
 Native Odin muxing and demuxing of H.264, H.265 and AAC in MP4/MOV files,
 and reading of QuickTime ProRes and PCM. The
-package imports only Odin `core`. Codec configuration records are built from
+package imports only Odin `core` and `common`. Codec configuration records are built from
 the parameter sets in the stream. Sample bytes pass through unchanged, apart
 from Annex-B/length-prefix framing. For RGBA frames and PCM in or out, use
 [`video`](../../video/README.md), which drives this package and
@@ -67,6 +67,11 @@ mp4.destroy(&w)
   write each segment's packets in order with continuing timestamps.
 - **Output:** a path, or any `io.Stream` with `Write_At` (plus `Read_At` for
   faststart). `Memory_Stream` is a growable in-memory stream.
+- **Chapters:** `Options.chapters` (`[]Chapter` of `{start: f64, title: string}`,
+  starts strictly increasing from `0` and before the movie duration, non-empty
+  UTF-8 titles; invalid entries return `Invalid_Argument`) writes a disabled
+  QuickTime `text` chapter track referenced by the media tracks through `tref`
+  `'chap'`, with the last chapter ending at the movie duration.
 
 ## Reading
 
@@ -101,6 +106,9 @@ mp4.close(&r)
     for nclc, which has no range flag; take the range from the VUI then.
   - `config` holds the `avcC`/`hvcC` record, and `audio_specific_config` the
     AAC ASC.
+- **Chapters:** `r.chapters` lists `{start, title}` from the QuickTime `tref`
+  `'chap'` text track (not exposed in `r.tracks`), or from Nero `udta`/`chpl`
+  when no chapter track is present.
 - **QuickTime:** ProRes sample entries (`apco`, `apcs`, `apcn`, `apch`,
   `ap4h`, `ap4x`) read as codec `ProRes`, one frame per sample, with `colr`
   and `fiel` (`interlaced`). Uncompressed audio (`raw `, `twos`, `sowt`,
@@ -154,7 +162,7 @@ mp4.close(&r)
   audio codecs keep codec `Unknown`. Their samples are still readable.
 - **Edit lists** beyond one empty edit plus one rate-1 edit are not fully
   applied (`Edit.complex`).
-- **Not written:** metadata (`udta`/`meta`), chapters, and `sdtp`
+- **Not written:** metadata (`udta`/`meta`) and `sdtp`
   dependency hints.
 
 ## Validation

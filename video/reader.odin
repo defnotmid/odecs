@@ -67,6 +67,7 @@ Reader :: struct {
 	color_from_frames: bool, // the container has no colour; use the bitstream's
 	video_index:    int, // demuxer track, -1 when absent
 	video:          Video_Info,
+	chapters:       []Chapter,
 	error_detail:   string,
 	conversion:     Conversion_Cache,
 	bit_depth:      int,
@@ -143,11 +144,13 @@ open_input :: proc(r: ^Reader, config: Reader_Config, path: string, stream: io.S
 	}
 	#partial switch r.audio.container {
 	case .WebM:
+		r.chapters = r.audio.webm.chapters
 		for &t, i in r.audio.webm.tracks {
 			video := t.codec == .VP9 || t.codec == .H264 || t.codec == .H265 || t.codec == .AV1
 			if t.kind == .Video && video && len(t.samples) > 0 {r.video_index = i; break}
 		}
 	case .MP4:
+		r.chapters = r.audio.demux.chapters
 		for &t, i in r.audio.demux.tracks {
 			video := t.codec == .H264 || t.codec == .H265 || t.codec == .ProRes || t.codec == .AV1
 			if t.kind == .Video && video && len(t.samples) > 0 {r.video_index = i; break}

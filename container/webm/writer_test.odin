@@ -167,3 +167,81 @@ writer_seekhead_and_sizes :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, clusters, 2)
 }
+
+@(test)
+writer_chapters_roundtrip_and_validation :: proc(t: ^testing.T) {
+	chapters := []Chapter{
+		{0, "Intro"},
+		{0.033333333, "Scène 2: Café & 🎬"},
+		{0.066666666, "Finale"},
+	}
+	m: Writer_Memory
+	defer delete(m.data)
+	w: Writer
+	testing.expect_value(t, create_stream(&w, writer_memory_stream(&m), {width = 32, height = 32, default_duration = 33_333_333, chapters = chapters}), .None)
+	for i in 0 ..< 3 {
+		testing.expect_value(t, write_sample(&w, {u8(i + 1)}, i64(i) * 33_333_333, i == 0), .None)
+	}
+	testing.expect_value(t, finish(&w), .None)
+	destroy(&w)
+
+	r: Reader
+	testing.expect_value(t, open_stream(&r, writer_memory_stream(&m)), .None)
+	defer close(&r)
+	testing.expect_value(t, len(r.chapters), len(chapters))
+	for c, i in r.chapters {
+		testing.expect_value(t, c, chapters[i])
+	}
+
+	// SeekHead includes Chapters (4 entries total: Info, Tracks, Chapters, Cues).
+	header, _ := read_element(&r, 0, r.size)
+	segment, _ := read_element(&r, header.end, r.size)
+	seek, _ := read_element(&r, segment.at, segment.end)
+	seek_count := 0
+	found_chapters := false
+	for at := seek.at; at < seek.end; {
+		entry, _ := read_element(&r, at, seek.end)
+		id, _ := read_element(&r, entry.at, entry.end)
+		target_id, _ := read_uint(&r, id)
+		position, _ := read_element(&r, id.end, entry.end)
+		target_pos, _ := read_uint(&r, position)
+		target, te := read_element(&r, segment.at + i64(target_pos), segment.end)
+		testing.expect_value(t, te, .None)
+		testing.expect_value(t, target.id, u32(target_id))
+		if target.id == u32(ID.Chapters) do found_chapters = true
+		at = entry.end
+		seek_count += 1
+	}
+	testing.expect_value(t, seek_count, 4)
+	testing.expect(t, found_chapters)
+
+	// Invalid chapter configurations must be refused with .Invalid_Argument.
+	for bad in ([][]Chapter{
+		{{0.1, "Not zero"}},
+		{{-0.1, "Negative"}},
+		{{0, ""}},
+		{{0, "A"}, {0.5, ""}},
+		{{0, "A"}, {0, "Duplicate"}},
+		{{0, "A"}, {0.5, "B"}, {0.2, "Unsorted"}},
+		{{0, "A"}, {0.5, "B"}, {0.5, "Equal"}},
+	}) {
+		bm: Writer_Memory
+		defer delete(bm.data)
+		bw: Writer
+		testing.expect_value(t, create_stream(&bw, writer_memory_stream(&bm), {width = 16, height = 16, chapters = bad}), .Invalid_Argument)
+		destroy(&bw)
+	}
+
+	// A chapter starting at or past the media's end is refused at finish.
+	for last_start in ([2]f64{0.06, 0.1}) {
+		bm: Writer_Memory
+		defer delete(bm.data)
+		bw: Writer
+		testing.expect_value(t, create_stream(&bw, writer_memory_stream(&bm), {width = 16, height = 16, default_duration = 30_000_000, chapters = {{0, "Start"}, {last_start, "Past end"}}}), .None)
+		testing.expect_value(t, write_sample(&bw, {1}, 0, true), .None)
+		testing.expect_value(t, write_sample(&bw, {2}, 30_000_000, false), .None)
+		testing.expect_value(t, finish(&bw), .Invalid_Argument)
+		destroy(&bw)
+	}
+}
+

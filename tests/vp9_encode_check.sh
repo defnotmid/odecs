@@ -45,5 +45,13 @@ if [ -n "${VP9_CAMERA:-}" ]; then
 fi
 p=.work/vp9-encode/browser
 .work/vp9-encode/check "$p" 128 128 0 1 8 1 animation 4
+ffprobe -v error -show_chapters -of json "$p.webm" > "$p.chapters.json"
+grep -q '"start_time": "0.000000"' "$p.chapters.json"
+grep -q '"end_time": "0.100000"' "$p.chapters.json"
+grep -q '"title": "Intro"' "$p.chapters.json"
+grep -q '"title": "Scène 2: Café & 🎬"' "$p.chapters.json"
+grep -q '"start_time": "0.200000"' "$p.chapters.json"
+grep -q '"end_time": "0.266667"' "$p.chapters.json"
+grep -q '"title": "Finale"' "$p.chapters.json"
 bash tests/vp9_browser_check.sh "$p" 128 128 8
 printf 'VP9/WebM oracle gate passed\n'

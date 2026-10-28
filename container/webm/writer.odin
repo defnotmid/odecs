@@ -1,6 +1,8 @@
 package webm
 
+import "../../common"
 import "core:io"
+import "core:math"
 import "core:os"
 import "base:intrinsics"
 
@@ -9,6 +11,7 @@ Writer_Config :: struct {
 	width, height: int,
 	alpha: bool,
 	default_duration: i64,
+	chapters: []Chapter,
 }
 
 Writer :: struct {
@@ -19,8 +22,9 @@ Writer :: struct {
 	cues: [dynamic]Writer_Cue,
 	position, segment_start, segment_payload: i64,
 	cluster_start, cluster_payload, cluster_time: i64,
-	cue_seek_at, duration_at: i64,
-	last_pts, end_pts: i64,
+	cue_seek_at, duration_at, chapter_end_at: i64,
+	last_pts, end_pts, last_chapter_ns: i64,
+	last_chapter_start: f64,
 	have_sample, failed, finished, initialized: bool,
 }
 
@@ -39,9 +43,18 @@ create :: proc(w: ^Writer, path: string, config: Writer_Config) -> Error {
 // Borrows a seekable Write_At stream. Destroy never finishes an incomplete file.
 create_stream :: proc(w: ^Writer, stream: io.Stream, config: Writer_Config) -> Error {
 	if w == nil || config.width <= 0 || config.height <= 0 || config.width > 65536 || config.height > 65536 || config.default_duration < 0 do return .Invalid_Argument
+	if !common.validate_chapters(config.chapters) do return .Invalid_Argument
+	extra := 0
+	for c, i in config.chapters {
+		if c.start >= 9e9 do return .Invalid_Argument
+		if i > 0 && u64(math.round(c.start * 1e9)) <= u64(math.round(config.chapters[i - 1].start * 1e9)) {
+			return .Invalid_Argument
+		}
+		extra += len(c.title) + 64
+	}
 	if .Write_At not_in io.query(stream) do return .Invalid_Argument
 	w^ = {stream = stream, config = config, cluster_start = -1, initialized = true}
-	if reserve(&w.scratch, 512) != nil {destroy(w); return .Out_Of_Memory}
+	if reserve(&w.scratch, 512 + extra) != nil {destroy(w); return .Out_Of_Memory}
 	b := &w.scratch
 	ebml := writer_begin(b, 0x1A45DFA3)
 	writer_uint(b, 0x4286, 1); writer_uint(b, 0x42F7, 1)
@@ -54,6 +67,7 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, config: Writer_Config) -> E
 	seek := writer_begin(b, 0x114D9B74)
 	info_seek := writer_seek(b, 0x1549A966)
 	tracks_seek := writer_seek(b, 0x1654AE6B)
+	chapters_seek := len(config.chapters) > 0 ? writer_seek(b, 0x1043A770) : 0
 	w.cue_seek_at = i64(writer_seek(b, 0x1C53BB6B))
 	writer_end(b, seek)
 	info_pos := len(b^)
@@ -79,6 +93,33 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, config: Writer_Config) -> E
 	writer_uint(b, 0x55B1, 1); writer_uint(b, 0x55B2, 8)
 	writer_uint(b, 0x55B9, 1); writer_uint(b, 0x55BA, 1); writer_uint(b, 0x55BB, 1)
 	writer_end(b, colour); writer_end(b, video); writer_end(b, track); writer_end(b, tracks)
+	if len(config.chapters) > 0 {
+		chapters_pos := len(b^)
+		chapters := writer_begin(b, 0x1043A770)
+		edition := writer_begin(b, 0x45B9)
+		for c, i in config.chapters {
+			start_ns := u64(math.round(c.start * 1e9))
+			atom := writer_begin(b, 0xB6)
+			writer_uint(b, 0x73C4, u64(i + 1))
+			writer_uint(b, 0x91, start_ns)
+			if i + 1 < len(config.chapters) {
+				writer_uint(b, 0x92, u64(math.round(config.chapters[i + 1].start * 1e9)))
+			} else {
+				writer_id(b, 0x92); writer_size(b, 8)
+				w.chapter_end_at = i64(len(b^)); writer_be(b, 0, 8)
+				w.last_chapter_ns = i64(start_ns)
+				w.last_chapter_start = c.start
+			}
+			display := writer_begin(b, 0x80)
+			writer_bytes(b, 0x85, transmute([]u8)c.title)
+			writer_bytes(b, 0x437C, transmute([]u8)string("und"))
+			writer_end(b, display)
+			writer_end(b, atom)
+		}
+		writer_end(b, edition)
+		writer_end(b, chapters)
+		writer_patch_be(b^[:], chapters_seek, u64(i64(chapters_pos) - w.segment_payload), 8)
+	}
 	writer_patch_be(b^[:], info_seek, u64(i64(info_pos) - w.segment_payload), 8)
 	writer_patch_be(b^[:], tracks_seek, u64(i64(tracks_pos) - w.segment_payload), 8)
 	if e := writer_flush(w); e != .None {destroy(w); return e}
@@ -142,6 +183,9 @@ finish :: proc(w: ^Writer) -> Error {
 	if w == nil || !w.initialized do return .Closed
 	if w.failed do return .IO_Error
 	if w.finished do return .None
+	if w.chapter_end_at > 0 && (f64(w.end_pts) <= w.last_chapter_start * 1e9 || w.end_pts <= w.last_chapter_ns) {
+		return .Invalid_Argument
+	}
 	if reserve(&w.scratch, 64 + len(w.cues) * 48) != nil do return .Out_Of_Memory
 	writer_close_cluster(w) or_return
 	cue_pos := w.position - w.segment_payload
@@ -159,6 +203,10 @@ finish :: proc(w: ^Writer) -> Error {
 	patch: [8]u8
 	writer_patch_be(patch[:], 0, u64(cue_pos), 8)
 	writer_write_at(w, patch[:], w.cue_seek_at) or_return
+	if w.chapter_end_at > 0 {
+		writer_patch_be(patch[:], 0, u64(w.end_pts), 8)
+		writer_write_at(w, patch[:], w.chapter_end_at) or_return
+	}
 	if w.end_pts > 0 {
 		writer_patch_be(patch[:], 0, transmute(u64)(f64(w.end_pts) / 1e6), 8)
 		writer_write_at(w, patch[:], w.duration_at) or_return

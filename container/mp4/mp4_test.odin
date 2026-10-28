@@ -660,3 +660,93 @@ test_reversed_composition_order_sorts :: proc(t: ^testing.T) {
 	for k in 0 ..< N do if int(v.presentation[k]) != N - 1 - k do ok = false
 	testing.expect(t, ok)
 }
+
+@(test)
+test_chapters_round_trip_and_validation :: proc(t: ^testing.T) {
+	chapters := []Chapter{
+		{0, "Intro"},
+		{0.1, "Scène 2: Café & 🎬"},
+		{0.2, "Finale"},
+	}
+	for faststart in ([2]bool{false, true}) {
+		m: Memory_Stream
+		defer delete(m.data)
+		write_test_movie(t, &m, {faststart = faststart, chapters = chapters})
+		r: Reader
+		testing.expect_value(t, open_stream(&r, memory_stream(&m)), Error.None)
+		defer close(&r)
+		testing.expect_value(t, len(r.tracks), 2)
+		testing.expect_value(t, len(r.chapters), len(chapters))
+		tick := 1.0 / f64(r.movie_timescale)
+		for c, i in r.chapters {
+			testing.expect_value(t, c.title, chapters[i].title)
+			testing.expect(t, abs(c.start - chapters[i].start) <= tick)
+		}
+	}
+
+	// Nero `chpl` fallback in `udta` when no QuickTime chapter track is present.
+	{
+		m: Memory_Stream
+		defer delete(m.data)
+		write_test_movie(t, &m, {})
+		moov := find_type(m.data[:], "moov") - 4
+		udta: [dynamic]u8
+		defer delete(udta)
+		u := begin_box(&udta, "udta")
+		chpl := begin_full_box(&udta, "chpl", 1, 0)
+		put_u32(&udta, 0)
+		put_u8(&udta, 2)
+		put_u64(&udta, 0)
+		put_u8(&udta, 5)
+		append(&udta, "Part1")
+		put_u64(&udta, 1_250_000) // 0.125 s in 100 ns units
+		put_u8(&udta, 5)
+		append(&udta, "Part2")
+		end_box(&udta, chpl)
+		end_box(&udta, u)
+		old_moov_size := get_u32(m.data[moov:])
+		append(&m.data, ..udta[:])
+		patch_u32(&m.data, moov, old_moov_size + u32(len(udta)))
+		r: Reader
+		testing.expect_value(t, open_stream(&r, memory_stream(&m)), Error.None)
+		defer close(&r)
+		testing.expect_value(t, len(r.chapters), 2)
+		testing.expect_value(t, r.chapters[0], Chapter{0, "Part1"})
+		testing.expect_value(t, r.chapters[1], Chapter{0.125, "Part2"})
+	}
+
+	// Invalid chapter configurations must be refused with .Invalid_Argument.
+	tracks := []Track_Config{{codec = .H264, timescale = 1000, width = 64, height = 64, default_duration = 100}}
+	for bad in ([][]Chapter{
+		{{0.5, "Not zero"}},
+		{{-0.1, "Negative"}},
+		{{0, ""}},
+		{{0, "A"}, {1.0, ""}},
+		{{0, "A"}, {0, "Duplicate zero"}},
+		{{0, "A"}, {2.0, "B"}, {1.0, "Unsorted"}},
+		{{0, "A"}, {1.0, "B"}, {1.0, "Equal"}},
+	}) {
+		m: Memory_Stream
+		defer delete(m.data)
+		w: Writer
+		testing.expect_value(t, create_stream(&w, memory_stream(&m), tracks, {chapters = bad}), Error.Invalid_Argument)
+		destroy(&w)
+	}
+
+	// A chapter starting at or past the media's end is refused at finish.
+	for last_start in ([2]f64{0.3, 0.5}) {
+		m: Memory_Stream
+		defer delete(m.data)
+		w: Writer
+		testing.expect_value(t, create_stream(&w, memory_stream(&m), tracks, {chapters = {{0, "Start"}, {last_start, "Past end"}}}), Error.None)
+		au: [dynamic]u8
+		defer delete(au)
+		avc_sps(&au, 66, 4)
+		avc_pps(&au)
+		slice_nal(&au, 5, 0, 16)
+		// 3 samples of 100 ticks at 1000 Hz = 0.3 s movie duration.
+		for i in 0 ..< 3 do testing.expect_value(t, write_video_packet(&w, 0, au[:], i64(i * 100), i64(i * 100), false), Error.None)
+		testing.expect_value(t, finish(&w), Error.Invalid_Argument)
+		destroy(&w)
+	}
+}

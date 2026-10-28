@@ -4,8 +4,11 @@
 // pass through unchanged apart from Annex-B/length-prefix framing.
 package mp4
 
+import "../../common"
 import "base:runtime"
 import "core:io"
+
+Chapter :: common.Chapter
 
 Codec :: enum u8 {
 	Unknown,

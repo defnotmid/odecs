@@ -100,6 +100,10 @@ video.destroy(&w)
 - **Output:** `faststart` (on by default) puts `moov` first for progressive
   playback. `create_stream` writes to any stream with `Write_At`, such as an
   `mp4.Memory_Stream` for in-memory segments.
+- **Chapters:** `Writer_Config.chapters` (`[]Chapter` of `{start: f64, title: string}`,
+  starts strictly increasing from `0` and before the media end, non-empty UTF-8
+  titles; invalid entries return `Invalid_Config`) passes through to the MP4 or
+  WebM container writer.
 
 ## Reading
 
@@ -109,6 +113,7 @@ err := video.open_reader(&r, "in.mov", {preference = .Native}) // or open_reader
 // r.video: codec, width, height, frame_count, fps_num/den, duration, rotation,
 //          color, has_alpha, bit_depth, chroma, decodable
 // r.audio: codec, present, sample_rate, channels, samples
+// r.chapters: []Chapter{start, title} from MP4 or WebM/MKV
 for {
     f, e := video.next_frame(&r)     // sequential playback
     if e == .End_Of_Stream do break

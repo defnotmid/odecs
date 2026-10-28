@@ -55,6 +55,8 @@ main :: proc() {
 			config.faststart = false
 		case "--no-audio":
 			config.sample_rate, config.channels = 0, 0
+		case "--chapters":
+			config.chapters = {{0, "Intro"}, {1.0, "Scène 2: Café & 🎬"}, {2.0, "Finale"}}
 		case:
 			fmt.eprintln("unknown argument", arg); os.exit(2)
 		}
@@ -121,6 +123,17 @@ main :: proc() {
 		ok := e == .None && frame.index == f && quality > 30
 		if !ok do failures += 1
 		fmt.printfln("frame_at(%.3f s): index %d, PSNR %.2f dB %s", (f64(f) + 0.5) / fps, frame.index, quality, ok ? "ok" : "FAIL")
+	}
+	if len(r.chapters) != len(config.chapters) {
+		fmt.eprintfln("chapters: got %d, want %d", len(r.chapters), len(config.chapters))
+		failures += 1
+	} else {
+		for c, i in r.chapters {
+			if c.title != config.chapters[i].title || abs(c.start - config.chapters[i].start) > 1e-3 {
+				fmt.eprintfln("chapter %d: got %v, want %v", i, c, config.chapters[i])
+				failures += 1
+			}
+		}
 	}
 	if r.audio.present {
 		decoded := make([]f32, (audio_samples + 4096) * config.channels)

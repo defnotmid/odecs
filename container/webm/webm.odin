@@ -7,9 +7,12 @@
 // Odin core.
 package webm
 
+import "../../common"
 import "core:io"
 import "core:os"
 import "core:slice"
+
+Chapter :: common.Chapter
 
 Codec :: enum u8 {
 	Unknown, // see Track.codec_id
@@ -108,6 +111,7 @@ Reader :: struct {
 	timecode_scale: i64, // ns per Matroska timestamp tick
 	duration:       f64, // seconds; 0 when Info has none
 	tracks:         [dynamic]Track,
+	chapters:       []Chapter,
 	buffer:         [dynamic]u8, // read_sample storage
 	window:         [4096]u8, // small read-ahead for element headers
 	window_at:      i64,
@@ -159,6 +163,8 @@ close :: proc(r: ^Reader) {
 	if r == nil do return
 	for &t in r.tracks do destroy_track(&t)
 	delete(r.tracks)
+	for c in r.chapters do delete(c.title)
+	delete(r.chapters)
 	delete(r.buffer)
 	if r.file != nil do os.close(r.file)
 	r^ = {}
@@ -289,6 +295,15 @@ ID :: enum u32 {
 	Reference_Block    = 0xFB,
 	Position           = 0xA7,
 	Prev_Size          = 0xAB,
+	Chapters           = 0x1043A770,
+	Edition_Entry      = 0x45B9,
+	Chapter_Atom       = 0xB6,
+	Chapter_UID        = 0x73C4,
+	Chapter_Time_Start = 0x91,
+	Chapter_Time_End   = 0x92,
+	Chapter_Display    = 0x80,
+	Chap_String        = 0x85,
+	Chap_Language      = 0x437C,
 	Void               = 0xEC,
 	CRC32              = 0xBF,
 }
@@ -451,6 +466,8 @@ parse_segment :: proc(r: ^Reader, segment: Element) -> Error {
 			parse_tracks(r, e) or_return
 			have_tracks = true
 			resize(&indices, len(r.tracks))
+		case .Chapters:
+			if len(r.chapters) == 0 do parse_chapters(r, e) or_return
 		case .Cluster:
 			if !have_tracks do return .Invalid_Data
 			next, cluster_err := parse_cluster(r, e, indices[:])
@@ -526,6 +543,77 @@ parse_info :: proc(r: ^Reader, info: Element) -> Error {
 		at = e.end
 	}
 	if duration > 0 && duration < 1e15 do r.duration = duration * f64(r.timecode_scale) / 1e9
+	return .None
+}
+
+@(private)
+parse_chapters :: proc(r: ^Reader, chapters_elem: Element) -> Error {
+	list: [dynamic]Chapter
+	ok := false
+	defer if !ok {
+		for c in list do delete(c.title)
+		delete(list)
+	}
+	for at := chapters_elem.at; at < chapters_elem.end; {
+		e := read_element(r, at, chapters_elem.end) or_return
+		if e.id == u32(ID.Edition_Entry) {
+			for a := e.at; a < e.end; {
+				atom := read_element(r, a, e.end) or_return
+				if atom.id == u32(ID.Chapter_Atom) {
+					start_ns: u64
+					title: string
+					have_title := false
+					for c := atom.at; c < atom.end; {
+						f, ferr := read_element(r, c, atom.end)
+						if ferr != .None {
+							delete(title)
+							return ferr
+						}
+						#partial switch ID(f.id) {
+						case .Chapter_Time_Start:
+							v, verr := read_uint(r, f)
+							if verr != .None {
+								delete(title)
+								return verr
+							}
+							start_ns = v
+						case .Chapter_Display:
+							if !have_title {
+								for d := f.at; d < f.end; {
+									g, gerr := read_element(r, d, f.end)
+									if gerr != .None {
+										delete(title)
+										return gerr
+									}
+									if g.id == u32(ID.Chap_String) && !have_title {
+										bytes, berr := read_bytes(r, g)
+										if berr != .None {
+											delete(title)
+											return berr
+										}
+										title = string(bytes)
+										have_title = true
+									}
+									d = g.end
+								}
+							}
+						}
+						c = f.end
+					}
+					if len(title) > 0 {
+						append(&list, Chapter{start = f64(start_ns) / 1e9, title = title})
+					} else {
+						delete(title)
+					}
+				}
+				a = atom.end
+			}
+			break
+		}
+		at = e.end
+	}
+	r.chapters = list[:]
+	ok = true
 	return .None
 }
 

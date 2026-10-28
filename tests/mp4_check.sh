@@ -39,12 +39,27 @@ interop() { # file [args]
 }
 
 echo "== odecs output: smoke round trips, FFmpeg decode and interop"
-for spec in "h264 --native" "h264" "h265 --native --frames 30" "h265" "h264 --native --fps 30000/1001 --size 1280x720 --frames 45 --no-faststart" "h264 --native --size 320x240 --no-audio"; do
+for spec in "h264 --native" "h264" "h265 --native --frames 30" "h265" "h264 --native --fps 30000/1001 --size 1280x720 --frames 45 --no-faststart" "h264 --native --size 320x240 --no-audio" "h264 --native --chapters"; do
 	set -- $spec
 	name="$work/odecs-$(printf %s "$spec" | tr -c '[:alnum:]' _).mp4"
 	codec=$1; shift
 	if "$work/mp4_smoke" "$name" --codec "$codec" "$@" > "$name.smoke" 2>&1; then pass "smoke $spec"; else bad "smoke $spec"; cat "$name.smoke" || true; continue; fi
 	if [ -n "$(ffmpeg -v error -i "$name" -f null - 2>&1)" ]; then bad "ffmpeg decodes cleanly: $spec"; else pass "ffmpeg decodes cleanly: $spec"; fi
+	case "$spec" in *--chapters*)
+		chref="$name.chapters.json"
+		ffprobe -v error -show_chapters -of json "$name" > "$chref"
+		if grep -q '"start_time": "0.000000"' "$chref" &&
+			grep -q '"end_time": "1.000000"' "$chref" &&
+			grep -q '"title": "Intro"' "$chref" &&
+			grep -q '"title": "Scène 2: Café & 🎬"' "$chref" &&
+			grep -q '"start_time": "2.000000"' "$chref" &&
+			grep -q '"end_time": "3.000000"' "$chref" &&
+			grep -q '"title": "Finale"' "$chref"; then
+			pass "ffprobe chapters: $spec"
+		else
+			bad "ffprobe chapters: $spec"; cat "$chref" || true
+		fi ;;
+	esac
 	reference "$name"
 	interop "$name" --native
 	rm -f "$name.rgba" "$name.pcm" # raw references are large

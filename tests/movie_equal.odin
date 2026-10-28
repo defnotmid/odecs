@@ -38,6 +38,12 @@ main :: proc() {
 	rate_a, rate_b := f64(va.fps_num) / f64(va.fps_den), f64(vb.fps_num) / f64(vb.fps_den)
 	if abs(rate_a - rate_b) > rate_a * 0.02 do fail("rate", va.fps_num, va.fps_den, "vs", vb.fps_num, vb.fps_den)
 	if va.color != vb.color do fail("colour", va.color, "vs", vb.color)
+	if len(a.chapters) != len(b.chapters) do fail("chapters", len(a.chapters), "vs", len(b.chapters))
+	for c, i in a.chapters {
+		if c.title != b.chapters[i].title || abs(c.start - b.chapters[i].start) > 0.001 {
+			fail("chapter", i, c, "vs", b.chapters[i])
+		}
+	}
 	frames := 0
 	for {
 		fa, ea := video.next_frame(&a)

@@ -50,8 +50,10 @@ main :: proc() {
 	defer for p in 0 ..< 3 {delete(input[p]); delete(ai[p])}
 	cw, aw: webm.Writer
 	save := prefix != "-"
+	chapters := []webm.Chapter{{0, "Intro"}, {0.1, "Scène 2: Café & 🎬"}, {0.2, "Finale"}}
+	use_chapters := frames >= 8
 	if save {
-		require(webm.create(&cw, fmt.tprintf("%s.webm", prefix), {width = w, height = h, alpha = alpha, default_duration = 33_333_333}) == .None, "create WebM")
+		require(webm.create(&cw, fmt.tprintf("%s.webm", prefix), {width = w, height = h, alpha = alpha, default_duration = 33_333_333, chapters = use_chapters ? chapters : nil}) == .None, "create WebM")
 		if alpha {
 			require(webm.create(&aw, fmt.tprintf("%s.alpha.webm", prefix), {width = w, height = h, default_duration = 33_333_333}) == .None, "create alpha oracle WebM")
 		}
@@ -163,6 +165,13 @@ verify :: proc(path: string, expected, expected_alpha: []u8, w, h, frames, gop: 
 	require(video.open_reader(&mr, path, {preference = .Native, format = .Planar}) == .None, "movie open")
 	defer video.close_reader(&mr)
 	require(mr.video.has_alpha == alpha, "movie alpha metadata")
+	if frames >= 8 {
+		want := [3]webm.Chapter{{0, "Intro"}, {0.1, "Scène 2: Café & 🎬"}, {0.2, "Finale"}}
+		require(len(r.chapters) == len(want) && len(mr.chapters) == len(want), "WebM chapter count")
+		for c, i in want {
+			require(r.chapters[i] == c && mr.chapters[i] == c, "WebM chapter mismatch")
+		}
+	}
 	at := 0
 	for f in 0 ..< frames {
 		packet, err := webm.read_sample(&r, 0, f)

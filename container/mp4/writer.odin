@@ -1,6 +1,8 @@
 package mp4
 
+import "../../common"
 import "core:io"
+import "core:math"
 import "core:os"
 
 // One output track. Timestamps passed to the writer are in `timescale` units
@@ -33,6 +35,7 @@ Options :: struct {
 	// AAC priming and trimming), else the first track's.
 	movie_timescale: u32,
 	force_co64:      bool, // 64-bit chunk offsets even when 32 bits suffice
+	chapters:        []Chapter,
 }
 
 Writer :: struct {
@@ -40,6 +43,8 @@ Writer :: struct {
 	file:           ^os.File, // owned when created from a path
 	options:        Options,
 	tracks:         [dynamic]Track_Writer,
+	chapters:       []Chapter,
+	chapter_offset: i64,
 	staging:        [dynamic]u8, // sample bytes not yet written, starting at staging_offset
 	staging_offset: i64,
 	mdat_start:     i64,
@@ -109,6 +114,8 @@ create :: proc(w: ^Writer, path: string, tracks: []Track_Config, options := Opti
 // Read_At as well for faststart. The writer borrows it until finish/destroy.
 create_stream :: proc(w: ^Writer, stream: io.Stream, tracks: []Track_Config, options := Options{}) -> Error {
 	if w == nil || len(tracks) == 0 || len(tracks) > 255 do return .Invalid_Argument
+	if !common.validate_chapters(options.chapters) do return .Invalid_Argument
+	for c in options.chapters do if len(c.title) > int(max(u16)) do return .Invalid_Argument
 	modes := io.query(stream)
 	if .Write_At not_in modes || (options.faststart && .Read_At not_in modes) do return .Invalid_Argument
 	for t in tracks {
@@ -132,6 +139,26 @@ create_stream :: proc(w: ^Writer, stream: io.Stream, tracks: []Track_Config, opt
 	if w.options.movie_timescale == 0 {
 		w.options.movie_timescale = tracks[0].timescale
 		for t in tracks do if t.codec == .AAC {w.options.movie_timescale = t.timescale; break}
+	}
+	for c, i in options.chapters {
+		if c.start * f64(w.options.movie_timescale) >= 9e18 do return .Invalid_Argument
+		if i > 0 {
+			prev := i64(math.round(options.chapters[i - 1].start * f64(w.options.movie_timescale)))
+			cur := i64(math.round(c.start * f64(w.options.movie_timescale)))
+			if cur <= prev || cur - prev > i64(max(u32)) do return .Invalid_Argument
+		}
+	}
+	if len(options.chapters) > 0 {
+		chapters, err := make([]Chapter, len(options.chapters))
+		if err != nil {destroy(w); return .Out_Of_Memory}
+		w.chapters = chapters
+		w.options.chapters = chapters
+		for c, i in options.chapters {
+			title, terr := make([]u8, len(c.title))
+			if terr != nil {destroy(w); return .Out_Of_Memory}
+			copy(title, c.title)
+			w.chapters[i] = {start = c.start, title = string(title)}
+		}
 	}
 	for t in tracks {
 		tw := Track_Writer {
@@ -204,6 +231,8 @@ destroy :: proc(w: ^Writer) {
 		for p in t.parameter_sets do delete(p.data)
 		delete(t.parameter_sets)
 	}
+	for c in w.chapters do delete(c.title)
+	delete(w.chapters)
 	delete(w.tracks)
 	delete(w.staging)
 	delete(w.scratch)
@@ -455,6 +484,18 @@ finish :: proc(w: ^Writer) -> Error {
 	if w == nil || w.stream.procedure == nil || w.finished do return .Closed
 	if w.failed do return .Closed
 	if w.sample.active do return .Invalid_Argument
+	if len(w.chapters) > 0 {
+		movie_duration: i64
+		for &t in w.tracks {
+			timing := track_timing(w, &t)
+			movie_duration = max(movie_duration, timing.empty_edit + timing.segment_duration)
+		}
+		last := w.chapters[len(w.chapters) - 1]
+		last_tick := i64(math.round(last.start * f64(w.options.movie_timescale)))
+		if last.start * f64(w.options.movie_timescale) >= f64(movie_duration) || last_tick >= movie_duration || movie_duration - last_tick > i64(max(u32)) {
+			return .Invalid_Argument
+		}
+	}
 	w.finished = true
 	for t in w.tracks {
 		if len(t.samples) == 0 do continue
@@ -463,6 +504,19 @@ finish :: proc(w: ^Writer) -> Error {
 			has_sps := false
 			for p in t.parameter_sets do if p.type == 7 || p.type == 33 do has_sps = true
 			if !has_sps do return .Invalid_Data
+		}
+	}
+	if len(w.chapters) > 0 {
+		flush_staging(w) or_return
+		w.chapter_offset = w.staging_offset
+		ENCD :: [12]u8{0, 0, 0, 12, 'e', 'n', 'c', 'd', 0, 0, 1, 0}
+		encd := ENCD
+		for c in w.chapters {
+			n := u16(len(c.title))
+			len_be := [2]u8{u8(n >> 8), u8(n)}
+			append_payload(w, len_be[:]) or_return
+			append_payload(w, transmute([]u8)c.title) or_return
+			append_payload(w, encd[:]) or_return
 		}
 	}
 	flush_staging(w) or_return
@@ -491,7 +545,7 @@ finish :: proc(w: ^Writer) -> Error {
 		// more tracks, so the fixed point arrives within tracks + 1 rebuilds.
 		shift := 0
 		stable := false
-		for _ in 0 ..< len(w.tracks) + 2 {
+		for _ in 0 ..< len(w.tracks) + 3 {
 			clear(&moov)
 			build_moov(w, &moov, i64(shift)) or_return
 			if len(moov) == shift {stable = true; break}
@@ -587,11 +641,14 @@ build_moov :: proc(w: ^Writer, b: ^[dynamic]u8, shift: i64) -> Error {
 	put_zeros(b, 10)
 	put_matrix(b)
 	put_zeros(b, 24)
-	put_u32(b, u32(len(w.tracks) + 1)) // next_track_ID
+	put_u32(b, u32(len(w.tracks) + (len(w.chapters) > 0 ? 2 : 1))) // next_track_ID
 	end_box(b, mvhd)
 	for &t, i in w.tracks {
 		if len(t.samples) == 0 do continue
 		build_trak(w, b, &t, u32(i + 1), timings[i], shift) or_return
+	}
+	if len(w.chapters) > 0 {
+		build_chapter_trak(w, b, u32(len(w.tracks) + 1), movie_duration, shift)
 	}
 	end_box(b, moov)
 	return .None
@@ -654,6 +711,13 @@ build_trak :: proc(w: ^Writer, b: ^[dynamic]u8, t: ^Track_Writer, id: u32, timin
 		end_box(b, elst)
 		end_box(b, edts)
 	}
+	if len(w.chapters) > 0 {
+		tref := begin_box(b, "tref")
+		chap := begin_box(b, "chap")
+		put_u32(b, u32(len(w.tracks) + 1))
+		end_box(b, chap)
+		end_box(b, tref)
+	}
 	mdia := begin_box(b, "mdia")
 	mdhd := begin_full_box(b, "mdhd", wide ? 1 : 0, 0)
 	if wide {
@@ -700,6 +764,153 @@ build_trak :: proc(w: ^Writer, b: ^[dynamic]u8, t: ^Track_Writer, id: u32, timin
 	end_box(b, mdia)
 	end_box(b, trak)
 	return .None
+}
+
+@(private)
+build_chapter_trak :: proc(w: ^Writer, b: ^[dynamic]u8, id: u32, movie_duration, shift: i64) {
+	trak := begin_box(b, "trak")
+	wide := movie_duration > i64(max(u32))
+	tkhd := begin_full_box(b, "tkhd", wide ? 1 : 0, 2) // in movie, disabled
+	if wide {
+		put_u64(b, 0)
+		put_u64(b, 0)
+		put_u32(b, id)
+		put_u32(b, 0)
+		put_u64(b, u64(movie_duration))
+	} else {
+		put_u32(b, 0)
+		put_u32(b, 0)
+		put_u32(b, id)
+		put_u32(b, 0)
+		put_u32(b, u32(movie_duration))
+	}
+	put_zeros(b, 16)
+	put_matrix(b)
+	put_zeros(b, 8)
+	end_box(b, tkhd)
+
+	edts := begin_box(b, "edts")
+	elst := begin_full_box(b, "elst", wide ? 1 : 0, 0)
+	put_u32(b, 1)
+	if wide {
+		put_u64(b, u64(movie_duration))
+		put_u64(b, 0)
+	} else {
+		put_u32(b, u32(movie_duration))
+		put_u32(b, 0)
+	}
+	put_u32(b, 0x00010000)
+	end_box(b, elst)
+	end_box(b, edts)
+
+	mdia := begin_box(b, "mdia")
+	mdhd := begin_full_box(b, "mdhd", wide ? 1 : 0, 0)
+	if wide {
+		put_u64(b, 0)
+		put_u64(b, 0)
+		put_u32(b, w.options.movie_timescale)
+		put_u64(b, u64(movie_duration))
+	} else {
+		put_u32(b, 0)
+		put_u32(b, 0)
+		put_u32(b, w.options.movie_timescale)
+		put_u32(b, u32(movie_duration))
+	}
+	put_u16(b, 0x55C4) // 'und'
+	put_u16(b, 0)
+	end_box(b, mdhd)
+
+	hdlr := begin_full_box(b, "hdlr", 0, 0)
+	put_u32(b, 0)
+	put_type(b, "text")
+	put_zeros(b, 12)
+	append(b, ..transmute([]u8)string("SubtitleHandler"))
+	put_u8(b, 0)
+	end_box(b, hdlr)
+
+	minf := begin_box(b, "minf")
+	gmhd := begin_box(b, "gmhd")
+	gmin := begin_full_box(b, "gmin", 0, 0)
+	put_u16(b, 0x0040)
+	put_u16(b, 0x8000)
+	put_u16(b, 0x8000)
+	put_u16(b, 0x8000)
+	put_u16(b, 0)
+	put_u16(b, 0)
+	end_box(b, gmin)
+	gmhd_text := begin_box(b, "text")
+	put_matrix(b)
+	end_box(b, gmhd_text)
+	end_box(b, gmhd)
+
+	dinf := begin_box(b, "dinf")
+	dref := begin_full_box(b, "dref", 0, 0)
+	put_u32(b, 1)
+	url := begin_full_box(b, "url ", 0, 1)
+	end_box(b, url)
+	end_box(b, dref)
+	end_box(b, dinf)
+
+	stbl := begin_box(b, "stbl")
+	stsd := begin_full_box(b, "stsd", 0, 0)
+	put_u32(b, 1)
+	entry := begin_box(b, "text")
+	put_zeros(b, 6)
+	put_u16(b, 1) // data_reference_index
+	put_u32(b, 1) // displayFlags
+	put_zeros(b, 18) // justification, bgColor, defaultTextBox, startChar + endChar
+	put_u16(b, 1) // fontID
+	put_zeros(b, 6) // fontStyleFlags, fontSize, fgColor
+	ftab := begin_box(b, "ftab")
+	put_u16(b, 1) // entry_count
+	put_u16(b, 1) // fontID
+	put_u8(b, 0)  // fontNameLength
+	end_box(b, ftab)
+	end_box(b, entry)
+	end_box(b, stsd)
+
+	n := len(w.chapters)
+	stts := begin_full_box(b, "stts", 0, 0)
+	count_at := len(b)
+	put_u32(b, 0)
+	entries, run_delta, run_count: u32
+	scale := f64(w.options.movie_timescale)
+	for i in 0 ..< n {
+		t0 := i64(math.round(w.chapters[i].start * scale))
+		t1 := i + 1 < n ? i64(math.round(w.chapters[i + 1].start * scale)) : movie_duration
+		delta := u32(t1 - t0)
+		if run_count > 0 && delta == run_delta {run_count += 1; continue}
+		if run_count > 0 {put_u32(b, run_count); put_u32(b, run_delta); entries += 1}
+		run_delta, run_count = delta, 1
+	}
+	put_u32(b, run_count)
+	put_u32(b, run_delta)
+	patch_u32(b, count_at, entries + 1)
+	end_box(b, stts)
+
+	stsc := begin_full_box(b, "stsc", 0, 0)
+	put_u32(b, 1)
+	put_u32(b, 1)
+	put_u32(b, u32(n))
+	put_u32(b, 1)
+	end_box(b, stsc)
+
+	stsz := begin_full_box(b, "stsz", 0, 0)
+	put_u32(b, 0)
+	put_u32(b, u32(n))
+	for c in w.chapters do put_u32(b, u32(2 + len(c.title) + 12))
+	end_box(b, stsz)
+
+	off := w.chapter_offset + shift
+	co64 := w.options.force_co64 || off > i64(max(u32))
+	stco := begin_full_box(b, co64 ? "co64" : "stco", 0, 0)
+	put_u32(b, 1)
+	if co64 {put_u64(b, u64(off))} else {put_u32(b, u32(off))}
+	end_box(b, stco)
+	end_box(b, stbl)
+	end_box(b, minf)
+	end_box(b, mdia)
+	end_box(b, trak)
 }
 
 @(private)

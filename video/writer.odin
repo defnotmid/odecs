@@ -2,6 +2,7 @@ package video
 
 import aac "../audio/aac"
 import audio "../audio"
+import "../common"
 import "core:io"
 import mp4 "../container/mp4"
 import hevce "./h265/encoder"
@@ -10,6 +11,8 @@ import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
 import webm "../container/webm"
+
+Chapter :: common.Chapter
 
 Video_Codec :: enum u8 {
 	H264,
@@ -45,6 +48,7 @@ Writer_Config :: struct {
 	ultrafast:             bool, // prefer encode speed over size (media.Config.ultrafast)
 	native_options:        ^native.Options, // optional worker pool and slice/tile geometry
 	gpu_context:           ^vulkan.Context, // optional shared Vulkan device
+	chapters:              []Chapter,
 }
 
 default_writer_config :: proc(width, height, fps_num, fps_den: int) -> Writer_Config {
@@ -262,6 +266,7 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 	}
 	options := mp4.Options {
 		faststart = c.faststart,
+		chapters  = c.chapters,
 	}
 	e := stream.procedure != nil ? mp4.create_stream(&w.mux, stream, tracks[:track_count], options) : mp4.create(&w.mux, path, tracks[:track_count], options)
 	if e != .None {
@@ -290,9 +295,10 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 create_webm :: proc(w: ^Writer, path: string, stream: io.Stream) -> Error {
 	c := &w.config
 	config := webm.Writer_Config {
-		width  = c.width,
-		height = c.height,
-		alpha  = c.transparency != .None,
+		width    = c.width,
+		height   = c.height,
+		alpha    = c.transparency != .None,
+		chapters = c.chapters,
 	}
 	e := stream.procedure != nil ? webm.create_stream(&w.webm, stream, config) : webm.create(&w.webm, path, config)
 	if e != .None {

@@ -545,3 +545,43 @@ test_audio_only_m4a_round_trip :: proc(t: ^testing.T) {
 	testing.expectf(t, snr > 12, "audio-only M4A SNR %v dB", snr)
 }
 
+@(test)
+test_movie_chapters_round_trip :: proc(t: ^testing.T) {
+	W, H :: 64, 48
+	chapters := []Chapter{
+		{0, "Opening"},
+		{0.1, "Scène 2: Café & 🎬"},
+		{0.2, "Credits"},
+	}
+	rgba := make([]u8, W * H * 4)
+	defer delete(rgba)
+	fill_gradient(rgba, W, H, 0)
+	for codec in ([2]Video_Codec{.H264, .VP9}) {
+		m: mp4.Memory_Stream
+		defer delete(m.data)
+		config := default_writer_config(W, H, 30, 1)
+		config.codec = codec
+		config.preference = .Native
+		config.chapters = chapters
+		w: Writer
+		testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.None)
+		for _ in 0 ..< 9 do testing.expect_value(t, write_frame(&w, rgba, W * 4), Error.None)
+		testing.expect_value(t, finish(&w), Error.None)
+		destroy(&w)
+
+		r: Reader
+		testing.expect_value(t, open_reader_stream(&r, mp4.memory_stream(&m), {preference = .Native}), Error.None)
+		defer close_reader(&r)
+		testing.expect_value(t, len(r.chapters), len(chapters))
+		for c, i in r.chapters {
+			testing.expect_value(t, c.title, chapters[i].title)
+			if codec == .VP9 {
+				testing.expect_value(t, c.start, chapters[i].start)
+			} else {
+				testing.expect(t, abs(c.start - chapters[i].start) <= 1.0 / f64(r.audio.demux.movie_timescale))
+			}
+		}
+	}
+}
+
+

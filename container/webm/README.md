@@ -4,7 +4,7 @@ Native demuxing of WebM and Matroska. On open, the reader indexes every
 block of every track into a flat per-track sample table: offset, size,
 timestamp in nanoseconds, duration, keyframe flag, and the `BlockAdditional`
 with `BlockAddID` 1. Seeking therefore needs no `Cues`. The package imports
-only Odin `core`.
+only Odin `core` and `common`.
 
 ```odin
 r: webm.Reader
@@ -34,6 +34,9 @@ webm.close(&r)
   pixel and display size, `AlphaMode`, `Colour` (matrix, primaries,
   transfer, range, bits, chroma siting), sample rate, channels, bit depth,
   `CodecDelay`, and the last block's `DiscardPadding` as `end_discard`.
+- **Chapters:** `r.chapters` lists `{start, title}` (`start` in seconds, UTF-8
+  `ChapString`) from the top-level `ChapterAtom` entries of the first
+  `EditionEntry` in `Chapters`. Nested atoms are ignored.
 - **Content encodings:** header stripping (`ContentCompAlgo` 3, which older
   mkvmerge versions applied by default) is undone by `read_sample`. Tracks
   with zlib or other compression, or encryption, keep codec `Unknown`.
@@ -77,6 +80,12 @@ webm.destroy(&w)
   A missing final duration uses DefaultDuration, or the preceding PTS delta.
   A lone frame at PTS 0 with no duration gets a Void in place of Duration,
   since Matroska requires a positive Duration.
+- `Writer_Config.chapters` (`[]Chapter` of `{start: f64, title: string}`, starts
+  strictly increasing from `0` and before the end timestamp, non-empty UTF-8
+  titles; invalid entries return `Invalid_Argument`) writes a `Chapters`
+  element indexed in `SeekHead`, with `ChapterUID = index + 1`,
+  `ChapterTimeStart`/`ChapterTimeEnd` in nanoseconds (the final end patched at
+  `finish`), and `ChapLanguage` `"und"`.
 - `finish` is idempotent and **required**. `destroy` closes an owned file and
   frees memory, but never silently finishes an interrupted recording. Borrowed
   streams remain open. I/O errors latch: later writes/finish return IO_Error.

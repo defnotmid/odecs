@@ -64,10 +64,12 @@ Reader :: struct {
 	size:            i64,
 	movie_timescale: u32,
 	movie_duration:  i64,
-	major_brand:     [4]u8,
-	tracks:          [dynamic]Track,
-	buffer:          [dynamic]u8,
-	moov:            []u8,
+	major_brand:      [4]u8,
+	tracks:           [dynamic]Track,
+	chapters:         []Chapter,
+	chapter_track_id: u32,
+	buffer:           [dynamic]u8,
+	moov:             []u8,
 }
 
 Packet :: struct {
@@ -114,6 +116,8 @@ close :: proc(r: ^Reader) {
 		delete(t.presentation)
 	}
 	delete(r.tracks)
+	for c in r.chapters do delete(c.title)
+	delete(r.chapters)
 	delete(r.buffer)
 	delete(r.moov)
 	if r.file != nil do os.close(r.file)
@@ -188,6 +192,85 @@ scan_top_level :: proc(r: ^Reader) -> Error {
 		}
 	}
 	for &t in r.tracks do finalize_track(&t) or_return
+	read_chapters(r) or_return
+	return .None
+}
+
+@(private)
+read_chapters :: proc(r: ^Reader) -> Error {
+	if r.chapter_track_id != 0 {
+		chap_idx := -1
+		for &t, i in r.tracks do if t.id == r.chapter_track_id && t.kind == .Other {
+			chap_idx = i
+			break
+		}
+		if chap_idx >= 0 {
+			chapters: [dynamic]Chapter
+			ok := false
+			defer if !ok {
+				for c in chapters do delete(c.title)
+				delete(chapters)
+			}
+			t := &r.tracks[chap_idx]
+			for idx in t.presentation {
+				p := read_sample(r, chap_idx, int(idx)) or_return
+				if len(p.data) < 2 do continue
+				n := int(get_u16(p.data))
+				if n > len(p.data) - 2 do continue
+				raw := p.data[2:2 + n]
+				for len(raw) > 0 && raw[len(raw) - 1] == 0 do raw = raw[:len(raw) - 1]
+				if len(raw) == 0 do continue
+				title := clone_bytes(raw) or_return
+				append(&chapters, Chapter{
+					start = max(0, f64(p.pts) / f64(t.timescale)),
+					title = string(title),
+				})
+			}
+			destroy_track(&r.tracks[chap_idx])
+			ordered_remove(&r.tracks, chap_idx)
+			r.chapters = chapters[:]
+			ok = true
+			if len(r.chapters) > 0 do return .None
+		}
+	}
+	if udta, has_udta := find_box(r.moov, "udta") or_return; has_udta {
+		if chpl, has_chpl := find_box(udta, "chpl") or_return; has_chpl {
+			parse_chpl(r, chpl) or_return
+		}
+	}
+	return .None
+}
+
+@(private)
+parse_chpl :: proc(r: ^Reader, chpl: []u8) -> Error {
+	if len(chpl) < 5 do return .None
+	at := chpl[0] == 0 ? 4 : 8
+	if at >= len(chpl) do return .None
+	count := int(chpl[at])
+	at += 1
+	chapters: [dynamic]Chapter
+	for _ in 0 ..< count {
+		if at + 9 > len(chpl) do break
+		start_ticks := i64(get_u64(chpl[at:]))
+		n := int(chpl[at + 8])
+		at += 9
+		if at + n > len(chpl) do break
+		raw := chpl[at:at + n]
+		at += n
+		for len(raw) > 0 && raw[len(raw) - 1] == 0 do raw = raw[:len(raw) - 1]
+		if len(raw) == 0 do continue
+		title, err := clone_bytes(raw)
+		if err != .None {
+			for c in chapters do delete(c.title)
+			delete(chapters)
+			return err
+		}
+		append(&chapters, Chapter{
+			start = max(0, f64(start_ticks) / 1e7),
+			title = string(title),
+		})
+	}
+	r.chapters = chapters[:]
 	return .None
 }
 
@@ -470,6 +553,11 @@ parse_trak :: proc(r: ^Reader, t: ^Track, trak: []u8) -> Error {
 	if !has_stbl do return .Invalid_Data
 	if edts, has_edts := find_box(trak, "edts") or_return; has_edts {
 		if elst, has_elst := find_box(edts, "elst") or_return; has_elst do parse_elst(r, t, elst) or_return
+	}
+	if tref, has_tref := find_box(trak, "tref") or_return; has_tref {
+		if chap, has_chap := find_box(tref, "chap") or_return; has_chap && len(chap) >= 4 && r.chapter_track_id == 0 {
+			r.chapter_track_id = get_u32(chap)
+		}
 	}
 	parse_stsd(t, stbl) or_return
 	if t.codec == .PCM do return parse_pcm_chunks(r, t, stbl)

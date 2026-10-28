@@ -20,10 +20,44 @@ odin test video -o:speed
 odin build tests/movie_equal.odin -file -o:speed -out:"$work/movie_equal"
 odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"
+odin build tests/vp9_encode_check.odin -file -o:speed -out:"$work/vp9_encode_check"
+
+echo "== WebM chapters round trip and ffprobe oracle"
+"$work/vp9_encode_check" "$fx/chapters" 64 48 100 1 8 0 animation 5 > "$fx/chapters.log" 2>&1
+ffprobe -v error -show_chapters -of json "$fx/chapters.webm" > "$fx/chapters.json"
+if grep -q '"start_time": "0.000000"' "$fx/chapters.json" &&
+	grep -q '"end_time": "0.100000"' "$fx/chapters.json" &&
+	grep -q '"title": "Intro"' "$fx/chapters.json" &&
+	grep -q '"title": "Scène 2: Café & 🎬"' "$fx/chapters.json" &&
+	grep -q '"start_time": "0.200000"' "$fx/chapters.json" &&
+	grep -q '"end_time": "0.266667"' "$fx/chapters.json" &&
+	grep -q '"title": "Finale"' "$fx/chapters.json"; then
+	pass "WebM chapters ffprobe + reader round trip"
+else
+	bad "WebM chapters ffprobe + reader round trip"; cat "$fx/chapters.json"
+fi
 
 ff() { ffmpeg -v error -y "$@"; }
+cat > "$fx/chapters.ffmeta" << 'EOF'
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=1000
+title=Intro
+[CHAPTER]
+TIMEBASE=1/1000
+START=1000
+END=2000
+title=Scène 2: Café & 🎬
+[CHAPTER]
+TIMEBASE=1/1000
+START=2000
+END=3000
+title=Finale
+EOF
 src="-f lavfi -i testsrc2=size=640x360:rate=30:d=3 -f lavfi -i sine=frequency=440:sample_rate=48000:d=3"
-ff $src -ac 2 -c:v libx264 -pix_fmt yuv420p -bf 3 -g 30 -c:a aac "$fx/h264_aac.mkv"
+ff $src -i "$fx/chapters.ffmeta" -map_metadata 2 -map_chapters 2 -ac 2 -c:v libx264 -pix_fmt yuv420p -bf 3 -g 30 -c:a aac "$fx/h264_aac.mkv"
 ff -f lavfi -i testsrc2=size=480x270:rate=25:d=3 -f lavfi -i sine=frequency=300:sample_rate=44100:d=3 \
 	-c:v libx265 -x265-params log-level=error:bframes=4 -pix_fmt yuv420p10le -c:a aac "$fx/h265_10bit_aac.mkv"
 for a in pcm_s16le pcm_s16be pcm_s24le pcm_f32le; do
