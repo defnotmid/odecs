@@ -3,6 +3,7 @@ package vp9_encoder
 import "core:testing"
 import "core:fmt"
 import "core:mem"
+import vp9 ".."
 import decoder "../decoder"
 import common "../../../common"
 
@@ -52,6 +53,213 @@ roundtrip_case :: proc(t: ^testing.T, pool: ^common.Work_Pool, size: [2]int, q, 
 		}
 	}
 	return true
+}
+
+@(test)
+segmentation_and_delta_q_roundtrip :: proc(t: ^testing.T) {
+	e: Encoder
+	cfg := Encoder_Config{
+		width = 65, height = 49, base_q_idx = 80,
+		delta_q_y_dc = -5, delta_q_uv_dc = -8, delta_q_uv_ac = 6,
+		keyframe_interval = 4, block_log2 = 5,
+	}
+	if !testing.expect_value(t, init_encoder(&e, cfg), .None) do return
+	defer destroy_encoder(&e)
+	e.segmentation.enabled = true
+	e.segmentation.update_map = true
+	e.segmentation.temporal_update = true
+	e.segmentation.feature_enabled[1][vp9.SEG_LVL_ALT_Q] = true
+	e.segmentation.feature_data[1][vp9.SEG_LVL_ALT_Q] = -20
+	e.segmentation.feature_enabled[2][vp9.SEG_LVL_ALT_L] = true
+	e.segmentation.feature_data[2][vp9.SEG_LVL_ALT_L] = 8
+	e.segmentation.feature_enabled[3][vp9.SEG_LVL_SKIP] = true
+	e.segmentation.feature_enabled[4][vp9.SEG_LVL_REF_FRAME] = true
+	e.segmentation.feature_data[4][vp9.SEG_LVL_REF_FRAME] = vp9.INTRA_FRAME
+	e.segmentation.feature_enabled[5][vp9.SEG_LVL_REF_FRAME] = true
+	e.segmentation.feature_data[5][vp9.SEG_LVL_REF_FRAME] = vp9.LAST_FRAME
+
+	d: decoder.Decoder
+	decoder.init_decoder(&d)
+	defer decoder.destroy_decoder(&d)
+	input: [3][]u8
+	strides := [3]int{65, 33, 33}
+	for p in 0 ..< 3 do input[p] = make([]u8, strides[p] * (p == 0 ? 49 : 25))
+	defer for v in input do delete(v)
+	for f in 0 ..< 6 {
+		e.segmentation.update_map = f != 2
+		for &sid, idx in e.segment_ids do sid = u8((idx + f) % 6)
+		for p in 0 ..< 3 do for &v, i in input[p] do v = u8((i * 19 + f * 23 + p * 37) & 255)
+		packet, _, err := encode_frame(&e, input, strides)
+		if !testing.expect_value(t, err, .None) do return
+		pic, shown, de := decoder.decode_packet(&d, packet)
+		if !testing.expect_value(t, de, .None) || !testing.expect(t, shown) do return
+		rec, rs := reconstruction(&e)
+		for p in 0 ..< 3 {
+			h := p == 0 ? 49 : 25
+			for y in 0 ..< h do for x in 0 ..< strides[p] {
+				if rec[p][y * rs[p] + x] != pic.planes8[p][y * pic.strides[p] + x] {
+					testing.expect(t, false, fmt.tprintf("seg frame=%d plane=%d xy=%d,%d", f, p, x, y))
+					return
+				}
+			}
+		}
+	}
+}
+
+@(test)
+altref_and_contexts_roundtrip :: proc(t: ^testing.T) {
+	e: Encoder
+	if !testing.expect_value(t, init_encoder(&e, {width = 64, height = 48, base_q_idx = 60, keyframe_interval = 8, block_log2 = 5}), .None) do return
+	defer destroy_encoder(&e)
+	d: decoder.Decoder
+	decoder.init_decoder(&d)
+	defer decoder.destroy_decoder(&d)
+	input, arf_input: [3][]u8
+	strides := [3]int{64, 32, 32}
+	for p in 0 ..< 3 {
+		h := p == 0 ? 48 : 24
+		input[p] = make([]u8, strides[p] * h)
+		arf_input[p] = make([]u8, strides[p] * h)
+		for &v, i in arf_input[p] do v = u8((i * 29 + p * 43 + 99) & 255)
+	}
+	defer for p in 0 ..< 3 {delete(input[p]); delete(arf_input[p])}
+
+	// 1. Keyframe (frame 0).
+	for p in 0 ..< 3 do for &v, i in input[p] do v = u8((i * 17 + p * 31) & 255)
+	pkt0, key0, err0 := encode_frame(&e, input, strides)
+	if !testing.expect_value(t, err0, .None) || !testing.expect(t, key0) do return
+	_, shown0, de0 := decoder.decode_packet(&d, pkt0)
+	if !testing.expect_value(t, de0, .None) || !testing.expect(t, shown0) do return
+
+	// 2. Unshown altref frame into slot 2 on context 2.
+	e.frame_context_idx = 2
+	pkt_arf, err_arf := encode_altref_frame(&e, arf_input, strides)
+	if !testing.expect_value(t, err_arf, .None) do return
+	_, shown_arf, de_arf := decoder.decode_packet(&d, pkt_arf)
+	if !testing.expect_value(t, de_arf, .None) || !testing.expect(t, !shown_arf) do return
+
+	// 3. Shown inter frames cycling contexts 0..3 and predicting from LAST/GOLDEN/ALTREF.
+	for f in 1 ..= 3 {
+		e.frame_context_idx = f & 3
+		for p in 0 ..< 3 do for &v, i in input[p] do v = f == 2 ? arf_input[p][i] : u8((int(arf_input[p][i]) + f * 7) & 255)
+		pkt, key, err := encode_frame(&e, input, strides)
+		if !testing.expect_value(t, err, .None) || !testing.expect(t, !key) do return
+		pic, shown, de := decoder.decode_packet(&d, pkt)
+		if !testing.expect_value(t, de, .None) || !testing.expect(t, shown) do return
+		rec, rs := reconstruction(&e)
+		for p in 0 ..< 3 {
+			h := p == 0 ? 48 : 24
+			for y in 0 ..< h do for x in 0 ..< strides[p] {
+				if rec[p][y * rs[p] + x] != pic.planes8[p][y * pic.strides[p] + x] {
+					testing.expect(t, false, fmt.tprintf("arf inter frame=%d plane=%d xy=%d,%d", f, p, x, y))
+					return
+				}
+			}
+		}
+	}
+
+	// 4. Display the buffered altref frame via 1-byte show_existing_frame = 1 packet.
+	pkt_show, err_show := encode_existing_frame(&e, 2)
+	if !testing.expect_value(t, err_show, .None) || !testing.expect_value(t, len(pkt_show), 1) do return
+	pic_show, shown_show, de_show := decoder.decode_packet(&d, pkt_show)
+	if !testing.expect_value(t, de_show, .None) || !testing.expect(t, shown_show) do return
+	rec_show, rs_show := reconstruction(&e)
+	for p in 0 ..< 3 {
+		h := p == 0 ? 48 : 24
+		for y in 0 ..< h do for x in 0 ..< strides[p] {
+			if rec_show[p][y * rs_show[p] + x] != pic_show.planes8[p][y * pic_show.strides[p] + x] {
+				testing.expect(t, false, fmt.tprintf("show_existing plane=%d xy=%d,%d", p, x, y))
+				return
+			}
+		}
+	}
+}
+
+@(test)
+profiles_1_to_3_roundtrip :: proc(t: ^testing.T) {
+	Case :: struct {
+		bit_depth:   int,
+		subsampling: Chroma_Subsampling,
+		q:           int,
+	}
+	cases := []Case{
+		// Profile 1: 8-bit 4:2:2, 4:4:0, 4:4:4 (lossy + lossless)
+		{8, .YUV422, 80},
+		{8, .YUV440, 80},
+		{8, .YUV444, 80},
+		{8, .YUV444, 0},
+		// Profile 2: 10-bit and 12-bit 4:2:0 (lossy + lossless)
+		{10, .YUV420, 80},
+		{10, .YUV420, 0},
+		{12, .YUV420, 80},
+		{12, .YUV420, 0},
+		// Profile 3: 10-bit and 12-bit 4:2:2, 4:4:4 (lossy + lossless)
+		{10, .YUV422, 80},
+		{10, .YUV444, 80},
+		{12, .YUV444, 80},
+		{12, .YUV444, 0},
+	}
+	w, h := 33, 25
+	for tc in cases {
+		e: Encoder
+		cfg := Encoder_Config{
+			width = w, height = h,
+			bit_depth = tc.bit_depth,
+			subsampling = tc.subsampling,
+			base_q_idx = tc.q,
+			keyframe_interval = 2,
+			block_log2 = 4,
+		}
+		if !testing.expect_value(t, init_encoder(&e, cfg), .None) do return
+		defer destroy_encoder(&e)
+		d: decoder.Decoder
+		decoder.init_decoder(&d)
+		defer decoder.destroy_decoder(&d)
+		strides: [3]int
+		heights: [3]int
+		for p in 0 ..< 3 {
+			sx := p > 0 ? uint(e.ss_x) : 0
+			sy := p > 0 ? uint(e.ss_y) : 0
+			strides[p] = (w + int(sx)) >> sx
+			heights[p] = (h + int(sy)) >> sy
+		}
+		mask := (1 << uint(tc.bit_depth)) - 1
+		if tc.bit_depth == 8 {
+			input: [3][]u8
+			for p in 0 ..< 3 do input[p] = make([]u8, strides[p] * heights[p])
+			defer for v in input do delete(v)
+			for f in 0 ..< 3 {
+				for p in 0 ..< 3 do for &v, i in input[p] do v = u8((i * 19 + f * 29 + p * 41) & mask)
+				pkt, _, err := encode_frame(&e, input, strides)
+				if !testing.expect_value(t, err, .None) do return
+				pic, shown, de := decoder.decode_packet(&d, pkt)
+				if !testing.expect_value(t, de, .None) || !testing.expect(t, shown) do return
+				rec, rs := reconstruction(&e)
+				for p in 0 ..< 3 do for y in 0 ..< heights[p] do for x in 0 ..< strides[p] {
+					msg := fmt.tprintf("tc=%v f=%d p=%d xy=%d,%d", tc, f, p, x, y)
+					if rec[p][y * rs[p] + x] != pic.planes8[p][y * pic.strides[p] + x] {testing.expect(t, false, msg); return}
+					if tc.q == 0 && rec[p][y * rs[p] + x] != input[p][y * strides[p] + x] {testing.expect(t, false, msg); return}
+				}
+			}
+		} else {
+			input: [3][]u16
+			for p in 0 ..< 3 do input[p] = make([]u16, strides[p] * heights[p])
+			defer for v in input do delete(v)
+			for f in 0 ..< 3 {
+				for p in 0 ..< 3 do for &v, i in input[p] do v = u16((i * 73 + f * 131 + p * 257) & mask)
+				pkt, _, err := encode_frame16(&e, input, strides)
+				if !testing.expect_value(t, err, .None) do return
+				pic, shown, de := decoder.decode_packet(&d, pkt)
+				if !testing.expect_value(t, de, .None) || !testing.expect(t, shown) do return
+				rec, rs := reconstruction16(&e)
+				for p in 0 ..< 3 do for y in 0 ..< heights[p] do for x in 0 ..< strides[p] {
+					msg := fmt.tprintf("tc=%v f=%d p=%d xy=%d,%d", tc, f, p, x, y)
+					if rec[p][y * rs[p] + x] != pic.planes16[p][y * pic.strides[p] + x] {testing.expect(t, false, msg); return}
+					if tc.q == 0 && rec[p][y * rs[p] + x] != input[p][y * strides[p] + x] {testing.expect(t, false, msg); return}
+				}
+			}
+		}
+	}
 }
 
 @(test)

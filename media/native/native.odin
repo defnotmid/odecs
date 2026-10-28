@@ -1010,6 +1010,7 @@ open_vp9_encoders :: proc(session: ^media.Session, s: ^State, config: media.Conf
 		base_q_idx        = vp9_q_index(config.qp),
 		keyframe_interval = gop,
 		tile_cols_log2    = 2,
+		ultrafast         = config.ultrafast,
 		pool              = options.pool,
 	}
 	for i in 0 ..< (config.alpha ? 2 : 1) {

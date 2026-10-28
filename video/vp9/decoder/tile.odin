@@ -139,7 +139,7 @@ decode_block :: proc(t: ^Tile, r, c, subsize: int, $T: typeid) #no_bounds_check 
 	b.segment_id = 0
 	b.is_inter = false
 	b.interp_filter = 0
-	b.block_mvs = {}
+	b.mv = {}
 	b.eob_total = 0
 	if h.frame_is_intra {
 		intra_frame_mode_info(t)
@@ -160,14 +160,15 @@ decode_block :: proc(t: ^Tile, r, c, subsize: int, $T: typeid) #no_bounds_check 
 		skip      = b.skip,
 	}
 	filtering := vp9.filter_cell(m, &d.filter_levels, d.ss_x, d.ss_y)
-	motion := Motion{{b.block_mvs[0][3], b.block_mvs[1][3]}, ref_frame, u8(b.y_mode), subsize < vp9.BLOCK_8X8}
+	motion := Motion{b.mv, ref_frame, u8(b.y_mode), subsize < vp9.BLOCK_8X8}
 	edge := Edge_Context{ref_frame, {}, u8(b.tx_size), u8(b.interp_filter), b.skip}
 	rows := min(int(vp9.NUM_8X8_BLOCKS_HIGH_LOOKUP[subsize]), h.mi_rows - r)
 	cols := min(int(vp9.NUM_8X8_BLOCKS_WIDE_LOOKUP[subsize]), h.mi_cols - c)
+	update_seg := d.segmentation.enabled && d.segmentation.update_map
 	for y in 0 ..< rows do for x in 0 ..< cols {
 		cell := (r + y) * h.mi_cols + c + x
 		d.motion[cell] = motion
-		d.segment_ids[cell] = u8(b.segment_id)
+		if update_seg do d.segment_ids[cell] = u8(b.segment_id)
 		d.filter_cells[cell] = filtering
 	}
 	if motion.sub8x8 do d.sub_mvs[r * h.mi_cols + c] = b.block_mvs
@@ -368,19 +369,17 @@ inter_block_mode_info :: proc(t: ^Tile) #no_bounds_check {
 	h := &d.h
 	b := &t.blk
 	read_ref_frames(t)
-	neighbours: Mv_Neighbours
-	gather_neighbours(t, &neighbours)
-	for j in 0 ..< 2 {
-		if b.ref_frame[j] > vp9.INTRA_FRAME {
-			find_mv_refs(t, &neighbours, b.ref_frame[j], -1)
-			find_best_ref_mvs(t, j)
-		}
-	}
 	compound := b.ref_frame[1] > vp9.INTRA_FRAME
 	if vp9.seg_feature_active(&d.segmentation, b.segment_id, vp9.SEG_LVL_SKIP) {
 		b.y_mode = vp9.ZEROMV
 	} else if b.mi_size >= vp9.BLOCK_8X8 {
-		ctx := b.mode_context[b.ref_frame[0]]
+		search := &vp9.MV_REF_BLOCKS[b.mi_size]
+		context_counter := 0
+		for i in 0 ..< 2 {
+			r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
+			if is_inside(t, r, c) do context_counter += int(vp9.MODE_2_COUNTER[d.motion[r * h.mi_cols + c].y_mode])
+		}
+		ctx := int(vp9.COUNTER_TO_CONTEXT[context_counter])
 		mode := common.bool_tree(&t.b, vp9.INTER_MODE_TREE[:], d.probs.inter_mode[ctx][:])
 		t.counts.inter_mode[ctx][mode] += 1
 		b.y_mode = vp9.NEARESTMV + mode
@@ -402,6 +401,16 @@ inter_block_mode_info :: proc(t: ^Tile) #no_bounds_check {
 	} else {
 		b.interp_filter = h.interp_filter
 	}
+	if b.mi_size >= vp9.BLOCK_8X8 && b.y_mode == vp9.ZEROMV {
+		b.mv = {}
+		return
+	}
+	neighbours: [8]int = ---
+	gather_neighbours(t, &neighbours)
+	for j in 0 ..< 1 + int(compound) {
+		find_mv_refs(t, &neighbours, b.ref_frame[j], -1)
+		find_best_ref_mvs(t, j)
+	}
 	if b.mi_size < vp9.BLOCK_8X8 {
 		w4, h4 := int(vp9.NUM_4X4_BLOCKS_WIDE_LOOKUP[b.mi_size]), int(vp9.NUM_4X4_BLOCKS_HIGH_LOOKUP[b.mi_size])
 		for idy := 0; idy < 2; idy += h4 {
@@ -422,7 +431,6 @@ inter_block_mode_info :: proc(t: ^Tile) #no_bounds_check {
 		}
 	} else {
 		assign_mv(t, compound)
-		for l in 0 ..< 1 + int(compound) do for block in 0 ..< 4 do b.block_mvs[l][block] = b.mv[l]
 	}
 }
 
@@ -718,32 +726,17 @@ clamp_mv_col :: #force_inline proc(t: ^Tile, v, border: int) -> int #no_bounds_c
 	return clamp(v, to_left - border, to_right + border)
 }
 
-// The cells motion vector prediction reads around a block (6.4.21): the
-// MV_REF_BLOCKS positions and the previous frame's co-located cell. Gathered
-// once per block, since each reference frame and each sub-block searches
-// them again.
+// Grid indices of the MV_REF_BLOCKS positions around a block (6.4.21), -1
+// outside the tile.
 @(private)
-Mv_Neighbours :: struct {
-	cells:  [8]Motion,
-	at:     [8]int, // grid index, -1 outside the tile
-	prev:   Motion,
-	use_prev: bool,
-}
-
-@(private)
-gather_neighbours :: proc(t: ^Tile, n: ^Mv_Neighbours) #no_bounds_check {
+gather_neighbours :: proc(t: ^Tile, at: ^[8]int) #no_bounds_check {
 	d := t.d
 	b := &t.blk
 	search := &vp9.MV_REF_BLOCKS[b.mi_size]
 	for i in 0 ..< 8 {
 		r, c := b.mi_row + int(search[i][0]), b.mi_col + int(search[i][1])
-		n.at[i] = -1
-		if !is_inside(t, r, c) do continue
-		n.at[i] = r * d.h.mi_cols + c
-		n.cells[i] = d.motion[n.at[i]]
+		at[i] = is_inside(t, r, c) ? r * d.h.mi_cols + c : -1
 	}
-	n.use_prev = d.h.use_prev_mvs
-	if n.use_prev do n.prev = d.prev_motion[b.mi_row * d.h.mi_cols + b.mi_col]
 }
 
 // Up to two distinct candidate vectors, in order.
@@ -789,7 +782,7 @@ add_diff_ref :: #force_inline proc(c: ^Mv_Candidates, m: ^Motion, ref_frame: int
 // the previous frame), and the inter mode context. Once two are found the
 // rest of the search cannot change them.
 @(private)
-find_mv_refs :: proc(t: ^Tile, n: ^Mv_Neighbours, ref_frame, block: int) #no_bounds_check {
+find_mv_refs :: proc(t: ^Tile, at: ^[8]int, ref_frame, block: int) #no_bounds_check {
 	d := t.d
 	b := &t.blk
 	c: Mv_Candidates
@@ -798,8 +791,8 @@ find_mv_refs :: proc(t: ^Tile, n: ^Mv_Neighbours, ref_frame, block: int) #no_bou
 	search := &vp9.MV_REF_BLOCKS[b.mi_size]
 	search_loop: {
 		for i in 0 ..< 2 {
-			if n.at[i] < 0 do continue
-			m := &n.cells[i]
+			if at[i] < 0 do continue
+			m := &d.motion[at[i]]
 			different_ref_found = true
 			context_counter += int(vp9.MODE_2_COUNTER[m.y_mode])
 			for j in 0 ..< 2 {
@@ -807,7 +800,7 @@ find_mv_refs :: proc(t: ^Tile, n: ^Mv_Neighbours, ref_frame, block: int) #no_bou
 					mv := m.mv[j] // every sub-block of an 8x8 or larger block
 					if block >= 0 && m.sub8x8 {
 						idx := int(vp9.IDX_N_COLUMN_TO_SUBBLOCK[block][search[i][1] == 0 ? 1 : 0])
-						mv = d.sub_mvs[n.at[i]][j][idx]
+						mv = d.sub_mvs[at[i]][j][idx]
 					}
 					add_candidate(&c, mv)
 					break
@@ -816,16 +809,22 @@ find_mv_refs :: proc(t: ^Tile, n: ^Mv_Neighbours, ref_frame, block: int) #no_bou
 		}
 		if c.count == 2 do break search_loop
 		for i in 2 ..< 8 {
-			if n.at[i] < 0 do continue
+			if at[i] < 0 do continue
 			different_ref_found = true
-			add_same_ref(&c, &n.cells[i], ref_frame)
+			add_same_ref(&c, &d.motion[at[i]], ref_frame)
+			if c.count == 2 do break search_loop
 		}
-		if n.use_prev do add_same_ref(&c, &n.prev, ref_frame)
-		if c.count == 2 do break search_loop
+		if d.h.use_prev_mvs {
+			add_same_ref(&c, &d.prev_motion[b.mi_row * d.h.mi_cols + b.mi_col], ref_frame)
+			if c.count == 2 do break search_loop
+		}
 		if different_ref_found {
-			for i in 0 ..< 8 do if n.at[i] >= 0 do add_diff_ref(&c, &n.cells[i], ref_frame, &d.h)
+			for i in 0 ..< 8 do if at[i] >= 0 {
+				add_diff_ref(&c, &d.motion[at[i]], ref_frame, &d.h)
+				if c.count == 2 do break search_loop
+			}
 		}
-		if n.use_prev do add_diff_ref(&c, &n.prev, ref_frame, &d.h)
+		if d.h.use_prev_mvs do add_diff_ref(&c, &d.prev_motion[b.mi_row * d.h.mi_cols + b.mi_col], ref_frame, &d.h)
 	}
 	b.mode_context[ref_frame] = int(vp9.COUNTER_TO_CONTEXT[context_counter])
 	for i in 0 ..< 2 {
@@ -852,7 +851,7 @@ find_best_ref_mvs :: proc(t: ^Tile, list: int) #no_bounds_check {
 }
 
 @(private)
-append_sub8x8_mvs :: proc(t: ^Tile, neighbours: ^Mv_Neighbours, block, list: int) #no_bounds_check {
+append_sub8x8_mvs :: proc(t: ^Tile, neighbours: ^[8]int, block, list: int) #no_bounds_check {
 	b := &t.blk
 	find_mv_refs(t, neighbours, b.ref_frame[list], block)
 	candidates: [2]vp9.Mv
@@ -883,6 +882,30 @@ append_sub8x8_mvs :: proc(t: ^Tile, neighbours: ^Mv_Neighbours, block, list: int
 // ---- Residual and reconstruction ------------------------------------------------------
 
 @(private)
+has_nz :: #force_inline proc(src: [^]u8, step: int) -> int #no_bounds_check {
+	switch step {
+	case 1: return int(src[0])
+	case 2: return int(intrinsics.unaligned_load((^u16)(src)) != 0)
+	case 4: return int(intrinsics.unaligned_load((^u32)(src)) != 0)
+	case:   return int(intrinsics.unaligned_load((^u64)(src)) != 0)
+	}
+}
+
+@(private)
+fill_nz :: #force_inline proc(dst: [^]u8, n: int, val: u8) #no_bounds_check {
+	v := u64(val) * 0x0101010101010101
+	switch n {
+	case 1: dst[0] = val
+	case 2: intrinsics.unaligned_store((^u16)(dst), u16(v))
+	case 4: intrinsics.unaligned_store((^u32)(dst), u32(v))
+	case 8: intrinsics.unaligned_store((^u64)(dst), v)
+	case 16:
+		intrinsics.unaligned_store((^u64)(dst), v)
+		intrinsics.unaligned_store((^u64)(&dst[8]), v)
+	}
+}
+
+@(private)
 residual :: proc(t: ^Tile, $T: typeid) #no_bounds_check {
 	d := t.d
 	h := &d.h
@@ -895,22 +918,33 @@ residual :: proc(t: ^Tile, $T: typeid) #no_bounds_check {
 		plane_size := int(vp9.SS_SIZE_LOOKUP[bsize][sub_x][sub_y])
 		w4, h4 := int(vp9.NUM_4X4_BLOCKS_WIDE_LOOKUP[plane_size]), int(vp9.NUM_4X4_BLOCKS_HIGH_LOOKUP[plane_size])
 		base_x, base_y := (b.mi_col * 8) >> uint(sub_x), (b.mi_row * 8) >> uint(sub_y)
+		above := d.above_nonzero[p][:]
+		left := &t.left_nonzero[p]
 		if b.is_inter {
 			if b.mi_size < vp9.BLOCK_8X8 {
 				for y in 0 ..< h4 do for x in 0 ..< w4 do predict_inter(t, p, base_x + 4 * x, base_y + 4 * y, 4, 4, y * w4 + x, T)
 			} else {
 				predict_inter(t, p, base_x, base_y, w4 * 4, h4 * 4, 0, T)
 			}
+			if b.skip {
+				fill_nz(&above[base_x >> 2], w4, 0)
+				fill_nz(&left[(base_y >> 2) & 15], h4, 0)
+				continue
+			}
 		}
 		max_x, max_y := (h.mi_cols * 8) >> uint(sub_x), (h.mi_rows * 8) >> uint(sub_y)
+		ctx_max_x, ctx_max_y := max_x >> 2, max_y >> 2
+		plane_type := min(p, 1)
+		is_inter := int(b.is_inter)
+		probs := &d.probs.coef[tx][plane_type][is_inter]
+		counts_more := &t.counts.more_coefs[tx][plane_type][is_inter]
 		frame := plane(d.cur, p, T)
 		stride := d.cur.strides[p]
-		above := d.above_nonzero[p][:]
-		left := &t.left_nonzero[p]
 		block_idx := 0
 		for y := 0; y < h4; y += step {
 			for x := 0; x < w4; x += step {
 				start_x, start_y := base_x + 4 * x, base_y + 4 * y
+				x4, y4 := start_x >> 2, start_y >> 2
 				nonzero := false
 				if start_x < max_x && start_y < max_y {
 					if !b.is_inter {
@@ -925,15 +959,22 @@ residual :: proc(t: ^Tile, $T: typeid) #no_bounds_check {
 						vp9.predict_intra(frame, stride, start_x, start_y, tx, mode, edges, d.bit_depth)
 					}
 					if !b.skip {
-						eob, rows, tx_type := tokens(t, p, start_x, start_y, tx, block_idx, max_x, max_y)
-						nonzero = eob > 0
-						b.eob_total += int(nonzero)
-						if nonzero do reconstruct(t, frame[start_y * stride + start_x:], stride, tx, tx_type, rows)
+						ctx := has_nz(&above[x4], step) + has_nz(&left[y4 & 15], step)
+						more0 := common.bool_decode(&t.b, probs[0][ctx][0])
+						counts_more[0][ctx][more0] += 1
+						if more0 != 0 {
+							eob, rows, tx_type := tokens(t, p, tx, block_idx, ctx)
+							nonzero = true
+							b.eob_total += 1
+							reconstruct(t, frame[start_y * stride + start_x:], stride, tx, tx_type, eob, rows)
+						}
 					}
 				}
-				for i in 0 ..< step {
-					above[(start_x >> 2) + i] = u8(nonzero)
-					left[((start_y >> 2) + i) & 15] = u8(nonzero)
+				fill_nz(&above[x4], step, u8(nonzero))
+				fill_nz(&left[y4 & 15], step, u8(nonzero))
+				if nonzero {
+					for k in ctx_max_x ..< x4 + step do above[k] = 0
+					for k in ctx_max_y ..< y4 + step do left[k & 15] = 0
 				}
 				block_idx += 1
 			}
@@ -941,37 +982,22 @@ residual :: proc(t: ^Tile, $T: typeid) #no_bounds_check {
 	}
 }
 
-// Reads one transform block's coefficients (section 6.4.24) into t.coefs,
-// dequantized, in raster order. Returns the end of block, the number of
-// leading rows holding coefficients, and the transform type. Every index is
+// Reads one non-empty transform block's coefficients (section 6.4.24) into
+// t.coefs, dequantized, in raster order. Returns the end of block, the number
+// of leading rows holding coefficients, and the transform type. Every index is
 // bounded by construction: scan entries stay inside the block, bands and
 // contexts below six, tokens below eleven.
 @(private)
-tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) -> (eob, rows, tx_type: int) #no_bounds_check {
+tokens :: proc(t: ^Tile, p, tx, block_idx, initial_ctx: int) -> (eob, rows, tx_type: int) #no_bounds_check {
 	d := t.d
 	h := &d.h
 	blk := &t.blk
-	b := t.b
 	plane_type := min(p, 1)
 	is_inter := int(blk.is_inter)
 	probs := &d.probs.coef[tx][plane_type][is_inter]
 	counts_more := &t.counts.more_coefs[tx][plane_type][is_inter]
-	// First coefficient context from the neighbouring blocks.
-	sub_x, sub_y := p > 0 ? d.ss_x : 0, p > 0 ? d.ss_y : 0
-	ctx_max_x, ctx_max_y := (2 * h.mi_cols) >> uint(sub_x), (2 * h.mi_rows) >> uint(sub_y)
-	x4, y4 := start_x >> 2, start_y >> 2
-	above, left: u8
-	for i in 0 ..< 1 << uint(tx) {
-		if x4 + i < ctx_max_x do above |= d.above_nonzero[p][x4 + i]
-		if y4 + i < ctx_max_y do left |= t.left_nonzero[p][(y4 + i) & 15]
-	}
-	ctx := int(above) + int(left)
-	more0 := common.bool_decode(&b, probs[0][ctx][0])
-	counts_more[0][ctx][more0] += 1
-	if more0 == 0 {
-		t.b = b
-		return 0, 0, vp9.DCT_DCT
-	}
+	ctx := initial_ctx
+	b := t.b
 	// Transform type and scan.
 	tx_type = vp9.DCT_DCT
 	if p == 0 && tx != vp9.TX_32X32 {
@@ -985,61 +1011,77 @@ tokens :: proc(t: ^Tile, p, start_x, start_y, tx, block_idx, max_x, max_y: int) 
 	coefs := &t.coefs
 	counts_token := &t.counts.token[tx][plane_type][is_inter]
 	// Dequantizers of this block's segment.
-	q := vp9.segment_qindex(&d.segmentation, h.base_q_idx, blk.segment_id)
-	dc, ac: i32
-	if p == 0 {
-		dc, ac = vp9.dc_q(d.bit_depth, q + h.delta_q_y_dc), vp9.ac_q(d.bit_depth, q)
-	} else {
-		dc, ac = vp9.dc_q(d.bit_depth, q + h.delta_q_uv_dc), vp9.ac_q(d.bit_depth, q + h.delta_q_uv_ac)
-	}
+	dq := d.dequant[blk.segment_id][plane_type]
+	dc, ac := dq[0], dq[1]
 	shift: uint = tx == vp9.TX_32X32 ? 1 : 0
 	cache := &t.token_cache
-	check_eob := false
 	bit_depth := d.bit_depth
 	max_row := 0
 	seg_eob := 16 << uint(tx << 1)
+	dqv := dc
 	c := 0
-	for ; c < seg_eob; c += 1 {
+	for c < seg_eob {
 		e := scan[c]
 		pos := int(e.pos)
-		if c > 0 do ctx = (1 + int(cache[e.above]) + int(cache[e.left])) >> 1
 		band := int(e.band)
 		pr := &probs[band][ctx]
-		if check_eob {
+		if c > 0 {
 			more := common.bool_decode(&b, pr[0])
 			counts_more[band][ctx][more] += 1
 			if more == 0 do break
 		}
-		token: int
-		if common.bool_decode(&b, pr[1]) == 0 {
-			token = vp9.ZERO_TOKEN
-		} else if common.bool_decode(&b, pr[2]) == 0 {
-			token = vp9.ONE_TOKEN
+		for common.bool_decode(&b, pr[1]) == 0 {
+			counts_token[band][ctx][vp9.ZERO_TOKEN] += 1
+			dqv = ac
+			cache[pos] = 0
+			c += 1
+			if c >= seg_eob {
+				t.b = b
+				return c, max_row, tx_type
+			}
+			e = scan[c]
+			pos = int(e.pos)
+			ctx = (1 + int(cache[e.above]) + int(cache[e.left])) >> 1
+			band = int(e.band)
+			pr = &probs[band][ctx]
+		}
+		value: i32
+		if common.bool_decode(&b, pr[2]) == 0 {
+			counts_token[band][ctx][vp9.ONE_TOKEN] += 1
+			cache[pos] = 1
+			value = dqv >> shift
 		} else {
-			token = read_large_token(&b, pr[2])
+			counts_token[band][ctx][vp9.TWO_TOKEN] += 1
+			pareto := vp9.pareto_row(pr[2])
+			if common.bool_decode(&b, pareto[0]) == 0 {
+				if common.bool_decode(&b, pareto[1]) == 0 {
+					cache[pos] = 2
+					value = (2 * dqv) >> shift
+				} else {
+					cache[pos] = 3
+					value = (i32(3 + common.bool_decode(&b, pareto[2])) * dqv) >> shift
+				}
+			} else {
+				token := read_cat_token(&b, pareto)
+				cache[pos] = vp9.ENERGY_CLASS[token]
+				coef := read_coef(&b, token, bit_depth)
+				value = (i32(coef) * dqv) >> shift
+			}
 		}
-		counts_token[band][ctx][min(2, token)] += 1
-		cache[pos] = vp9.ENERGY_CLASS[token]
-		if token == vp9.ZERO_TOKEN {
-			check_eob = false
-			continue
-		}
-		coef := read_coef(&b, token, bit_depth)
-		value := (i32(coef) * (c == 0 ? dc : ac)) >> shift
 		coefs[pos] = common.bool_decode(&b, 128) == 1 ? -value : value
 		max_row = max(max_row, int(e.row) + 1)
-		check_eob = true
+		c += 1
+		if c < seg_eob do ctx = (1 + int(cache[scan[c].above]) + int(cache[scan[c].left])) >> 1
+		dqv = ac
 	}
 	t.b = b
 	return c, max_row, tx_type
 }
 
-// Tokens TWO_TOKEN and up: the tree below node 2, with Pareto-derived
-// probabilities from the band's third coefficient probability.
+// Tokens DCT_VAL_CAT1 and up: the subtree below node 5 (index 10) of the token tree.
 @(private)
-read_large_token :: #force_inline proc(b: ^common.Bool_Decoder, prob: u8) -> int #no_bounds_check {
-	pareto := vp9.pareto_row(prob)
-	n := 4 // node 2 of the token tree
+read_cat_token :: #force_inline proc(b: ^common.Bool_Decoder, pareto: ^[8]u8) -> int #no_bounds_check {
+	n := 10
 	for {
 		n = int(vp9.TOKEN_TREE[n + common.bool_decode(b, pareto[(n >> 1) - 2])])
 		if n <= 0 do return -n
@@ -1060,24 +1102,59 @@ read_coef :: #force_inline proc(b: ^common.Bool_Decoder, token, bit_depth: int) 
 }
 
 @(private)
-reconstruct :: proc(t: ^Tile, dst: []$T, stride, tx, tx_type, rows: int) #no_bounds_check {
-	V :: #simd[4]i32
-	VT :: #simd[4]T
+reconstruct :: #force_no_inline proc(t: ^Tile, dst: []$T, stride, tx, tx_type, eob, rows: int) #no_bounds_check {
 	d := t.d
 	n := 4 << uint(tx)
+	if eob == 1 && !d.h.lossless && tx_type == vp9.DCT_DCT {
+		dc := vp9.dc_residual(t.coefs[0], uint(tx + 2))
+		t.coefs[0] = 0
+		if dc == 0 do return
+		if n == 4 {
+			reconstruct_dc(dst, stride, 4, dc, d.bit_depth, 4)
+		} else {
+			reconstruct_dc(dst, stride, n, dc, d.bit_depth, 8)
+		}
+		return
+	}
 	coefs := t.coefs[:n * n]
-	max_v: V = i32(1) << uint(d.bit_depth) - 1
-	zero: V = 0
 	vp9.inverse_transform(coefs, uint(tx + 2), tx_type, d.h.lossless, rows, d.bit_depth)
+	if n == 4 {
+		reconstruct_lanes(dst, stride, coefs, 4, d.bit_depth, 4)
+	} else {
+		reconstruct_lanes(dst, stride, coefs, n, d.bit_depth, 8)
+	}
+}
+
+@(private)
+reconstruct_dc :: #force_inline proc(dst: []$T, stride, n: int, dc: i32, bit_depth: int, $L: int) #no_bounds_check {
+	V :: #simd[L]i32
+	VT :: #simd[L]T
+	rv := V(dc)
+	zero: V = 0
+	max_v: V = i32(1) << uint(bit_depth) - 1
+	for i in 0 ..< n {
+		row := dst[i * stride:]
+		for j := 0; j < n; j += L {
+			px := V(intrinsics.unaligned_load((^VT)(&row[j])))
+			intrinsics.unaligned_store((^VT)(&row[j]), VT(simd.clamp(px + rv, zero, max_v)))
+		}
+	}
+}
+
+@(private)
+reconstruct_lanes :: #force_inline proc(dst: []$T, stride: int, coefs: []i32, n, bit_depth: int, $L: int) #no_bounds_check {
+	V :: #simd[L]i32
+	VT :: #simd[L]T
+	zero: V = 0
+	max_v: V = i32(1) << uint(bit_depth) - 1
 	for i in 0 ..< n {
 		row := dst[i * stride:]
 		res := coefs[i * n:]
-		for j := 0; j < n; j += 4 {
+		for j := 0; j < n; j += L {
 			rv := intrinsics.unaligned_load((^V)(&res[j]))
 			intrinsics.unaligned_store((^V)(&res[j]), zero)
 			px := V(intrinsics.unaligned_load((^VT)(&row[j])))
-			out := simd.clamp(px + rv, zero, max_v)
-			intrinsics.unaligned_store((^VT)(&row[j]), VT(out))
+			intrinsics.unaligned_store((^VT)(&row[j]), VT(simd.clamp(px + rv, zero, max_v)))
 		}
 	}
 }
@@ -1096,7 +1173,9 @@ predict_inter :: proc(t: ^Tile, p, x, y, w, h, block_idx: int, $T: typeid) #no_b
 		mvs := &b.block_mvs[list]
 		mv: [2]i32
 		switch {
-		case p == 0 || b.mi_size >= vp9.BLOCK_8X8 || sub_x == 0 && sub_y == 0:
+		case b.mi_size >= vp9.BLOCK_8X8:
+			mv = {i32(b.mv[list][0]), i32(b.mv[list][1])}
+		case p == 0 || sub_x == 0 && sub_y == 0:
 			mv = {i32(mvs[block_idx][0]), i32(mvs[block_idx][1])}
 		case sub_x == 0 && sub_y == 1:
 			for k in 0 ..< 2 do mv[k] = vp9.round_mv_q2(i32(mvs[block_idx][k]) + i32(mvs[block_idx + 2][k]))

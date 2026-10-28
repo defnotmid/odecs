@@ -40,7 +40,8 @@ put_bool_byte :: #force_no_inline proc(b: ^Bool_Writer, shift: int) #no_bounds_c
 @(private)
 put_bool :: #force_inline proc(b: ^Bool_Writer, bit: int, prob: u8) {
 	split := 1 + ((b.range - 1) * u32(prob) >> 8)
-	if bit == 0 {b.range = split} else {b.low += split; b.range -= split}
+	b.low += bit != 0 ? split : 0
+	b.range = bit != 0 ? b.range - split : split
 	shift := int(intrinsics.count_leading_zeros(b.range) - 24)
 	b.range <<= uint(shift)
 	b.count += shift
@@ -82,6 +83,8 @@ INTRA_MODE_CODES: [vp9.INTRA_MODES]Tree_Code
 @(private)
 INTER_MODE_CODES: [vp9.INTER_MODES]Tree_Code
 @(private)
+INTERP_FILTER_CODES: [vp9.SWITCHABLE_FILTERS]Tree_Code
+@(private)
 TX_SIZE_CODES: [vp9.TX_SIZES][vp9.TX_SIZES]Tree_Code
 @(private)
 MV_JOINT_CODES: [vp9.MV_JOINTS]Tree_Code
@@ -91,12 +94,15 @@ MV_CLASS_CODES: [vp9.MV_CLASSES]Tree_Code
 MV_FR_CODES: [vp9.MV_FR_SIZE]Tree_Code
 @(private)
 TOKEN_PARETO_CODES: [11]Tree_Code
+@(private)
+SEG_CODES: [vp9.MAX_SEGMENTS]Tree_Code
 
 @(private, init)
 init_tree_codes :: proc "contextless" () {
 	build_tree_codes(PARTITION_CODES[:], vp9.PARTITION_TREE[:], 0, {}, 0)
 	build_tree_codes(INTRA_MODE_CODES[:], vp9.INTRA_MODE_TREE[:], 0, {}, 0)
 	build_tree_codes(INTER_MODE_CODES[:], vp9.INTER_MODE_TREE[:], 0, {}, 0)
+	build_tree_codes(INTERP_FILTER_CODES[:], vp9.INTERP_FILTER_TREE[:], 0, {}, 0)
 	build_tree_codes(TX_SIZE_CODES[vp9.TX_8X8][:], vp9.TX_SIZE_8_TREE[:], 0, {}, 0)
 	build_tree_codes(TX_SIZE_CODES[vp9.TX_16X16][:], vp9.TX_SIZE_16_TREE[:], 0, {}, 0)
 	build_tree_codes(TX_SIZE_CODES[vp9.TX_32X32][:], vp9.TX_SIZE_32_TREE[:], 0, {}, 0)
@@ -104,6 +110,7 @@ init_tree_codes :: proc "contextless" () {
 	build_tree_codes(MV_CLASS_CODES[:], vp9.MV_CLASS_TREE[:], 0, {}, 0)
 	build_tree_codes(MV_FR_CODES[:], vp9.MV_FR_TREE[:], 0, {}, 0)
 	build_tree_codes(TOKEN_PARETO_CODES[:], vp9.TOKEN_TREE[:], 4, {}, 2)
+	build_tree_codes(SEG_CODES[:], vp9.SEGMENT_TREE[:], 0, {}, 0)
 }
 
 @(private)

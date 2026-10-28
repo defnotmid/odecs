@@ -41,20 +41,22 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 	}
 	ref := b.ref
 	x, y, w, h := b.x, b.y, b.w, b.h
-	max_value := i32(1) << uint(b.bit_depth) - 1
+	when T == u8 {
+		max_value :: i32(255)
+	} else {
+		max_value := i32(1) << uint(b.bit_depth) - 1
+	}
 	kernels := &SUBPEL_FILTERS[b.filter]
 	cols, rows := w + 7, h + 7
 	x0, y0 := (x >> 4) - 3, (y >> 4) - 3
+	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
+		predict_unscaled_edge(b, ref, kernels, max_value, x0, y0, cols, rows)
+		return
+	}
 	// Direct reads when the whole footprint is inside the reference.
 	src := raw_data(ref.data)
 	src_stride := ref.stride
-	origin := y0 * ref.stride + x0
-	UNSCALED_STRIDE :: 72
-	local: [UNSCALED_STRIDE * UNSCALED_STRIDE]T = ---
-	if x0 < 0 || y0 < 0 || x0 + cols - 1 > ref.last_x || y0 + rows - 1 > ref.last_y {
-		edge_copy(local[:], UNSCALED_STRIDE, ref, x0, y0, cols, rows)
-		src, src_stride, origin = raw_data(local[:]), UNSCALED_STRIDE, 0
-	}
+	origin := y0 * src_stride + x0
 	// Native-width lanes, as HEVC's motion compensation; narrower blocks
 	// take their own width.
 	LANES :: max(8, runtime.NATIVE_SIMD_BIT_WIDTH / 32)
@@ -69,7 +71,24 @@ predict_inter_block :: proc(b: ^Inter_Block($T)) #no_bounds_check {
 }
 
 @(private)
-predict_scaled :: proc(b: ^Inter_Block($T)) #no_bounds_check {
+predict_unscaled_edge :: #force_no_inline proc(b: ^Inter_Block($T), ref: ^Ref_Plane(T), kernels: ^[16][8]i16, max_value: i32, x0, y0, cols, rows: int) #no_bounds_check {
+	UNSCALED_STRIDE :: 72
+	local: [UNSCALED_STRIDE * UNSCALED_STRIDE]T = ---
+	edge_copy(local[:], UNSCALED_STRIDE, ref, x0, y0, cols, rows)
+	src := raw_data(local[:])
+	LANES :: max(8, runtime.NATIVE_SIMD_BIT_WIDTH / 32)
+	switch {
+	case b.w >= LANES:
+		predict_unscaled(b, src, UNSCALED_STRIDE, 0, kernels, max_value, LANES)
+	case b.w >= 8:
+		predict_unscaled(b, src, UNSCALED_STRIDE, 0, kernels, max_value, 8)
+	case:
+		predict_unscaled(b, src, UNSCALED_STRIDE, 0, kernels, max_value, 4)
+	}
+}
+
+@(private)
+predict_scaled :: #force_no_inline proc(b: ^Inter_Block($T)) #no_bounds_check {
 	ref := b.ref
 	x, y, w, h := b.x, b.y, b.w, b.h
 	max_value := i32(1) << uint(b.bit_depth) - 1

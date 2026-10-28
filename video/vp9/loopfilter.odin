@@ -126,37 +126,68 @@ filter_superblock :: proc(f: ^Loop_Filter_Frame($T), $chroma: bool, $pass: int, 
 	sub_y := chroma ? f.ss_y : 0
 	sub := pass == 0 ? sub_x : sub_y
 	edge_len := 64 >> uint(pass == 0 ? sub_y : sub_x)
+	mi_cols, mi_rows := f.mi_cols, f.mi_rows
+	max_x8, max_y8 := 8 * mi_cols, 8 * mi_rows
+	cells := f.cells
 	// Visible extent of the plane in samples (MiCols/MiRows * 8, subsampled).
-	plane_w, plane_h := (8 * f.mi_cols) >> uint(sub_x), (8 * f.mi_rows) >> uint(sub_y)
+	plane_w, plane_h := max_x8 >> uint(sub_x), max_y8 >> uint(sub_y)
 	for edge in 0 ..< 16 >> uint(sub) {
+		when pass == 0 {
+			x := col * 8 + edge * (4 << uint(sub_x))
+			if x == 0 do continue
+			if x >= max_x8 do break
+			px := x >> uint(sub_x)
+			when chroma {
+				loop_col := ((x >> 3) >> uint(sub_x)) << uint(sub_x)
+			} else {
+				loop_col := x >> 3
+			}
+		} else {
+			y := row * 8 + edge * (4 << uint(sub_y))
+			if y == 0 do continue
+			if y >= max_y8 do break
+			py := y >> uint(sub_y)
+			when chroma {
+				loop_row := ((y >> 3) >> uint(sub_y)) << uint(sub_y)
+			} else {
+				loop_row := y >> 3
+			}
+			row_cells := cells[loop_row * mi_cols:]
+		}
 		segments: for i := 0; i < edge_len; i += 16 {
 			pair: Edge_Pair = ---
 			pair.lines = {}
 			px0, py0: int
 			#unroll for half in 0 ..< 2 {
 				when pass == 0 {
-					x := col * 8 + edge * (4 << uint(sub_x))
 					y := row * 8 + ((i + 8 * half) << uint(sub_y))
-					on_border := x == 0
+					in_bounds := y < max_y8
 				} else {
 					x := col * 8 + ((i + 8 * half) << uint(sub_x))
-					y := row * 8 + edge * (4 << uint(sub_y))
-					on_border := y == 0
+					in_bounds := x < max_x8
 				}
-				if x >= 8 * f.mi_cols || y >= 8 * f.mi_rows || on_border {
-					// Past the frame along the edge, or the frame's own edge.
+				if !in_bounds {
 					if half == 0 do break segments
 				} else {
-					px, py := x >> uint(sub_x), y >> uint(sub_y)
-					if half == 0 do px0, py0 = px, py
-					when chroma {
-						loop_col := ((x >> 3) >> uint(sub_x)) << uint(sub_x)
-						loop_row := ((y >> 3) >> uint(sub_y)) << uint(sub_y)
+					when pass == 0 {
+						py := y >> uint(sub_y)
+						when chroma {
+							loop_row := ((y >> 3) >> uint(sub_y)) << uint(sub_y)
+						} else {
+							loop_row := y >> 3
+						}
+						cell := &cells[loop_row * mi_cols + loop_col]
 					} else {
-						loop_col := x >> 3
-						loop_row := y >> 3
+						px := x >> uint(sub_x)
+						when chroma {
+							loop_col := ((x >> 3) >> uint(sub_x)) << uint(sub_x)
+						} else {
+							loop_col := x >> 3
+						}
+						cell := &row_cells[loop_col]
 					}
-					d := edge_decision(f, &f.cells[loop_row * f.mi_cols + loop_col], chroma, pass, edge, x, y, sub_x, sub_y, sub)
+					if half == 0 do px0, py0 = px, py
+					d := edge_decision(f, cell, chroma, pass, edge, x, y, sub_x, sub_y, sub)
 					if d.apply {
 						pair.d[half] = d
 						pair.lines[half] = min(8, pass == 0 ? plane_h - py : plane_w - px)

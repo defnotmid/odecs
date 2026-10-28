@@ -52,7 +52,7 @@ brev :: #force_inline proc "contextless" (bits: uint, x: int) -> int {
 
 // Butterfly rotation, optionally swapping the outputs.
 @(private)
-B :: #force_inline proc "contextless" (t: ^[32]$V, a, b, angle: int, flip: bool) {
+B :: #force_inline proc "contextless" (t: ^[$M]$V, a, b, angle: int, flip: bool) {
 	E :: intrinsics.type_elem_type(V)
 	c, s := V(E(cos64(angle))), V(E(sin64(angle)))
 	x := t[a] * c - t[b] * s
@@ -63,7 +63,7 @@ B :: #force_inline proc "contextless" (t: ^[32]$V, a, b, angle: int, flip: bool)
 
 // Hadamard rotation; flip uses (b, a).
 @(private)
-H :: #force_inline proc "contextless" (t: ^[32]$V, a, b: int, flip: bool) {
+H :: #force_inline proc "contextless" (t: ^[$M]$V, a, b: int, flip: bool) {
 	a, b := a, b
 	if flip do a, b = b, a
 	x, y := t[a], t[b]
@@ -71,7 +71,7 @@ H :: #force_inline proc "contextless" (t: ^[32]$V, a, b: int, flip: bool) {
 }
 
 @(private)
-SB :: #force_inline proc "contextless" (t, s: ^[32]$V, a, b, angle: int, flip: bool) {
+SB :: #force_inline proc "contextless" (t: ^[$M]$V, s: ^[$K]V, a, b, angle: int, flip: bool) {
 	E :: intrinsics.type_elem_type(V)
 	c, n := V(E(cos64(angle))), V(E(sin64(angle)))
 	s[a] = t[a] * c - t[b] * n
@@ -80,20 +80,20 @@ SB :: #force_inline proc "contextless" (t, s: ^[32]$V, a, b, angle: int, flip: b
 }
 
 @(private)
-SH :: #force_inline proc "contextless" (t, s: ^[32]$V, a, b: int) {
+SH :: #force_inline proc "contextless" (t: ^[$M]$V, s: ^[$K]V, a, b: int) {
 	t[a], t[b] = round2_lanes(s[a] + s[b], 14), round2_lanes(s[a] - s[b], 14)
 }
 
 // Inverse DCT of 1 << n samples (8.7.1.2 permutation, then 8.7.1.3).
 @(private)
-idct :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
+idct :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
 	c := t^
 	#unroll for i in 0 ..< 1 << n do t[i] = c[brev(n, i)]
 	idct_permuted(t, n)
 }
 
 @(private)
-idct_permuted :: proc "contextless" (t: ^[32]$V, $n: uint) {
+idct_permuted :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
 	N0 :: 1 << n
 	N1 :: N0 >> 1
 	N2 :: N0 >> 2
@@ -128,7 +128,7 @@ SINPI_3_9 :: 13377
 SINPI_4_9 :: 15212
 
 @(private)
-iadst4 :: #force_inline proc "contextless" (t: ^[32]$V) {
+iadst4 :: #force_inline proc "contextless" (t: ^[$M]$V) {
 	s0 := V(SINPI_1_9) * t[0]
 	s1 := V(SINPI_2_9) * t[0]
 	s2 := V(SINPI_3_9) * t[1]
@@ -148,7 +148,7 @@ iadst4 :: #force_inline proc "contextless" (t: ^[32]$V) {
 }
 
 @(private)
-adst_input_permute :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
+adst_input_permute :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
 	N0 :: 1 << n
 	c := t^
 	#unroll for i in 0 ..< N0 >> 1 {
@@ -158,7 +158,7 @@ adst_input_permute :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
 }
 
 @(private)
-adst_output_permute :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
+adst_output_permute :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
 	c := t^
 	when n == 4 {
 		#unroll for a in 0 ..< 2 do #unroll for b in 0 ..< 2 do #unroll for cc in 0 ..< 2 do #unroll for d in 0 ..< 2 {
@@ -172,8 +172,8 @@ adst_output_permute :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
 }
 
 @(private)
-iadst8 :: #force_inline proc "contextless" (t: ^[32]$V) {
-	s: [32]V
+iadst8 :: #force_inline proc "contextless" (t: ^[$M]$V) {
+	s: [8]V = ---
 	adst_input_permute(t, 3)
 	#unroll for i in 0 ..< 4 do SB(t, &s, 2 * i, 1 + 2 * i, 30 - 8 * i, true)
 	#unroll for i in 0 ..< 4 do SH(t, &s, i, 4 + i)
@@ -186,8 +186,8 @@ iadst8 :: #force_inline proc "contextless" (t: ^[32]$V) {
 }
 
 @(private)
-iadst16 :: #force_inline proc "contextless" (t: ^[32]$V) {
-	s: [32]V
+iadst16 :: #force_inline proc "contextless" (t: ^[$M]$V) {
+	s: [16]V = ---
 	adst_input_permute(t, 4)
 	#unroll for i in 0 ..< 8 do SB(t, &s, 2 * i, 1 + 2 * i, 31 - 4 * i, true)
 	#unroll for i in 0 ..< 8 do SH(t, &s, i, 8 + i)
@@ -204,7 +204,7 @@ iadst16 :: #force_inline proc "contextless" (t: ^[32]$V) {
 
 // Inverse ADST of 1 << n samples, n = 2, 3 or 4 (8.7.1.5 to 8.7.1.9).
 @(private)
-iadst :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
+iadst :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
 	when n == 2 {
 		iadst4(t)
 	} else when n == 3 {
@@ -212,6 +212,13 @@ iadst :: #force_inline proc "contextless" (t: ^[32]$V, $n: uint) {
 	} else {
 		iadst16(t)
 	}
+}
+
+// Constant residual produced by a DC-only DCT_DCT block of side 1 << n.
+dc_residual :: #force_inline proc "contextless" (c0: i32, n: uint) -> i32 {
+	dc1 := round2(i64(c0) * cos64(16), 14)
+	dc2 := round2(i64(dc1) * cos64(16), 14)
+	return round2(i64(dc2), min(n + 2, 6))
 }
 
 @(private)
@@ -269,38 +276,46 @@ transform_lanes :: proc(block: []i32, $n: uint, $E: typeid, tx_type, rows: int) 
 		dc_only := true
 		for j in 1 ..< N do if block[j] != 0 {dc_only = false; break}
 		if dc_only {
-			dc1 := round2(i64(block[0]) * cos64(16), 14)
-			dc2 := round2(i64(dc1) * cos64(16), 14)
-			v := W(round2(i64(dc2), SHIFT))
+			v := W(dc_residual(block[0], n))
 			for idx := 0; idx < N * N; idx += L {
 				intrinsics.unaligned_store((^W)(&block[idx]), v)
 			}
 			return
 		}
 	}
-	t: [32]V = ---
-	for g := 0; g < rows; g += L {
-		#unroll for jb in 0 ..< N / L {
-			tile: [L]V = ---
-			#unroll for l in 0 ..< L do tile[l] = V(intrinsics.unaligned_load((^W)(&block[(g + l) * N + jb * L])))
-			tile = common.transpose(tile)
-			#unroll for k in 0 ..< L do t[jb * L + k] = tile[k]
-		}
+	t: [N]V = ---
+	when N == L {
+		tile: [L]V = ---
+		#unroll for l in 0 ..< L do tile[l] = V(intrinsics.unaligned_load((^W)(&block[l * N])))
+		t = common.transpose(tile)
 		if row_dct {idct(&t, n)} else {iadst(&t, n)}
-		#unroll for jb in 0 ..< N / L {
-			tile: [L]V = ---
-			#unroll for k in 0 ..< L do tile[k] = t[jb * L + k]
-			tile = common.transpose(tile)
-			#unroll for l in 0 ..< L do intrinsics.unaligned_store((^W)(&block[(g + l) * N + jb * L]), W(tile[l]))
-		}
-	}
-	row_end := min(N, (rows + L - 1) & ~int(L - 1))
-	for jb := 0; jb < N; jb += L {
-		#unroll for i in 0 ..< N {
-			t[i] = i < row_end ? V(intrinsics.unaligned_load((^W)(&block[i * N + jb]))) : 0
-		}
+		t = common.transpose(t)
 		if col_dct {idct(&t, n)} else {iadst(&t, n)}
-		#unroll for i in 0 ..< N do intrinsics.unaligned_store((^W)(&block[i * N + jb]), W(round2_lanes(t[i], SHIFT)))
+		#unroll for i in 0 ..< N do intrinsics.unaligned_store((^W)(&block[i * N]), W(round2_lanes(t[i], SHIFT)))
+	} else {
+		for g := 0; g < rows; g += L {
+			#unroll for jb in 0 ..< N / L {
+				tile: [L]V = ---
+				#unroll for l in 0 ..< L do tile[l] = V(intrinsics.unaligned_load((^W)(&block[(g + l) * N + jb * L])))
+				tile = common.transpose(tile)
+				#unroll for k in 0 ..< L do t[jb * L + k] = tile[k]
+			}
+			if row_dct {idct(&t, n)} else {iadst(&t, n)}
+			#unroll for jb in 0 ..< N / L {
+				tile: [L]V = ---
+				#unroll for k in 0 ..< L do tile[k] = t[jb * L + k]
+				tile = common.transpose(tile)
+				#unroll for l in 0 ..< L do intrinsics.unaligned_store((^W)(&block[(g + l) * N + jb * L]), W(tile[l]))
+			}
+		}
+		row_end := min(N, (rows + L - 1) & ~int(L - 1))
+		for jb := 0; jb < N; jb += L {
+			#unroll for i in 0 ..< N {
+				t[i] = i < row_end ? V(intrinsics.unaligned_load((^W)(&block[i * N + jb]))) : 0
+			}
+			if col_dct {idct(&t, n)} else {iadst(&t, n)}
+			#unroll for i in 0 ..< N do intrinsics.unaligned_store((^W)(&block[i * N + jb]), W(round2_lanes(t[i], SHIFT)))
+		}
 	}
 }
 

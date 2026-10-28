@@ -62,6 +62,7 @@ Decoder :: struct {
 	segment_ids:       [dynamic]u8,
 	filter_cells:      [dynamic]vp9.Filter_Cell, // for the loop filter
 	filter_levels:     vp9.Filter_Levels, // the current frame's, for filter_cells
+	dequant:           [vp9.MAX_SEGMENTS][2][2]i32, // [segment][plane_type]{dc, ac}
 	ref_scales:        [3]Ref_Scale, // LAST, GOLDEN and ALTREF against the current frame
 	prev_segment_ids:  [dynamic]u8,
 	above_context:     [dynamic]Edge_Context, // per 8x8 column: the block above's bottom edge
@@ -198,6 +199,11 @@ decode_frame :: proc(d: ^Decoder, data: []u8) -> Error {
 	allocate_frame(d) or_return
 	allocate_grids(d) or_return
 	d.filter_levels = vp9.filter_levels(&d.loop_filter, &d.segmentation)
+	for seg in 0 ..< vp9.MAX_SEGMENTS {
+		q := vp9.segment_qindex(&d.segmentation, h.base_q_idx, seg)
+		d.dequant[seg][0] = {vp9.dc_q(d.bit_depth, q + h.delta_q_y_dc), vp9.ac_q(d.bit_depth, q)}
+		d.dequant[seg][1] = {vp9.dc_q(d.bit_depth, q + h.delta_q_uv_dc), vp9.ac_q(d.bit_depth, q + h.delta_q_uv_ac)}
+	}
 	if !h.frame_is_intra do for i in 0 ..< 3 {
 		if ref := d.refs[h.ref_frame_idx[i]]; ref != nil do d.ref_scales[i] = ref_scale(ref, h)
 	}

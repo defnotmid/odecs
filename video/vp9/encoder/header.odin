@@ -33,7 +33,7 @@ bit_cost :: #force_inline proc "contextless" (bit: int, p: u8) -> u32 #no_bounds
 }
 
 @(private)
-code_bit_cost :: #force_inline proc "contextless" (code: Tree_Code, probs: [^]u8) -> u32 #no_bounds_check {
+code_bit_cost :: #force_inline proc "contextless" (code: Tree_Code, probs: []u8) -> u32 #no_bounds_check {
 	cost: u32
 	for i in 0 ..< int(code.count) {
 		bit := int(code.bits >> uint(i) & 1)
@@ -168,19 +168,41 @@ emit_tree_mv_updates :: proc(b: ^Bool_Writer, tree: []i8, probs: []u8, counts: [
 }
 
 @(private)
+update_segmentation_probs :: proc(e: ^Encoder) {
+	seg := &e.segmentation
+	if !seg.enabled || !seg.update_map do return
+	branches: [7][2]u32
+	tree_branch_counts(vp9.SEGMENT_TREE[:], 0, e.counts.seg_tree[:], branches[:])
+	for i in 0 ..< 7 {
+		ct0, ct1 := branches[i][0], branches[i][1]
+		den := ct0 + ct1
+		p := den > 0 ? u8(clamp((ct0 * 256 + (den >> 1)) / den, 1, 255)) : 255
+		seg.tree_probs[i] = p != 255 && branch_cost(ct0, ct1, p) + 8 * 256 < branch_cost(ct0, ct1, 255) ? p : 255
+	}
+	if !e.keyframe && seg.temporal_update {
+		for i in 0 ..< 3 {
+			ct0, ct1 := e.counts.seg_pred[i][0], e.counts.seg_pred[i][1]
+			den := ct0 + ct1
+			p := den > 0 ? u8(clamp((ct0 * 256 + (den >> 1)) / den, 1, 255)) : 255
+			seg.pred_probs[i] = p != 255 && branch_cost(ct0, ct1, p) + 8 * 256 < branch_cost(ct0, ct1, 255) ? p : 255
+		}
+	}
+}
+
+@(private)
 build_compressed_header :: proc(e: ^Encoder) {
 	b := &e.header
 	p := &e.probs
 	c := &e.counts
 	start_bool(b)
-	if e.config.base_q_idx != 0 {
+	if !e.lossless {
 		put_literal(b, vp9.ALLOW_32X32, 2)
 		put_literal(b, 1, 1) // TX_MODE_SELECT
 		for i in 0 ..< vp9.TX_SIZE_CONTEXTS do emit_tree_diff_updates(b, vp9.TX_SIZE_8_TREE[:], p.tx[vp9.TX_8X8][i][:1], c.tx_size[vp9.TX_8X8][i][:])
 		for i in 0 ..< vp9.TX_SIZE_CONTEXTS do emit_tree_diff_updates(b, vp9.TX_SIZE_16_TREE[:], p.tx[vp9.TX_16X16][i][:2], c.tx_size[vp9.TX_16X16][i][:])
 		for i in 0 ..< vp9.TX_SIZE_CONTEXTS do emit_tree_diff_updates(b, vp9.TX_SIZE_32_TREE[:], p.tx[vp9.TX_32X32][i][:3], c.tx_size[vp9.TX_32X32][i][:])
 	}
-	count := e.config.base_q_idx == 0 ? 1 : 4
+	count := e.lossless ? 1 : 4
 	for tx in 0 ..< count {
 		total_savings := i64(0)
 		for i in 0 ..< 2 do for j in 0 ..< 2 do for k in 0 ..< 6 {
@@ -209,9 +231,19 @@ build_compressed_header :: proc(e: ^Encoder) {
 	for i in 0 ..< vp9.SKIP_CONTEXTS do emit_diff_update(b, &p.skip[i], c.skip[i])
 	if !e.keyframe {
 		for i in 0 ..< vp9.INTER_MODE_CONTEXTS do emit_tree_diff_updates(b, vp9.INTER_MODE_TREE[:], p.inter_mode[i][:], c.inter_mode[i][:])
+		if !e.config.ultrafast && !e.lossless {
+			for i in 0 ..< vp9.INTERP_FILTER_CONTEXTS do emit_tree_diff_updates(b, vp9.INTERP_FILTER_TREE[:], p.interp_filter[i][:], c.interp_filter[i][:])
+		}
 		for i in 0 ..< vp9.IS_INTER_CONTEXTS do emit_diff_update(b, &p.is_inter[i], c.is_inter[i])
-		// All sign biases are zero, so compound reference syntax is absent.
+		if e.allow_comp {
+			put_literal(b, 1, 1) // not SINGLE_REFERENCE
+			put_literal(b, 1, 1) // REFERENCE_MODE_SELECT
+			for i in 0 ..< vp9.COMP_MODE_CONTEXTS do emit_diff_update(b, &p.comp_mode[i], c.comp_mode[i])
+		}
 		for i in 0 ..< vp9.REF_CONTEXTS do for j in 0 ..< 2 do emit_diff_update(b, &p.single_ref[i][j], c.single_ref[i][j])
+		if e.allow_comp {
+			for i in 0 ..< vp9.REF_CONTEXTS do emit_diff_update(b, &p.comp_ref[i], c.comp_ref[i])
+		}
 		for i in 0 ..< vp9.BLOCK_SIZE_GROUPS do emit_tree_diff_updates(b, vp9.INTRA_MODE_TREE[:], p.y_mode[i][:], c.intra_mode[i][:])
 		for i in 0 ..< vp9.PARTITION_CONTEXTS do emit_tree_diff_updates(b, vp9.PARTITION_TREE[:], p.partition[i][:], c.partition[i][:])
 		emit_tree_mv_updates(b, vp9.MV_JOINT_TREE[:], p.mv_joint[:], c.mv_joint[:])
@@ -224,6 +256,12 @@ build_compressed_header :: proc(e: ^Encoder) {
 		for i in 0 ..< 2 {
 			for j in 0 ..< vp9.CLASS0_SIZE do emit_tree_mv_updates(b, vp9.MV_FR_TREE[:], p.mv_class0_fr[i][j][:], c.mv_class0_fr[i][j][:])
 			emit_tree_mv_updates(b, vp9.MV_FR_TREE[:], p.mv_fr[i][:], c.mv_fr[i][:])
+		}
+		if e.allow_hp {
+			for i in 0 ..< 2 {
+				emit_mv_update(b, &p.mv_class0_hp[i], c.mv_class0_hp[i])
+				emit_mv_update(b, &p.mv_hp[i], c.mv_hp[i])
+			}
 		}
 	}
 	finish_bool(b)
@@ -244,33 +282,108 @@ raw_bits :: proc(w: ^Raw_Writer, value, bits: int) {
 }
 
 @(private)
+emit_delta_q :: proc(w: ^Raw_Writer, dq: int) {
+	if dq == 0 {
+		raw_bits(w, 0, 1)
+	} else {
+		raw_bits(w, 1, 1)
+		raw_bits(w, abs(dq), 4)
+		raw_bits(w, int(dq < 0), 1)
+	}
+}
+
+@(private)
+emit_seg_prob :: proc(w: ^Raw_Writer, p: u8) {
+	if p != 255 {
+		raw_bits(w, 1, 1)
+		raw_bits(w, int(p), 8)
+	} else {
+		raw_bits(w, 0, 1)
+	}
+}
+
+@(private)
+emit_profile :: proc(w: ^Raw_Writer, profile: int) {
+	raw_bits(w, profile & 1, 1)
+	raw_bits(w, (profile >> 1) & 1, 1)
+	if profile == 3 do raw_bits(w, 0, 1)
+}
+
+@(private)
 build_uncompressed_header :: proc(e: ^Encoder) -> bool {
 	w := Raw_Writer{data = &e.packet}
-	raw_bits(&w, 2, 2); raw_bits(&w, 0, 2) // marker, profile 0
+	raw_bits(&w, 2, 2)
+	emit_profile(&w, e.profile)
 	raw_bits(&w, 0, 1) // show_existing_frame
 	raw_bits(&w, int(!e.keyframe), 1)
-	raw_bits(&w, 1, 1); raw_bits(&w, 0, 1) // shown, error_resilient=0 (enables backward adaptation)
+	raw_bits(&w, int(e.show_frame), 1); raw_bits(&w, 0, 1) // show_frame, error_resilient=0 (enables backward adaptation)
 	if e.keyframe {
 		raw_bits(&w, 0x498342, 24)
+		if e.profile >= 2 do raw_bits(&w, int(e.bit_depth == 12), 1)
 		raw_bits(&w, 2, 3); raw_bits(&w, 0, 1) // BT.709 limited
+		if e.profile == 1 || e.profile == 3 {
+			raw_bits(&w, e.ss_x, 1)
+			raw_bits(&w, e.ss_y, 1)
+			raw_bits(&w, 0, 1)
+		}
 		raw_bits(&w, e.config.width - 1, 16); raw_bits(&w, e.config.height - 1, 16)
 		raw_bits(&w, 0, 1) // same render size
 	} else {
+		if !e.show_frame do raw_bits(&w, 0, 1) // intra_only = 0
 		raw_bits(&w, 0, 2) // reset_frame_context = 0
-		raw_bits(&w, 1, 8) // refresh LAST slot zero
-		for _ in 0 ..< 3 {raw_bits(&w, 0, 3); raw_bits(&w, 0, 1)}
+		raw_bits(&w, e.refresh_frame_flags, 8)
+		raw_bits(&w, 0, 3); raw_bits(&w, 0, 1) // LAST = slot 0
+		raw_bits(&w, 1, 3); raw_bits(&w, int(e.allow_comp), 1) // GOLDEN = slot 1
+		raw_bits(&w, e.has_altref ? 2 : 1, 3); raw_bits(&w, int(e.allow_comp), 1) // ALTREF = slot 2 or 1
 		raw_bits(&w, 1, 1) // size from LAST
 		raw_bits(&w, 0, 1) // same render size
-		raw_bits(&w, 0, 1) // quarter-pixel precision
-		raw_bits(&w, 0, 1); raw_bits(&w, 1, 2) // fixed EIGHTTAP
+		raw_bits(&w, int(e.allow_hp), 1)
+		if !e.config.ultrafast && !e.lossless {
+			raw_bits(&w, 1, 1) // SWITCHABLE
+		} else {
+			raw_bits(&w, 0, 1); raw_bits(&w, 1, 2) // fixed EIGHTTAP
+		}
 	}
 	raw_bits(&w, 1, 1); raw_bits(&w, 0, 1) // refresh_frame_context=1, frame_parallel=0
-	raw_bits(&w, 0, 2) // context index
-	level := e.config.base_q_idx == 0 || e.config.disable_loop_filter ? 0 : min(63, (e.config.base_q_idx + 4) / 8)
-	raw_bits(&w, level, 6); raw_bits(&w, 0, 3); raw_bits(&w, 0, 1) // filter level, sharpness, deltas
-	raw_bits(&w, e.config.base_q_idx, 8)
-	raw_bits(&w, 0, 3) // quantizer deltas absent
-	raw_bits(&w, 0, 1) // no segmentation
+	raw_bits(&w, e.frame_context_idx, 2) // context index
+	raw_bits(&w, e.base_filter_level, 6); raw_bits(&w, 0, 3)
+	if !e.config.ultrafast {
+		raw_bits(&w, 1, 1); raw_bits(&w, 0, 1) // delta_enabled=1, delta_update=0
+	} else {
+		raw_bits(&w, 0, 1)
+	}
+	raw_bits(&w, e.q_idx, 8)
+	emit_delta_q(&w, e.config.delta_q_y_dc)
+	emit_delta_q(&w, e.config.delta_q_uv_dc)
+	emit_delta_q(&w, e.config.delta_q_uv_ac)
+	seg := &e.segmentation
+	raw_bits(&w, int(seg.enabled), 1)
+	if seg.enabled {
+		raw_bits(&w, int(seg.update_map), 1)
+		if seg.update_map {
+			for i in 0 ..< 7 do emit_seg_prob(&w, seg.tree_probs[i])
+			temp := !e.keyframe && seg.temporal_update
+			raw_bits(&w, int(temp), 1)
+			if temp {
+				for i in 0 ..< 3 do emit_seg_prob(&w, seg.pred_probs[i])
+			}
+		}
+		raw_bits(&w, int(e.seg_update_data), 1)
+		if e.seg_update_data {
+			raw_bits(&w, int(seg.abs_or_delta_update), 1)
+			for i in 0 ..< vp9.MAX_SEGMENTS do for j in 0 ..< 4 {
+				enabled := seg.feature_enabled[i][j]
+				raw_bits(&w, int(enabled), 1)
+				if enabled {
+					val := int(seg.feature_data[i][j])
+					raw_bits(&w, abs(val), int(vp9.SEGMENTATION_FEATURE_BITS[j]))
+					if vp9.SEGMENTATION_FEATURE_SIGNED[j] == 1 {
+						raw_bits(&w, int(val < 0), 1)
+					}
+				}
+			}
+		}
+	}
 	minimum, maximum := tile_limits(e.sb_cols)
 	for _ in minimum ..< e.config.tile_cols_log2 do raw_bits(&w, 1, 1)
 	if e.config.tile_cols_log2 < maximum do raw_bits(&w, 0, 1)

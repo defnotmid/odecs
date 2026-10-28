@@ -2,49 +2,132 @@ package vp9
 
 import common "../../common"
 import "base:intrinsics"
-import "core:simd"
 
-// Separable fixed-point analysis bases paired with the normative synthesis
-// transforms. Prepared once per encoder, not regenerated in block loops.
-Forward_Transforms :: struct {
-	basis: [4][2][32][32]i32, // tx size, DCT/ADST, output frequency, input sample
+// Separable fixed-point butterfly analysis transforms paired with the
+// normative synthesis transforms in transform.odin.
+Forward_Transforms :: struct {}
+
+init_forward_transforms :: proc(f: ^Forward_Transforms) {}
+
+// Forward DCT of 1 << n samples: exact transpose of idct.
+@(private)
+fdct :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
+	fdct_permuted(t, n)
+	c := t^
+	#unroll for i in 0 ..< 1 << n do t[i] = c[brev(n, i)]
 }
 
-init_forward_transforms :: proc(f: ^Forward_Transforms) {
-	for tx in 0 ..< 4 {
-		n := 4 << uint(tx)
-		for k in 0 ..< n do for x in 0 ..< n {
-			f.basis[tx][0][k][x] = i32(k == 0 ? cos64(16) : cos64((2 * x + 1) * k * (32 / n)))
+@(private)
+fdct_permuted :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
+	N0 :: 1 << n
+	N1 :: N0 >> 1
+	N2 :: N0 >> 2
+	N3 :: N0 >> 3
+	N :: int(n)
+	#unroll for i in 0 ..< N1 do H(t, i, N0 - 1 - i, false)
+	when n >= 3 {
+		#unroll for i in 0 ..< N3 do B(t, N0 - N3 - 1 - i, N1 + N3 + i, 16, true)
+	}
+	when n >= 4 {
+		#unroll for i in 0 ..< 2 * N - 6 do #unroll for j in 0 ..< 2 do H(t, N1 + N2 * j + i, N1 + N2 - 1 + N2 * j - i, j & 1 == 1)
+		#unroll for i in 0 ..< N - 3 do #unroll for j in 0 ..< 2 do B(t, N0 - N + 2 - i - N2 * j, N1 + N - 3 + i + N2 * j, 24 + 48 * j, true)
+	}
+	when n == 5 {
+		#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 4 do H(t, N1 + N3 * j + i, N1 + N2 - 5 + N3 * j - i, j & 1 == 1)
+		#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do B(t, N0 - N + 3 - N2 * j - 4 * i, N1 + N - 4 + N2 * j + 4 * i, 28 - 16 * i + 56 * j, true)
+	}
+	when n >= 3 {
+		#unroll for i in 0 ..< N3 do #unroll for j in 0 ..< 2 do H(t, N1 + 4 * i + 2 * j, N1 + 1 + 4 * i + 2 * j, j == 1)
+	}
+	#unroll for i in 0 ..< N2 do B(t, N1 + i, N0 - 1 - i, -(32 - brev(5, N1 + i)), false)
+	when n == 2 {
+		B(t, 0, 1, 16, true)
+	} else {
+		fdct_permuted(t, n - 1)
+	}
+}
+
+@(private)
+adst_input_permute_t :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
+	N0 :: 1 << n
+	c := t^
+	#unroll for i in 0 ..< N0 >> 1 {
+		t[N0 - 1 - 2 * i] = c[2 * i]
+		t[2 * i] = c[2 * i + 1]
+	}
+}
+
+@(private)
+adst_output_permute_t :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
+	c := t^
+	when n == 4 {
+		#unroll for a in 0 ..< 2 do #unroll for b in 0 ..< 2 do #unroll for cc in 0 ..< 2 do #unroll for d in 0 ..< 2 {
+			t[8 * (d ~ cc) + 4 * (cc ~ b) + 2 * (b ~ a) + a] = c[8 * a + 4 * b + 2 * cc + d]
 		}
-		// forward_lossy pairs reflected samples: even DCT rows are symmetric,
-		// odd rows antisymmetric.
-		for k in 0 ..< n do for x in 0 ..< n / 2 {
-			assert(f.basis[tx][0][k][n - 1 - x] == (k & 1 == 0 ? 1 : -1) * f.basis[tx][0][k][x])
+	} else {
+		#unroll for a in 0 ..< 2 do #unroll for b in 0 ..< 2 do #unroll for cc in 0 ..< 2 {
+			t[4 * (cc ~ b) + 2 * (b ~ a) + a] = c[4 * a + 2 * b + cc]
 		}
 	}
-	// VP9 does not define a 32-point ADST.
-	adst_basis(f, TX_4X4, 2)
-	adst_basis(f, TX_8X8, 3)
-	adst_basis(f, TX_16X16, 4)
 }
 
-// ADST basis row k is the inverse ADST of 16384 at sample k, taken in lane k.
 @(private)
-adst_basis :: proc(f: ^Forward_Transforms, tx: int, $n: uint) {
-	N :: 1 << n
-	L :: min(N, 8)
-	for kb := 0; kb < N; kb += L {
-		t: [32]#simd[L]i64
-		for x in 0 ..< N {
-			lanes: [L]i64
-			if x >= kb && x < kb + L do lanes[x - kb] = 16384
-			t[x] = simd.from_array(lanes)
-		}
-		iadst(&t, n)
-		for x in 0 ..< N {
-			lanes := simd.to_array(t[x])
-			for l in 0 ..< L do f.basis[tx][1][kb + l][x] = i32(lanes[l])
-		}
+fadst4 :: #force_inline proc "contextless" (t: ^[$M]$V) {
+	s0 := V(SINPI_1_9) * t[0]
+	s1 := V(SINPI_4_9) * t[0]
+	s2 := V(SINPI_2_9) * t[1]
+	s3 := V(SINPI_1_9) * t[1]
+	s4 := V(SINPI_3_9) * t[2]
+	s5 := V(SINPI_4_9) * t[3]
+	s6 := V(SINPI_2_9) * t[3]
+	s7 := V(SINPI_3_9) * (t[0] + t[1] - t[3])
+	x0 := s0 + s2 + s5
+	x1 := s7
+	x2 := s1 - s3 + s6
+	x3 := s4
+	t[0] = round2_lanes(x0 + x3, 14)
+	t[1] = round2_lanes(x1, 14)
+	t[2] = round2_lanes(x2 - x3, 14)
+	t[3] = round2_lanes(x2 - x0 + x3, 14)
+}
+
+@(private)
+fadst8 :: #force_inline proc "contextless" (t: ^[$M]$V) {
+	#unroll for i in 0 ..< 4 do t[1 + 2 * i] = -t[1 + 2 * i]
+	adst_output_permute_t(t, 3)
+	#unroll for i in 0 ..< 2 do B(t, 2 + 4 * i, 3 + 4 * i, 16, true)
+	#unroll for i in 0 ..< 2 do H(t, i, 2 + i, false)
+	#unroll for i in 0 ..< 2 do H(t, 4 + i, 6 + i, false)
+	#unroll for i in 0 ..< 2 do B(t, 4 + 3 * i, 5 + i, 24 - 16 * i, true)
+	#unroll for i in 0 ..< 4 do H(t, i, 4 + i, false)
+	#unroll for i in 0 ..< 4 do B(t, 2 * i, 1 + 2 * i, 30 - 8 * i, true)
+	adst_input_permute_t(t, 3)
+}
+
+@(private)
+fadst16 :: #force_inline proc "contextless" (t: ^[$M]$V) {
+	#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do t[1 + 12 * j + 2 * i] = -t[1 + 12 * j + 2 * i]
+	adst_output_permute_t(t, 4)
+	#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do B(t, 2 + 4 * j + 8 * i, 3 + 4 * j + 8 * i, -(48 + 64 * (i ~ j)), false)
+	#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do H(t, 8 * j + i, 2 + 8 * j + i, false)
+	#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do H(t, 4 + 8 * j + i, 6 + 8 * j + i, false)
+	#unroll for i in 0 ..< 2 do #unroll for j in 0 ..< 2 do B(t, 4 + 8 * i + 3 * j, 5 + 8 * i + j, 24 - 16 * j, true)
+	#unroll for i in 0 ..< 4 do H(t, i, 4 + i, false)
+	#unroll for i in 0 ..< 4 do H(t, 8 + i, 12 + i, false)
+	#unroll for i in 0 ..< 4 do B(t, 8 + 2 * i, 9 + 2 * i, 28 - 16 * i, true)
+	#unroll for i in 0 ..< 8 do H(t, i, 8 + i, false)
+	#unroll for i in 0 ..< 8 do B(t, 2 * i, 1 + 2 * i, 31 - 4 * i, true)
+	adst_input_permute_t(t, 4)
+}
+
+@(private)
+fadst :: #force_inline proc "contextless" (t: ^[$M]$V, $n: uint) {
+	when n == 2 {
+		fadst4(t)
+	} else when n == 3 {
+		fadst8(t)
+	} else {
+		fadst16(t)
 	}
 }
 
@@ -60,7 +143,7 @@ forward_wht4 :: proc(v: ^[4]i32) {
 // Coefficients have the inverse's scaling (the caller applies 32x32's
 // quantizer shift when writing tokens). The lossy analysis is not specified
 // by VP9 and need not reproduce libvpx's encoder coefficients.
-forward_transform :: proc(f: ^Forward_Transforms, block: []i32, tx_size, tx_type: int, lossless: bool) {
+forward_transform :: proc(f: ^Forward_Transforms, block: []i32, tx_size, tx_type: int, lossless: bool, bit_depth := 8) {
 	assert(tx_size >= 0 && tx_size <= TX_32X32 && tx_type >= 0 && tx_type <= ADST_ADST)
 	assert(tx_size != TX_32X32 || tx_type == DCT_DCT)
 	n := 4 << uint(tx_size)
@@ -78,102 +161,75 @@ forward_transform :: proc(f: ^Forward_Transforms, block: []i32, tx_size, tx_type
 		}
 		return
 	}
+	wide := bit_depth > 8
 	switch tx_size {
-	case 0: forward_lossy(f, block, tx_type, 0)
-	case 1: forward_lossy(f, block, tx_type, 1)
-	case 2: forward_lossy(f, block, tx_type, 2)
-	case 3: forward_lossy(f, block, tx_type, 3)
+	case 0:
+		if wide {forward_lossy(block, tx_type, 2, i64)} else {forward_lossy(block, tx_type, 2, i32)}
+	case 1:
+		if wide {forward_lossy(block, tx_type, 3, i64)} else {forward_lossy(block, tx_type, 3, i32)}
+	case 2:
+		if wide {forward_lossy(block, tx_type, 4, i64)} else {forward_lossy(block, tx_type, 4, i32)}
+	case 3:
+		if wide {forward_lossy(block, DCT_DCT, 5, i64)} else {forward_lossy(block, DCT_DCT, 5, i32)}
 	}
 }
 
-// Residuals are within +-255, so a column sum is below 32 * 255 * 2^14 and
-// four times it still fits i32. Row products also fit i32 in pairs before
-// widening to i64 for the final sum.
 // forward_transform's length assertion bounds every index below.
 @(private)
-forward_lossy :: proc(f: ^Forward_Transforms, block: []i32, tx_type: int, $TX: int) #no_bounds_check {
-	N :: 4 << uint(TX)
-	H :: N / 2
+forward_lossy :: proc(block: []i32, tx_type: int, $n: uint, $E: typeid) #no_bounds_check {
+	N :: 1 << n
 	L :: min(N, 8)
-	Vec :: #simd[L]i32
-	Acc :: #simd[L]i64
-	vertical := tx_type == ADST_DCT || tx_type == ADST_ADST
-	horizontal := tx_type == DCT_ADST || tx_type == ADST_ADST
-	cols, rows := &f.basis[TX][int(vertical)], &f.basis[TX][int(horizontal)]
-
-	// Columns: process L columns at a time and transpose L x L tiles into t_cols
-	// so that t_cols[gb][x] holds sample x of rows gb * L ..< (gb + 1) * L.
-	t_cols: [N / L][N]Vec = ---
-	for jb := 0; jb < N; jb += L {
-		col_out: [N]Vec = ---
-		if vertical {
-			input: [N]Vec = ---
-			#unroll for i in 0 ..< N do input[i] = intrinsics.unaligned_load((^Vec)(&block[i * N + jb]))
-			for y in 0 ..< N {
-				acc: Vec
-				for i in 0 ..< N do acc += Vec(cols[y][i]) * input[i]
-				col_out[y] = simd.shr(acc * 4 + 8192, (#simd[L]u32)(14))
+	Vec :: #simd[L]E
+	W :: #simd[L]i32
+	vertical_adst := n < 5 && (tx_type == ADST_DCT || tx_type == ADST_ADST)
+	horizontal_adst := n < 5 && (tx_type == DCT_ADST || tx_type == ADST_ADST)
+	t: [N]Vec = ---
+	when N == L {
+		#unroll for i in 0 ..< N do t[i] = Vec(intrinsics.unaligned_load((^W)(&block[i * N]))) * 4
+		if vertical_adst {fadst(&t, n)} else {fdct(&t, n)}
+		t = common.transpose(t)
+		if horizontal_adst {fadst(&t, n)} else {fdct(&t, n)}
+		t = common.transpose(t)
+		#unroll for i in 0 ..< N {
+			out := t[i]
+			when n == 3 do out = round2_lanes(out, 1)
+			intrinsics.unaligned_store((^W)(&block[i * N]), W(out))
+		}
+	} else {
+		t_cols: [N / L][N]Vec = ---
+		for jb := 0; jb < N; jb += L {
+			#unroll for i in 0 ..< N {
+				t[i] = Vec(intrinsics.unaligned_load((^W)(&block[i * N + jb]))) * 4
 			}
-		} else {
-			sums, diffs: [H]Vec = ---, ---
-			#unroll for i in 0 ..< H {
-				a := intrinsics.unaligned_load((^Vec)(&block[i * N + jb]))
-				b := intrinsics.unaligned_load((^Vec)(&block[(N - 1 - i) * N + jb]))
-				sums[i], diffs[i] = a + b, a - b
-			}
-			for y := 0; y < N; y += 2 {
-				acc0, acc1: Vec
-				for i in 0 ..< H {
-					acc0 += Vec(cols[y][i]) * sums[i]
-					acc1 += Vec(cols[y + 1][i]) * diffs[i]
+			if vertical_adst {fadst(&t, n)} else {fdct(&t, n)}
+			#unroll for gb in 0 ..< N / L {
+				tile: [L]Vec = ---
+				#unroll for l in 0 ..< L {
+					v := t[gb * L + l]
+					when n == 5 do v = round2_lanes(v, 1)
+					tile[l] = v
 				}
-				col_out[y] = simd.shr(acc0 * 4 + 8192, (#simd[L]u32)(14))
-				col_out[y + 1] = simd.shr(acc1 * 4 + 8192, (#simd[L]u32)(14))
+				tile = common.transpose(tile)
+				#unroll for k in 0 ..< L do t_cols[gb][jb + k] = tile[k]
 			}
 		}
-		#unroll for gb in 0 ..< N / L {
-			tile: [L]Vec = ---
-			#unroll for l in 0 ..< L do tile[l] = col_out[gb * L + l]
-			tile = common.transpose(tile)
-			#unroll for k in 0 ..< L do t_cols[gb][jb + k] = tile[k]
-		}
-	}
-
-	// Rows: transform L rows at a time in parallel, pairing two i32 products
-	// before widening to i64, then transpose L x L tiles back to block.
-	shift :: uint(2 * (TX + 2) - min(6, TX + 4))
-	for gb in 0 ..< N / L {
-		src := &t_cols[gb]
-		row_out: [N]Vec = ---
-		if horizontal {
-			for x in 0 ..< N {
-				s: Acc
-				for i := 0; i < N; i += 2 {
-					p := Vec(rows[x][i]) * src[i] + Vec(rows[x][i + 1]) * src[i + 1]
-					s += Acc(p)
+		for gb in 0 ..< N / L {
+			row_vec := &t_cols[gb]
+			if horizontal_adst {fadst(row_vec, n)} else {fdct(row_vec, n)}
+			#unroll for jb in 0 ..< N / L {
+				tile: [L]Vec = ---
+				#unroll for k in 0 ..< L {
+					v := row_vec[jb * L + k]
+					when n == 4 {
+						v = round2_lanes(v, 2)
+					} else when n == 5 {
+						v = round2_lanes(v, 3)
+					}
+					tile[k] = v
 				}
-				row_out[x] = Vec(round2_lanes(s, 14 + shift))
+				tile = common.transpose(tile)
+				#unroll for l in 0 ..< L do intrinsics.unaligned_store((^W)(&block[(gb * L + l) * N + jb * L]), W(tile[l]))
 			}
-		} else {
-			sums, diffs: [H]Vec = ---, ---
-			#unroll for i in 0 ..< H do sums[i], diffs[i] = src[i] + src[N - 1 - i], src[i] - src[N - 1 - i]
-			for x := 0; x < N; x += 2 {
-				s0, s1: Acc
-				for i := 0; i < H; i += 2 {
-					p0 := Vec(rows[x][i]) * sums[i] + Vec(rows[x][i + 1]) * sums[i + 1]
-					p1 := Vec(rows[x + 1][i]) * diffs[i] + Vec(rows[x + 1][i + 1]) * diffs[i + 1]
-					s0 += Acc(p0)
-					s1 += Acc(p1)
-				}
-				row_out[x] = Vec(round2_lanes(s0, 14 + shift))
-				row_out[x + 1] = Vec(round2_lanes(s1, 14 + shift))
-			}
-		}
-		#unroll for jb in 0 ..< N / L {
-			tile: [L]Vec = ---
-			#unroll for k in 0 ..< L do tile[k] = row_out[jb * L + k]
-			tile = common.transpose(tile)
-			#unroll for l in 0 ..< L do intrinsics.unaligned_store((^Vec)(&block[(gb * L + l) * N + jb * L]), tile[l])
 		}
 	}
 }

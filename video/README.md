@@ -52,8 +52,10 @@ video.destroy(&w)
   - **H.265** is Main.
 - **Speed:** `ultrafast` prefers encode speed over size. Native H.264 then
   encodes in 0.55-0.58 of the time for 1% smaller to 32% larger files at
-  equal quality, native H.265 in 0.32-0.37 of the time for 28-66% larger.
-  VP9 and the hardware encoders do not use it yet.
+  equal quality, native H.265 in 0.32-0.37 of the time for 28-66% larger, and
+  native VP9 skips rate-distortion partition trials, compound references,
+  switchable filters and directional intra modes for ~2.7x faster encoding.
+  The hardware encoders do not use it yet.
 - **Encoder selection:** `preference` chooses Automatic, Native or
   Require_Hardware. `video_backend` reports what was selected. The optional
   `native_options` (worker pool, slices/tiles) and `gpu_context` pass through
