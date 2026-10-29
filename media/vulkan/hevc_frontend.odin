@@ -492,7 +492,8 @@ decode_h265_nal :: proc(
 	if d == nil || !d.initialized || d.failed do return .Invalid_Argument
 	defer if err != .None && err != .Busy do d.failed = true
 	nal, ok := hevc.parse_nal_into(data, &d.syntax)
-	if !ok || nal.layer_id != 0 do return .Invalid_Argument
+	if !ok do return .Invalid_Argument
+	if nal.layer_id != 0 do return .None
 	#partial switch nal.type {
 	case .VPS_NUT, .SPS_NUT, .PPS_NUT:
 		if err = h265_finish_picture(d, receiver, user); err != .None do return

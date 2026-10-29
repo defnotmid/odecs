@@ -26,6 +26,9 @@ main :: proc() {
 	defer video.close_reader(&hardware)
 	if e := video.open_reader(&native, path, {preference = .Native}); e != .None do fail("open natively:", e, native.error_detail)
 	defer video.close_reader(&native)
+	// Hardware HEVC decoders decode only the base colour layer, so compare
+	// the native reader's base layer when the file carries alpha.
+	if !hardware.video.has_alpha do native.video.has_alpha = false
 	v := hardware.video
 	fmt.printfln("%s: %v %dx%d, %d frames, depth %d", path, v.codec, v.width, v.height, v.frame_count, v.bit_depth)
 

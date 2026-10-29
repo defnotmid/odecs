@@ -7,6 +7,7 @@ import "core:io"
 import mp4 "../container/mp4"
 import hevce "./h265/encoder"
 import media "../media"
+import avcodec "../media/avcodec"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
@@ -169,7 +170,7 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 	w.has_video = c.width != 0 || c.height != 0
 	w.has_audio = c.sample_rate != 0
 	if !w.has_video && !w.has_audio do return .Invalid_Config
-	providers := [3]media.Provider{native.provider(c.native_options), videotoolbox.provider(), vulkan.provider(c.gpu_context)}
+	providers := [4]media.Provider{native.provider(c.native_options), videotoolbox.provider(), vulkan.provider(c.gpu_context), avcodec.provider()}
 	if w.has_video {
 		if c.qp == 0 do c.qp = 23
 		if c.width < 16 || c.height < 16 || c.width > 8192 || c.height > 8192 || (c.width | c.height) & 1 != 0 do return .Invalid_Config
@@ -201,8 +202,8 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 		video.ultrafast = c.ultrafast
 		if e := media.open(&w.video, video, providers[:]); e != .None {
 			w.error_detail = "video encoder unavailable for this configuration"
-			when !native.ODECS_NATIVE_H264 do if c.codec == .H264 do w.error_detail = "no VideoToolbox or Vulkan Video H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
-			when !native.ODECS_NATIVE_H265 do if c.codec == .H265 do w.error_detail = "no VideoToolbox or Vulkan Video H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
+			when !native.ODECS_NATIVE_H264 do if c.codec == .H264 do w.error_detail = "no VideoToolbox, Vulkan Video or libavcodec H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
+			when !native.ODECS_NATIVE_H265 do if c.codec == .H265 do w.error_detail = "no VideoToolbox, Vulkan Video or libavcodec H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
 			return media_error(e)
 		}
 		if c.codec == .VP9 do return create_webm(w, path, stream)

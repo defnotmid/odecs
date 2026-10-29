@@ -29,6 +29,26 @@ Backend :: enum {
 	Native,
 	Vulkan,
 	VideoToolbox,
+	AVCodec,
+}
+// Automatic tries the tiers in this order: hardware, then odecs' own codecs,
+// then a system library (libavcodec) for what neither has.
+Tier :: enum {
+	Hardware,
+	Native,
+	System,
+}
+
+provider_tier :: proc(backend: Backend) -> Tier {
+	switch backend {
+	case .Vulkan, .VideoToolbox:
+		return .Hardware
+	case .AVCodec:
+		return .System
+	case .Native:
+		return .Native
+	}
+	return .Native
 }
 Preference :: enum {
 	Automatic,
@@ -269,12 +289,12 @@ open :: proc(
 	context.allocator = allocator
 	last: Error = .Unavailable
 	hardware_error: Error = config.preference == .Native ? .None : .Unavailable
-	passes := [2]bool{true, false}
-	for hardware in passes {
-		if hardware && config.preference == .Native do continue
-		if !hardware && config.preference == .Require_Hardware do continue
+	tiers := [3]Tier{.Hardware, .Native, .System}
+	for tier in tiers {
+		if tier != .Native && config.preference == .Native do continue
+		if tier != .Hardware && config.preference == .Require_Hardware do continue
 		for provider in providers {
-			if (provider.backend != .Native) != hardware do continue
+			if provider_tier(provider.backend) != tier do continue
 			if provider.probe == nil || provider.open == nil do continue
 			err := provider.probe(config, provider.user)
 			if err == .None {
@@ -297,14 +317,14 @@ open :: proc(
 						session^ = {}
 						return .Invalid_Config
 					}
-					if hardware do session.hardware_error = .None
+					if tier == .Hardware do session.hardware_error = .None
 					return .None
 				}
 				if session.state != nil && session.close_impl != nil do session.close_impl(session)
 				session^ = {}
 			}
 			last = err
-			if hardware do hardware_error = err
+			if tier == .Hardware do hardware_error = err
 		}
 	}
 	return last

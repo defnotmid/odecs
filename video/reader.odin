@@ -10,6 +10,7 @@ import h264 "./h264"
 import avcd "./h264/decoder"
 import hevcd "./h265/decoder"
 import media "../media"
+import avcodec "../media/avcodec"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
@@ -455,7 +456,7 @@ sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 				append(&scratch, b)
 				zeros = b == 0 ? zeros + 1 : 0
 			}
-			if v, ok := hevcd.parse_vps(scratch[:]); ok && v.alpha_layer_id != 0 do r.video.has_alpha = true
+			if v, ok := hevcd.parse_vps(scratch[:]); ok && v.alpha_layer_id != 0 && native.ODECS_NATIVE_H265 && r.config.preference != .Require_Hardware do r.video.has_alpha = true
 			continue
 		}
 		// The base layer's SPS (an alpha layer has its own, with layer id 1).
@@ -541,33 +542,32 @@ video_config :: proc(r: ^Reader) -> media.Config {
 // The video decoders in admission order. VideoToolbox reports itself
 // unavailable off Apple platforms, Vulkan Video on them.
 @(private)
-video_providers :: proc(r: ^Reader) -> [3]media.Provider {
+video_providers :: proc(r: ^Reader) -> [4]media.Provider {
 	shared := r.config.gpu_context != nil ? r.config.gpu_context : r.own_context
-	return {native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared)}
+	return {native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared), avcodec.provider()}
 }
 
 @(private)
 undecodable_detail :: proc(r: ^Reader) -> string {
 	if r.video.codec == .AV1 do return "AV1 needs a GPU with Vulkan Video AV1 decoding (Main, 4:2:0, 8 or 10 bits)"
 	when !native.ODECS_NATIVE_H264 {
-		if r.video.codec == .H264 do return "no VideoToolbox or Vulkan Video H.264 decoder admits this track, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
+		if r.video.codec == .H264 do return "no VideoToolbox, Vulkan Video or libavcodec H.264 decoder admits this track, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
 	}
 	when !native.ODECS_NATIVE_H265 {
-		if r.video.codec == .H265 && r.video.has_alpha do return "HEVC with an alpha layer decodes only natively, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
-		if r.video.codec == .H265 do return "no VideoToolbox or Vulkan Video H.265 decoder admits this track, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
+		if r.video.codec == .H265 do return "no VideoToolbox, Vulkan Video or libavcodec H.265 decoder admits this track, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
 	}
 	return "no decoder admits this video track"
 }
 
 // Whether a decoder admits the video track, from the providers' probes
-// without opening a session: native first, then the hardware probes (which
-// enumerate GPUs) only when native refuses.
+// without opening a session: native first, then the hardware and system
+// probes only when native refuses.
 @(private)
 check_video :: proc(r: ^Reader) {
 	config := video_config(r)
 	for p in video_providers(r) {
-		hardware := p.backend != .Native
-		if hardware && config.preference == .Native || !hardware && config.preference == .Require_Hardware do continue
+		tier := media.provider_tier(p.backend)
+		if tier != .Native && config.preference == .Native || tier != .Hardware && config.preference == .Require_Hardware do continue
 		if p.probe != nil && p.probe(config, p.user) == .None {r.video.decodable = true; return}
 	}
 	r.error_detail = undecodable_detail(r)
@@ -670,7 +670,9 @@ on_frame :: proc(f: media.Video_Frame, user: rawptr) {
 	// Matrix 0, H.273's identity, marks G, B, R planes (VP9 sRGB).
 	if f.color.primaries != 0 && f.color.matrix_coeffs == 0 do color.matrix_coeffs = 0
 	planar := r.config.format == .Planar
-	size := planar ? planar_bytes(f) : f.width * f.height * 4
+	frame := f
+	if !r.video.has_alpha do frame.alpha = {}
+	size := planar ? planar_bytes(frame) : frame.width * frame.height * 4
 	buffer: []u8
 	for len(r.free) > 0 {
 		b := pop(&r.free)
@@ -679,13 +681,13 @@ on_frame :: proc(f: media.Video_Frame, user: rawptr) {
 	}
 	if buffer == nil do buffer = make([]u8, size)
 	job := Convert_Job {
-		frame = f,
+		frame = frame,
 		dst   = buffer,
 	}
-	set_alpha(&job, {f.alpha.data, f.alpha.stride, r.config.premultiplied_alpha}, f.alpha_premultiplied)
-	queued := Queued_Frame{pts = pts, data = buffer, width = f.width, height = f.height}
+	set_alpha(&job, {frame.alpha.data, frame.alpha.stride, r.config.premultiplied_alpha}, frame.alpha_premultiplied)
+	queued := Queued_Frame{pts = pts, data = buffer, width = frame.width, height = frame.height}
 	if planar {
-		queued.planar = planar_layout(f, color, buffer)
+		queued.planar = planar_layout(frame, color, buffer)
 		job.planar = &queued.planar
 	} else {
 		prepare_conversion(&r.conversion, &job, color)

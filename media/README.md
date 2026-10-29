@@ -56,15 +56,20 @@ err = media.encode_video(&session, frame, {packet=write_packet,user=&output})
 err = media.drain(&session, {packet=write_packet,user=&output})
 ```
 
-`Automatic` tries implemented hardware providers before native ones regardless
-of array order. `Require_Hardware` returns an error when hardware admission
-fails; `Native` bypasses hardware. VideoToolbox counts as hardware here: in
-`Automatic` it may use Apple's software codecs, under `Require_Hardware` only
-the hardware ones. In automatic mode `hardware_error` records
-the admission failure when native is selected. Both providers retain temporal
-encoding for an explicit GOP request. Vulkan's GOP range is 1..32768; native
-HEVC's advanced API keeps its existing unbounded low-delay behavior when
-`idr_period=0`, independently of the common API's default.
+`Automatic` tries implemented hardware providers (`Tier.Hardware`: `Vulkan`,
+`VideoToolbox`), then native ones (`Tier.Native`), then system providers
+(`Tier.System`: `AVCodec`, loaded at runtime via `core:dynlib` in
+[`avcodec`](avcodec/README.md)) for what neither admits, regardless of array
+order. `Require_Hardware` returns an error
+when hardware admission fails and never accepts a software system codec;
+`Native` bypasses hardware and system providers. VideoToolbox counts as
+hardware here: in `Automatic` it may use Apple's software codecs, under
+`Require_Hardware` only the hardware ones. In automatic mode `hardware_error`
+records the hardware admission failure when a system or native provider is
+selected. Both providers retain temporal encoding for an explicit GOP request.
+Vulkan's GOP range is 1..32768; native HEVC's advanced API keeps its existing
+unbounded low-delay behavior when `idr_period=0`, independently of the common
+API's default.
 
 Fallback happens at initialization. For video decoding, supply indexed source
 width, height, chroma and bit depth; native also accepts unspecified dimensions.

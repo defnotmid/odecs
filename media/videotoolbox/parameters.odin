@@ -108,8 +108,17 @@ skip_hevc_sps_to_cropping :: proc(r: ^Bit_Reader) {
 	read_bits(r, 4) // sps_video_parameter_set_id
 	sub_layers := read_bits(r, 3) // sps_max_sub_layers_minus1
 	read_bits(r, 1) // sps_temporal_id_nesting_flag
-	// profile_tier_level(1, sub_layers): the general profile and level, then
-	// what each sub-layer says it carries.
+	skip_hevc_ptl(r, sub_layers)
+	read_ue(r) // sps_seq_parameter_set_id
+	if read_ue(r) == 3 do read_bits(r, 1) // chroma_format_idc, separate_colour_plane_flag
+	read_ue(r) // pic_width_in_luma_samples
+	read_ue(r) // pic_height_in_luma_samples
+}
+
+// profile_tier_level(1, sub_layers): the general profile and level, then
+// what each sub-layer says it carries.
+@(private)
+skip_hevc_ptl :: proc(r: ^Bit_Reader, sub_layers: int) {
 	read_bits(r, 32)
 	read_bits(r, 32)
 	read_bits(r, 32)
@@ -123,10 +132,66 @@ skip_hevc_sps_to_cropping :: proc(r: ^Bit_Reader) {
 		if profile_present[i] {read_bits(r, 32); read_bits(r, 32); read_bits(r, 24)}
 		if level_present[i] do read_bits(r, 8)
 	}
-	read_ue(r) // sps_seq_parameter_set_id
-	if read_ue(r) == 3 do read_bits(r, 1) // chroma_format_idc, separate_colour_plane_flag
-	read_ue(r) // pic_width_in_luma_samples
-	read_ue(r) // pic_height_in_luma_samples
+}
+
+// The VPS NAL unit (header included, no start code) for the base layer
+// alone: VideoToolbox's single-layer decompression session refuses a format
+// description whose VPS declares an auxiliary alpha layer (OSStatus -12713).
+base_layer_vps :: proc(nal: []u8, out: ^[dynamic]u8) -> bool {
+	clear(out)
+	if len(nal) <= 2 do return false
+	rbsp := make([dynamic]u8, 0, len(nal))
+	defer delete(rbsp)
+	zeros := 0
+	for b in nal[2:] {
+		if zeros >= 2 && b == 3 {zeros = 0; continue}
+		append(&rbsp, b)
+		zeros = b == 0 ? zeros + 1 : 0
+	}
+	r := Bit_Reader{data = rbsp[:]}
+	read_bits(&r, 6) // vps_video_parameter_set_id, base_layer_internal, base_layer_available
+	if read_bits(&r, 6) == 0 {
+		if r.failed do return false
+		append(out, ..nal)
+		return true
+	}
+	sub_layers := read_bits(&r, 3) // vps_max_sub_layers_minus1
+	read_bits(&r, 1) // vps_temporal_id_nesting_flag
+	if read_bits(&r, 16) != 0xffff do return false
+	skip_hevc_ptl(&r, sub_layers)
+	ordering := read_bits(&r, 1) != 0 // vps_sub_layer_ordering_info_present_flag
+	for _ in (ordering ? 0 : sub_layers) ..= sub_layers {
+		read_ue(&r) // vps_max_dec_pic_buffering_minus1
+		read_ue(&r) // vps_max_num_reorder_pics
+		read_ue(&r) // vps_max_latency_increase_plus1
+	}
+	if r.failed do return false
+	dpb_end := r.pos
+
+	w: Bit_Writer
+	w.data = make([dynamic]u8, 0, len(rbsp))
+	defer delete(w.data)
+	for i in 0 ..< 6 do write_bit(&w, bit_at(rbsp[:], i))
+	for _ in 0 ..< 6 do write_bit(&w, 0) // vps_max_layers_minus1 = 0
+	for i in 12 ..< dpb_end do write_bit(&w, bit_at(rbsp[:], i))
+	for _ in 0 ..< 6 do write_bit(&w, 0) // vps_max_layer_id = 0
+	write_bit(&w, 1) // vps_num_layer_sets_minus1 = ue(0)
+	write_bit(&w, 0) // vps_timing_info_present_flag = 0
+	write_bit(&w, 0) // vps_extension_flag = 0
+	write_bit(&w, 1) // rbsp_stop_one_bit
+	for w.count % 8 != 0 do write_bit(&w, 0)
+
+	append(out, ..nal[:2])
+	zeros = 0
+	for b in w.data {
+		if zeros >= 2 && b <= 3 {
+			append(out, 3)
+			zeros = 0
+		}
+		append(out, b)
+		zeros = b == 0 ? zeros + 1 : 0
+	}
+	return true
 }
 
 @(private)

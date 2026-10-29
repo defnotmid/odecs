@@ -105,3 +105,66 @@ test_no_reordering_is_a_decode_assertion :: proc(t: ^testing.T) {
 	encode.no_reordering = true
 	testing.expect_value(t, validate_config(encode), Error.Invalid_Config)
 }
+
+@(test)
+test_tier_ordering_and_require_hardware_rejects_system :: proc(t: ^testing.T) {
+	probe_ok :: proc(config: Config, user: rawptr) -> Error {return .None}
+	probe_unavail :: proc(config: Config, user: rawptr) -> Error {return .Unavailable}
+	decode_ok :: proc(session: ^Session, packet: Packet, receiver: Receiver) -> Error {return .None}
+	drain_ok :: proc(session: ^Session, receiver: Receiver) -> Error {return .None}
+	close_ok :: proc(session: ^Session) {free((^u8)(session.state))}
+	open_ok :: proc(session: ^Session, config: Config, user: rawptr) -> Error {
+		session.state = new(u8)
+		session.decode_impl = decode_ok
+		session.drain_impl = drain_ok
+		session.close_impl = close_ok
+		return .None
+	}
+
+	// Listed out of order: Native, System (AVCodec), Hardware (Vulkan).
+	providers_all := []Provider {
+		{backend = .Native, name = "native", probe = probe_ok, open = open_ok},
+		{backend = .AVCodec, name = "avcodec", probe = probe_ok, open = open_ok},
+		{backend = .Vulkan, name = "vulkan", probe = probe_ok, open = open_ok},
+	}
+
+	// Automatic selects Hardware before Native and System.
+	session: Session
+	cfg := default_config(.H264, .Decode)
+	cfg.preference = .Automatic
+	testing.expect_value(t, open(&session, cfg, providers_all), Error.None)
+	testing.expect_value(t, session.backend, Backend.Vulkan)
+	testing.expect_value(t, session.hardware_error, Error.None)
+	testing.expect_value(t, close(&session), Error.None)
+
+	// When Hardware is unavailable, Automatic selects Native before System.
+	providers_no_hw := []Provider {
+		{backend = .Native, name = "native", probe = probe_ok, open = open_ok},
+		{backend = .AVCodec, name = "avcodec", probe = probe_ok, open = open_ok},
+		{backend = .Vulkan, name = "vulkan", probe = probe_unavail, open = open_ok},
+	}
+	testing.expect_value(t, open(&session, cfg, providers_no_hw), Error.None)
+	testing.expect_value(t, session.backend, Backend.Native)
+	testing.expect_value(t, session.hardware_error, Error.Unavailable)
+	testing.expect_value(t, close(&session), Error.None)
+
+	// System only when Native refuses too (H.264/H.265 without ODECS_PATENTED).
+	providers_system := []Provider {
+		{backend = .Native, name = "native", probe = probe_unavail, open = open_ok},
+		{backend = .AVCodec, name = "avcodec", probe = probe_ok, open = open_ok},
+		{backend = .Vulkan, name = "vulkan", probe = probe_unavail, open = open_ok},
+	}
+	testing.expect_value(t, open(&session, cfg, providers_system), Error.None)
+	testing.expect_value(t, session.backend, Backend.AVCodec)
+	testing.expect_value(t, close(&session), Error.None)
+
+	// Require_Hardware must not accept a software System codec.
+	cfg.preference = .Require_Hardware
+	testing.expect_value(t, open(&session, cfg, providers_no_hw), Error.Unavailable)
+
+	// Native preference skips Hardware and System.
+	cfg.preference = .Native
+	testing.expect_value(t, open(&session, cfg, providers_all), Error.None)
+	testing.expect_value(t, session.backend, Backend.Native)
+	testing.expect_value(t, close(&session), Error.None)
+}

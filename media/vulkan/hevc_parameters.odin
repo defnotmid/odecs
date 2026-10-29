@@ -95,7 +95,7 @@ map_h265_parameters :: proc(
 	if out == nil || v == nil || s == nil || p == nil do return .Invalid_Argument
 	if v.id != s.vps_id ||
 	   s.id != p.sps_id ||
-	   v.max_layers_minus1 != 0 ||
+	   (v.max_layers_minus1 != 0 && v.alpha_layer_id == 0) ||
 	   (s.ptl.profile_idc != 1 && s.ptl.profile_idc != 2) ||
 	   s.ptl.interlaced_source ||
 	   s.chroma_format_idc != 1 ||

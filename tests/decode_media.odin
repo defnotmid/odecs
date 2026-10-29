@@ -1,6 +1,7 @@
 package main
 
 import media "../media"
+import avcodec "../media/avcodec"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
@@ -10,26 +11,29 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 
-// decode_media h264|h265 <in.annexb> <out.yuv|-> [hardware|native] [WxH] [depth=N]
+// decode_media h264|h265 <in.annexb> <out.yuv|-> [hardware|native|system] [WxH] [depth=N]
 //
 // Decodes an Annex B stream through media, one NAL unit per packet,
-// with VideoToolbox or Vulkan Video (where available) or the native decoder,
-// and writes the visible 4:2:0 frames in display order: yuv420p, or
+// with VideoToolbox or Vulkan Video (where available), the native decoder,
+// or (system) the system's libavcodec alone, and writes the visible 4:2:0 frames in display order: yuv420p, or
 // yuv420p10le above 8 bits ("-" only counts them, to time decoding alone).
 // WxH and depth=N (8 by default) describe the stream as a container would;
 // Vulkan Video admits a stream only with them.
 main :: proc() {
 	if len(os.args) < 4 {
-		fmt.eprintln("usage: decode_media h264|h265 <in.annexb> <out.yuv|-> [hardware|native] [WxH] [depth=N]")
+		fmt.eprintln("usage: decode_media h264|h265 <in.annexb> <out.yuv|-> [hardware|native|system] [WxH] [depth=N]")
 		os.exit(2)
 	}
 	config := media.default_config(os.args[1] == "h265" ? .H265 : .H264, .Decode)
+	system := false
 	for arg in os.args[4:] {
 		switch {
 		case arg == "native":
 			config.preference = .Native
 		case arg == "hardware":
 			config.preference = .Require_Hardware
+		case arg == "system":
+			system = true
 		case strings.has_prefix(arg, "depth="):
 			config.bit_depth, _ = strconv.parse_int(arg[len("depth="):])
 		case strings.contains(arg, "x"):
@@ -73,6 +77,7 @@ main :: proc() {
 
 	session: media.Session
 	providers := []media.Provider{videotoolbox.provider(), vulkan.provider(), native.provider()}
+	if system do providers = []media.Provider{avcodec.provider()}
 	if e := media.open(&session, config, providers); e != .None {fmt.eprintln("open:", e); os.exit(1)}
 	defer media.close(&session)
 	start := time.tick_now()

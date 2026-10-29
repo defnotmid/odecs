@@ -243,7 +243,7 @@ test_h264_movie_round_trip :: proc(t: ^testing.T) {
 		config.codec, config.preference = .H264, .Native
 		w: Writer
 		testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.Unsupported)
-		testing.expect_value(t, w.error_detail, "no VideoToolbox or Vulkan Video H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)")
+		testing.expect_value(t, w.error_detail, "no VideoToolbox, Vulkan Video or libavcodec H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)")
 	}
 }
 
@@ -258,7 +258,7 @@ test_h265_movie_round_trip :: proc(t: ^testing.T) {
 		config.codec, config.preference = .H265, .Native
 		w: Writer
 		testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.Unsupported)
-		testing.expect_value(t, w.error_detail, "no VideoToolbox or Vulkan Video H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)")
+		testing.expect_value(t, w.error_detail, "no VideoToolbox, Vulkan Video or libavcodec H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)")
 	}
 }
 

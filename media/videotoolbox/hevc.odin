@@ -74,7 +74,8 @@ decode_h265_nal :: proc(d: ^H265_Decoder, data: []u8, receiver: Receiver, user: 
 	if d == nil || !d.initialized || d.failed do return .Invalid_Argument
 	defer if err != .None do d.failed = true
 	nal, ok := hevc.parse_nal_into(data, &d.syntax)
-	if !ok || nal.layer_id != 0 do return .Invalid_Argument
+	if !ok do return .Invalid_Argument
+	if nal.layer_id != 0 do return .None
 	#partial switch nal.type {
 	case .VPS_NUT, .SPS_NUT, .PPS_NUT:
 		if err = h265_finish_picture(d, receiver, user); err != .None do return
@@ -83,7 +84,7 @@ decode_h265_nal :: proc(d: ^H265_Decoder, data: []u8, receiver: Receiver, user: 
 			value, good := hevc.parse_vps(nal.rbsp)
 			if !good do return .Invalid_Argument
 			d.vps[value.id], d.has_vps[value.id] = value, true
-			replace(&d.vps_nal[value.id], data)
+			if !base_layer_vps(data, &d.vps_nal[value.id]) do return .Invalid_Argument
 		case .SPS_NUT:
 			value, good := hevc.parse_sps(nal.rbsp)
 			if !good do return .Invalid_Argument
