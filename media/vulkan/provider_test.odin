@@ -22,13 +22,21 @@ test_bound_context_never_probes_other_devices :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, session.state == nil)
 	config.preference = .Automatic
-	testing.expect_value(
-		t,
-		media.open(&session, config, []media.Provider{bound, native.provider()}),
-		media.Error.None,
-	)
-	testing.expect(t, session.backend == .Native && session.hardware_error == .Invalid_Config)
-	testing.expect_value(t, media.close(&session), media.Error.None)
+	when native.ODECS_NATIVE_H264 {
+		testing.expect_value(
+			t,
+			media.open(&session, config, []media.Provider{bound, native.provider()}),
+			media.Error.None,
+		)
+		testing.expect(t, session.backend == .Native && session.hardware_error == .Invalid_Config)
+		testing.expect_value(t, media.close(&session), media.Error.None)
+	} else {
+		testing.expect_value(
+			t,
+			media.open(&session, config, []media.Provider{bound, native.provider()}),
+			media.Error.Unavailable,
+		)
+	}
 }
 
 @(test)
@@ -38,10 +46,14 @@ test_known_unsupported_profile_selects_native_before_stream_input :: proc(t: ^te
 	providers := []media.Provider{provider(), native.provider()}
 	session: media.Session
 	testing.expect_value(t, probe(config, nil), media.Error.Unsupported)
-	testing.expect_value(t, media.open(&session, config, providers), media.Error.None)
-	testing.expect_value(t, session.backend, media.Backend.Native)
-	testing.expect_value(t, session.hardware_error, media.Error.Unsupported)
-	testing.expect_value(t, media.close(&session), media.Error.None)
+	when native.ODECS_NATIVE_H265 {
+		testing.expect_value(t, media.open(&session, config, providers), media.Error.None)
+		testing.expect_value(t, session.backend, media.Backend.Native)
+		testing.expect_value(t, session.hardware_error, media.Error.Unsupported)
+		testing.expect_value(t, media.close(&session), media.Error.None)
+	} else {
+		testing.expect_value(t, media.open(&session, config, providers), media.Error.Unavailable)
+	}
 	config.preference = .Require_Hardware
 	testing.expect_value(t, media.open(&session, config, providers), media.Error.Unsupported)
 	testing.expect_value(t, session.state, rawptr(nil))

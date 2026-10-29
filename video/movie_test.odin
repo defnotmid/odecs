@@ -2,6 +2,7 @@ package video
 
 import mp4 "../container/mp4"
 import media "../media"
+import native "../media/native"
 import "core:math"
 import "core:testing"
 
@@ -233,12 +234,32 @@ round_trip :: proc(t: ^testing.T, codec: Video_Codec) {
 
 @(test)
 test_h264_movie_round_trip :: proc(t: ^testing.T) {
-	round_trip(t, .H264)
+	when native.ODECS_NATIVE_H264 {
+		round_trip(t, .H264)
+	} else {
+		m: mp4.Memory_Stream
+		defer delete(m.data)
+		config := default_writer_config(64, 48, 30, 1)
+		config.codec, config.preference = .H264, .Native
+		w: Writer
+		testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.Unsupported)
+		testing.expect_value(t, w.error_detail, "no VideoToolbox or Vulkan Video H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)")
+	}
 }
 
 @(test)
 test_h265_movie_round_trip :: proc(t: ^testing.T) {
-	round_trip(t, .H265)
+	when native.ODECS_NATIVE_H265 {
+		round_trip(t, .H265)
+	} else {
+		m: mp4.Memory_Stream
+		defer delete(m.data)
+		config := default_writer_config(64, 48, 30, 1)
+		config.codec, config.preference = .H265, .Native
+		w: Writer
+		testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.Unsupported)
+		testing.expect_value(t, w.error_detail, "no VideoToolbox or Vulkan Video H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)")
+	}
 }
 
 @(test)
@@ -298,6 +319,7 @@ remux_shifted :: proc(t: ^testing.T, src: ^mp4.Memory_Stream, dst: ^mp4.Memory_S
 
 @(test)
 test_edit_list_hidden_frames_are_not_presented :: proc(t: ^testing.T) {
+	when !native.ODECS_NATIVE_H264 do return
 	W, H, FRAMES :: 64, 48, 20
 	src: mp4.Memory_Stream
 	defer delete(src.data)
@@ -388,7 +410,7 @@ test_planar_matches_rgba :: proc(t: ^testing.T) {
 	m: mp4.Memory_Stream
 	defer delete(m.data)
 	config := default_writer_config(W, H, 24, 1)
-	config.codec = .H265
+	config.codec = native.ODECS_NATIVE_H265 ? .H265 : .VP9
 	config.preference = .Native
 	w: Writer
 	testing.expect_value(t, create_stream(&w, mp4.memory_stream(&m), config), Error.None)
@@ -429,7 +451,8 @@ test_planar_matches_rgba :: proc(t: ^testing.T) {
 @(test)
 test_nv12_matches_i420 :: proc(t: ^testing.T) {
 	W, H :: 96, 64
-	for codec in ([]Video_Codec{.H264, .H265}) {
+	for codec in ([]Video_Codec{.H264, .H265, .VP9}) {
+		if (codec == .H264 && !native.ODECS_NATIVE_H264) || (codec == .H265 && !native.ODECS_NATIVE_H265) do continue
 		files: [2]mp4.Memory_Stream
 		defer for f in files do delete(f.data)
 		rgba := make([]u8, W * H * 4)
@@ -466,6 +489,7 @@ test_nv12_matches_i420 :: proc(t: ^testing.T) {
 // written: premultiplied output is the picture over black either way.
 @(test)
 test_transparent_round_trip :: proc(t: ^testing.T) {
+	when !native.ODECS_NATIVE_H265 do return
 	W, H :: 96, 64
 	rgba := make([]u8, W * H * 4)
 	defer delete(rgba)
@@ -557,6 +581,7 @@ test_movie_chapters_round_trip :: proc(t: ^testing.T) {
 	defer delete(rgba)
 	fill_gradient(rgba, W, H, 0)
 	for codec in ([2]Video_Codec{.H264, .VP9}) {
+		if codec == .H264 && !native.ODECS_NATIVE_H264 do continue
 		m: mp4.Memory_Stream
 		defer delete(m.data)
 		config := default_writer_config(W, H, 30, 1)

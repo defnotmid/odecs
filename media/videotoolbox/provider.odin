@@ -3,8 +3,10 @@ package media_videotoolbox
 import media ".."
 import "core:fmt"
 
-// Hardware H.264 and HEVC on Apple platforms: decoding (host output, 4:2:0;
-// HEVC at 8 or 10 bits) and encoding (8-bit 4:2:0, I/P, constant QP).
+// H.264 and HEVC on Apple platforms: decoding (host output, 4:2:0; HEVC at 8
+// or 10 bits) and encoding (8-bit 4:2:0, I/P, constant QP). Require_Hardware
+// admits only the hardware codecs; Automatic lets VideoToolbox fall back to
+// Apple's software codecs.
 // Elsewhere every probe reports .Unavailable, so the provider can be listed
 // unconditionally.
 provider :: proc() -> media.Provider {
@@ -27,7 +29,10 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 		if depth != 8 && depth != 10 do return .Unsupported
 		if config.profile_idc != 0 && config.profile_idc != 1 && config.profile_idc != 2 do return .Unsupported
 	}
-	return hardware_decode_supported(config.codec == .H264 ? .H264 : .HEVC) ? .None : .Unavailable
+	if config.preference == .Require_Hardware {
+		return hardware_decode_supported(config.codec == .H264 ? .H264 : .HEVC) ? .None : .Unavailable
+	}
+	return ODIN_OS == .Darwin ? .None : .Unavailable
 }
 
 @(private)
@@ -59,7 +64,8 @@ map_error :: proc(err: Error) -> media.Error {
 open_videotoolbox :: proc(session: ^media.Session, config: media.Config, user: rawptr) -> media.Error {
 	s := new(State)
 	if config.operation == .Encode do return open_encoder(session, s, config)
-	err := config.codec == .H264 ? init_h264_decoder(&s.avc, config.no_reordering) : init_h265_decoder(&s.hevc)
+	require_hw := config.preference == .Require_Hardware
+	err := config.codec == .H264 ? init_h264_decoder(&s.avc, config.no_reordering, require_hw) : init_h265_decoder(&s.hevc, require_hw)
 	if err != .None {
 		free(s)
 		return map_error(err)
@@ -147,7 +153,7 @@ close_videotoolbox :: proc(session: ^media.Session) {
 @(private)
 open_encoder :: proc(session: ^media.Session, s: ^State, config: media.Config) -> media.Error {
 	gop := config.gop_size == 0 ? 15 : config.gop_size
-	err := encoder_create(&s.encoder, {codec = config.codec == .H264 ? .H264 : .HEVC, width = config.width, height = config.height, qp = int(clamp(config.qp, 1, 51)), keyframe_interval = gop})
+	err := encoder_create(&s.encoder, {codec = config.codec == .H264 ? .H264 : .HEVC, width = config.width, height = config.height, qp = int(clamp(config.qp, 1, 51)), keyframe_interval = gop, require_hardware = config.preference == .Require_Hardware})
 	session.state = s
 	session.video_impl = encode_videotoolbox
 	session.close_impl = close_videotoolbox

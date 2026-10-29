@@ -25,10 +25,13 @@ on_encoded :: proc "c" (ref_con, frame_ref_con: rawptr, status: OSStatus, info_f
 
 encoder_create :: proc(e: ^Encoder, config: Encoder_Config) -> Error {
 	e^ = {config = config}
-	keys := [1]rawptr{rawptr(kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder)}
-	values := [1]rawptr{rawptr(kCFBooleanTrue)}
-	specification := CFDictionaryCreate(nil, &keys[0], &values[0], 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)
-	defer CFRelease(CFTypeRef(specification))
+	specification: CFDictionaryRef
+	if config.require_hardware {
+		keys := [1]rawptr{rawptr(kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder)}
+		values := [1]rawptr{rawptr(kCFBooleanTrue)}
+		specification = CFDictionaryCreate(nil, &keys[0], &values[0], 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)
+	}
+	defer if specification != nil do CFRelease(CFTypeRef(specification))
 	format := i32(PIXEL_NV12_VIDEO)
 	number := CFNumberCreate(nil, CF_NUMBER_SINT32, &format)
 	defer CFRelease(CFTypeRef(number))

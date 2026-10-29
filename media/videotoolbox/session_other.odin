@@ -3,8 +3,9 @@ package media_videotoolbox
 
 // VideoToolbox exists only on Apple platforms.
 Session :: struct {
-	status:       i32,
-	pixel_format: u32,
+	status:           i32,
+	pixel_format:     u32,
+	require_hardware: bool,
 }
 
 hardware_decode_supported :: proc(codec: Codec) -> bool {

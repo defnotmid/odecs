@@ -25,10 +25,12 @@ H264_Display :: struct {
 }
 
 // no_reordering: the caller asserts that presentation order is decode order.
-init_h264_decoder :: proc(d: ^H264_Decoder, no_reordering := false) -> Error {
+init_h264_decoder :: proc(d: ^H264_Decoder, no_reordering := false, require_hardware := false) -> Error {
 	if d == nil || d.initialized do return .Invalid_Argument
-	if !hardware_decode_supported(.H264) do return .Unavailable
+	when ODIN_OS != .Darwin do return .Unavailable
+	if require_hardware && !hardware_decode_supported(.H264) do return .Unavailable
 	d^ = {
+		pictures     = {session = {require_hardware = require_hardware}},
 		initialized  = true,
 		format_dirty = true,
 	}

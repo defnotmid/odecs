@@ -29,13 +29,13 @@ implemented Annex-B support. Vulkan Video has no AAC codec operation.
 
 Native H.264 and HEVC, decoding and encoding, are compiled in only with
 `-define:ODECS_PATENTED=true` (`ODECS_NATIVE_H264` or `ODECS_NATIVE_H265` for
-one of them); `odin test` turns it on. Both formats are licensed by patent
-pools, so a default build leaves their software codecs out: the native provider
-refuses H.264 and HEVC as `Unsupported`, they go through VideoToolbox or Vulkan
-Video, and only the header parsing and reference bookkeeping those providers
-use is linked. Without a hardware provider (Windows, Linux without Vulkan
-Video) there is no H.264 or HEVC, and HEVC with an alpha layer (decoding and
-encoding) and RExt formats need the native codecs on every platform.
+one of them). Both formats are licensed by patent pools, so a default build
+leaves their software codecs out: the native provider refuses H.264 and HEVC as
+`Unavailable`, they go through VideoToolbox (hardware, or Apple's software
+codecs in `Automatic` mode) or Vulkan Video (Linux and Windows), and only the
+header parsing and reference bookkeeping those providers use is linked. HEVC
+with an alpha layer (decoding and encoding) and RExt formats need the define:
+the hardware decoders refuse alpha streams.
 
 ```odin
 import media "../media"
@@ -58,7 +58,9 @@ err = media.drain(&session, {packet=write_packet,user=&output})
 
 `Automatic` tries implemented hardware providers before native ones regardless
 of array order. `Require_Hardware` returns an error when hardware admission
-fails; `Native` bypasses hardware. In automatic mode `hardware_error` records
+fails; `Native` bypasses hardware. VideoToolbox counts as hardware here: in
+`Automatic` it may use Apple's software codecs, under `Require_Hardware` only
+the hardware ones. In automatic mode `hardware_error` records
 the admission failure when native is selected. Both providers retain temporal
 encoding for an explicit GOP request. Vulkan's GOP range is 1..32768; native
 HEVC's advanced API keeps its existing unbounded low-delay behavior when
@@ -96,6 +98,7 @@ defer common.destroy_static_pool(&pool) // after every bound session closes
 options := native.Options{
     pool=&pool.work_pool,
     h264_slice_count=4,
+    h264_cabac=true, h264_transform_8x8=true,
     h265_tile_cols=2, h265_tile_rows=2,
 }
 providers := []media.Provider{native.provider(&options), vulkan.provider()}
@@ -103,7 +106,8 @@ providers := []media.Provider{native.provider(&options), vulkan.provider()}
 
 Keep the provider binding alive while probing/opening. Each native session
 snapshots the scalar geometry and borrows the pool through close. A zero slice
-count preserves H.264's four-slice default; zero tile dimensions preserve
+count preserves H.264's four-slice default; `h264_cabac` and `h264_transform_8x8`
+enable Main/High profile CABAC and 8x8 transforms; zero tile dimensions preserve
 untiled HEVC. Probe validates geometry for the corresponding encode operation.
 H.264 slice coding/interpolation and HEVC tile search run synchronous disjoint
 ranges over retained codec state. Pool size does not change slice/tile geometry.
@@ -278,8 +282,8 @@ Validation:
 
 ```sh
 odin test media -o:speed
-odin test media/native -o:speed
-odin test media/vulkan -o:speed
+odin test media/native -o:speed -define:ODECS_PATENTED=true
+odin test media/vulkan -o:speed -define:ODECS_PATENTED=true
 odin build tests/media_gpu.odin -file -o:speed -define:ODECS_PATENTED=true -out:/tmp/odecs-media-gpu
 /tmp/odecs-media-gpu --hardware /tmp/odecs-media h264 8 15 37
 ffmpeg -v error -i /tmp/odecs-media.264 -f rawvideo -pix_fmt yuv420p -y /tmp/odecs-media-reference.yuv

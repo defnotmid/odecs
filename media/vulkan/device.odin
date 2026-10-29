@@ -85,7 +85,7 @@ Device :: struct {
 @(private)
 load_instance :: proc(d: ^Device) -> (err: Error) {
 	path: string
-	when ODIN_OS == .Linux {path = "libvulkan.so.1"} else {return .Unsupported}
+	when ODIN_OS == .Linux {path = "libvulkan.so.1"} else when ODIN_OS == .Windows {path = "vulkan-1.dll"} else {return .Unsupported}
 	lib, loaded := dynlib.load_library(path)
 	if !loaded do return .Loader_Unavailable
 	d.loader = lib

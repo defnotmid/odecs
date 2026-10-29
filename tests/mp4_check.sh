@@ -11,7 +11,7 @@ pass() { printf '  %-44s ok\n' "$1"; }
 bad() { printf '  %-44s FAIL\n' "$1"; fail=1; }
 
 odin test container/mp4
-odin test video -o:speed
+odin test video -o:speed -define:ODECS_PATENTED=true
 odin build tools/mp4_smoke -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_smoke"
 odin build tests/mp4_interop.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_interop"
 

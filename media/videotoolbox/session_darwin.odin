@@ -4,13 +4,14 @@ package media_videotoolbox
 // synchronously, so pictures come back in decode order. The session's
 // address is VideoToolbox's callback context: do not move it while open.
 Session :: struct {
-	codec:        Codec,
-	format:       CMFormatDescriptionRef,
-	vt:           VTDecompressionSessionRef,
-	output:       u32, // the pixel format requested of the session
-	image:        CVPixelBufferRef, // the output callback's picture, retained
-	status:       i32, // the last OSStatus VideoToolbox returned, for diagnostics
-	pixel_format: u32, // the last picture's CoreVideo format (a FourCC)
+	codec:            Codec,
+	format:           CMFormatDescriptionRef,
+	vt:               VTDecompressionSessionRef,
+	output:           u32, // the pixel format requested of the session
+	image:            CVPixelBufferRef, // the output callback's picture, retained
+	status:           i32, // the last OSStatus VideoToolbox returned, for diagnostics
+	pixel_format:     u32, // the last picture's CoreVideo format (a FourCC)
+	require_hardware: bool,
 }
 
 hardware_decode_supported :: proc(codec: Codec) -> bool {
@@ -51,12 +52,16 @@ session_set_format :: proc(s: ^Session, codec: Codec, parameter_sets: [][]u8, bi
 		s.format = format
 		return .None
 	}
+	require_hardware := s.require_hardware
 	session_destroy(s)
-	s.codec, s.format, s.output = codec, format, output
-	keys := [1]rawptr{rawptr(kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder)}
-	values := [1]rawptr{rawptr(kCFBooleanTrue)}
-	specification := CFDictionaryCreate(nil, &keys[0], &values[0], 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)
-	defer CFRelease(CFTypeRef(specification))
+	s.codec, s.format, s.output, s.require_hardware = codec, format, output, require_hardware
+	specification: CFDictionaryRef
+	if require_hardware {
+		keys := [1]rawptr{rawptr(kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder)}
+		values := [1]rawptr{rawptr(kCFBooleanTrue)}
+		specification = CFDictionaryCreate(nil, &keys[0], &values[0], 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks)
+	}
+	defer if specification != nil do CFRelease(CFTypeRef(specification))
 	callback := VTDecompressionOutputCallbackRecord{on_output, s}
 	format_type := i32(output)
 	number := CFNumberCreate(nil, CF_NUMBER_SINT32, &format_type)

@@ -1,7 +1,8 @@
 # VideoToolbox
 
-Hardware H.264 and HEVC decoding and encoding on Apple platforms through
-VideoToolbox.
+H.264 and HEVC decoding and encoding on Apple platforms through VideoToolbox:
+the hardware codecs, or Apple's software codecs where there is no hardware
+(unless `require_hardware` is set, as `media`'s `Require_Hardware` does).
 Most callers use it through [`media`](../README.md)'s
 `media_videotoolbox.provider()`, which `video` lists before Vulkan Video.
 Off Apple platforms the package builds with a stub session that reports
@@ -11,7 +12,7 @@ Off Apple platforms the package builds with a stub session that reports
 import vt "../media/videotoolbox"
 
 d: vt.H265_Decoder
-if vt.init_h265_decoder(&d) == .None { // .Unavailable without hardware HEVC decoding
+if vt.init_h265_decoder(&d) == .None { // require_hardware = true: .Unavailable without hardware HEVC decoding
 	defer vt.destroy_h265_decoder(&d)
 	// for each NAL unit (no start code): vt.decode_h265_nal(&d, nal, receive, user)
 	// at the end: vt.flush_h265_decoder(&d, receive, user)
@@ -25,7 +26,8 @@ if vt.init_h265_decoder(&d) == .None { // .Unavailable without hardware HEVC dec
 ## Encoding
 
 `encoder_create` / `encoder_encode` / `encoder_destroy` run a compression
-session that requires the hardware encoder: H.264 High or HEVC Main, 8-bit
+session (on the hardware encoder when `require_hardware` is set, else
+whichever VideoToolbox picks): H.264 High or HEVC Main, 8-bit
 4:2:0, BT.709 limited range, I and P pictures (no reordering), a keyframe
 every `keyframe_interval` frames. `qp` is held constant by setting the
 minimum and maximum frame QP to it (macOS 13 and later; the M4 honours
@@ -45,7 +47,7 @@ both decoded by odecs' native decoders and FFmpeg; QP 18, 30 and 40 give
 - **Synchronous sessions.** Each picture is decoded synchronously, so pictures return in decode order. They are held, copied, until their turn.
 - **Output formats.** The session always asks for a documented layout, in the stream's range: NV12 at 8 bits, and P010-style `x420`/`xf20` at 10. A decoder's own format can differ between chips, and the M4's at 10 bits is a private packed one.
 - **Cropping.** VideoToolbox sizes its output to an SPS's cropping but takes it from the picture's top-left corner, ignoring left and top offsets. It is therefore given SPSs with cropping removed (`parameters.odin`) and returns whole coded pictures, which are cropped while they are copied.
-- **Admission.** `probe` admits a codec only when `VTIsHardwareDecodeSupported` says so, and the session requires the hardware decoder. A stream VideoToolbox refuses mid-way fails the session. `media` never switches decoders after input.
+- **Admission.** With `Preference.Require_Hardware`, `probe` admits a codec only when `VTIsHardwareDecodeSupported` says so and sessions require hardware acceleration; in `Automatic` mode VideoToolbox uses hardware when present and falls back to Apple's software codecs otherwise. A stream VideoToolbox refuses mid-way fails the session. `media` never switches decoders after input.
 
 ## Verification
 

@@ -170,6 +170,7 @@ Encoder_Config :: struct {
 	width, height:     int,
 	qp:                int, // 1..51, held constant through the frame QP limits
 	keyframe_interval: int, // frames from one keyframe to the next
+	require_hardware:  bool,
 }
 
 // The chroma of a picture to encode: U and V planes, or interleaved UV

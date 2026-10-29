@@ -6,12 +6,13 @@ containers. It takes RGBA8 frames and interleaved `f32` PCM and writes an MP4
 with H.264/H.265 and AAC-LC tracks, or a VP9 WebM. It also reads such files
 (and many others) back as RGBA8 frames and PCM. Everything is native Odin.
 `Automatic` decodes in hardware when the machine admits the stream:
-VideoToolbox on macOS (H.264 and HEVC), Vulkan Video on Linux. Encoding
-likewise uses VideoToolbox on macOS and Vulkan Video on Linux, and the
+VideoToolbox on macOS (H.264 and HEVC, falling back to Apple's software codecs
+when hardware is absent), Vulkan Video on Linux and Windows. Encoding
+likewise uses VideoToolbox on macOS and Vulkan Video on Linux and Windows, and the
 native codecs elsewhere (and for alpha and VP9). Native H.264 and H.265 are
 built only with `-define:ODECS_PATENTED=true` ([media](../media/README.md));
-without it they need VideoToolbox or Vulkan Video, and H.265 transparency is
-unavailable.
+without it they go through VideoToolbox or Vulkan Video, and H.265 with an
+alpha layer is neither written nor read.
 
 ## Writing
 
@@ -50,7 +51,7 @@ video.destroy(&w)
   keyframe interval in frames; 0 means about one second. Hardware and native
   encoders produce different bitstreams at the same QP, so equal QP does not
   mean equal size or quality:
-  - **Native H.264** is Constrained Baseline: CAVLC, I/P.
+  - **Native H.264** is Constrained Baseline by default (CAVLC, I/P), or Main/High with `native_options.h264_cabac` / `h264_transform_8x8`.
   - **Vulkan H.264** is High: CABAC, I/P.
   - **H.265** is Main.
 - **Speed:** `ultrafast` prefers encode speed over size. Native H.264 then
@@ -303,7 +304,7 @@ Colour conversion and the reader's overhead (`tests/movie_timing.odin`, pinned t
 ## Validation
 
 ```sh
-odin test video -o:speed
+odin test video -o:speed -define:ODECS_PATENTED=true
 bash tests/mp4_check.sh /tmp/odecs-mp4
 odin run tools/mp4_smoke -o:speed -- /tmp/smoke.mp4 --codec h264
 ```

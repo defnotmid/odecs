@@ -4,14 +4,14 @@
 
 Native Odin media codecs and containers: video, audio and image decoding and
 encoding with no FFmpeg or other codec library at runtime. Hardware video
-coding goes through Vulkan Video on Linux and VideoToolbox on macOS, with the
+coding goes through Vulkan Video on Linux and Windows and VideoToolbox on macOS, with the
 native codecs as the software path; native H.264 and H.265 are compiled in only
 with `-define:ODECS_PATENTED=true` ([media](media/README.md)). MIT licensed ([LICENSE](LICENSE)).
 
 ## Packages
 
 Video:
-- `video/h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0 encoding and 4:2:0 or 4:2:2 decoding at 8 to 10 bits, with encoder checkpoints for editing ([README](video/h264/README.md)).
+- `video/h264/{encoder,decoder}`: H.264, progressive 8-bit 4:2:0 encoding (Baseline/Main/High, CAVLC/CABAC, 4x4/8x8 transforms) and 4:0:0, 4:2:0, 4:2:2 or 4:4:4 decoding at 8 to 10 bits (including lossless transform bypass), with encoder checkpoints for editing ([README](video/h264/README.md)).
 - `video/h265/{encoder,decoder}`: H.265 Main, Main 10 and range extensions; HEVC with an alpha layer, encoded and decoded ([README](video/h265/README.md)).
 - `video/prores/decoder`: Apple ProRes 422 and 4444/XQ with alpha ([README](video/prores/README.md)).
 - `video/vp9/{encoder,decoder}`: VP9 decoding, profiles 0–3 with alpha streams; encoding, profile 0 with alpha ([README](video/vp9/README.md)).

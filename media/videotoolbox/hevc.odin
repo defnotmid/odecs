@@ -44,10 +44,12 @@ H265_Entry :: struct {
 	latency:           int, // pictures decoded since, while it waits
 }
 
-init_h265_decoder :: proc(d: ^H265_Decoder) -> Error {
+init_h265_decoder :: proc(d: ^H265_Decoder, require_hardware := false) -> Error {
 	if d == nil || d.initialized do return .Invalid_Argument
-	if !hardware_decode_supported(.HEVC) do return .Unavailable
+	when ODIN_OS != .Darwin do return .Unavailable
+	if require_hardware && !hardware_decode_supported(.HEVC) do return .Unavailable
 	d^ = {
+		pictures     = {session = {require_hardware = require_hardware}},
 		initialized  = true,
 		format_dirty = true,
 	}

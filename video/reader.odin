@@ -549,6 +549,13 @@ video_providers :: proc(r: ^Reader) -> [3]media.Provider {
 @(private)
 undecodable_detail :: proc(r: ^Reader) -> string {
 	if r.video.codec == .AV1 do return "AV1 needs a GPU with Vulkan Video AV1 decoding (Main, 4:2:0, 8 or 10 bits)"
+	when !native.ODECS_NATIVE_H264 {
+		if r.video.codec == .H264 do return "no VideoToolbox or Vulkan Video H.264 decoder admits this track, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
+	}
+	when !native.ODECS_NATIVE_H265 {
+		if r.video.codec == .H265 && r.video.has_alpha do return "HEVC with an alpha layer decodes only natively, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
+		if r.video.codec == .H265 do return "no VideoToolbox or Vulkan Video H.265 decoder admits this track, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
+	}
 	return "no decoder admits this video track"
 }
 
@@ -607,8 +614,15 @@ reset_video :: proc(r: ^Reader, k: int) -> Error {
 			free(c)
 		}
 	}
-	// Later restarts use the backend the first open selected.
-	r.preference = r.session.backend == .Native ? .Native : .Require_Hardware
+	// Later restarts use the backend the first open selected. VideoToolbox
+	// keeps the preference that chose it: Require_Hardware would refuse
+	// Apple's software codecs.
+	#partial switch r.session.backend {
+	case .Native:
+		r.preference = .Native
+	case .Vulkan:
+		r.preference = .Require_Hardware
+	}
 	for nal in r.parameter_sets {
 		// AV1's configuration OBUs go in as a packet without frames.
 		framing: media.Framing = codec == .AV1 ? .Frame : .NAL

@@ -5,7 +5,8 @@
 #                                        # (and with -define:ODECS_PATENTED=true where native H.264/H.265 is gated)
 #   bash .github/ci.sh check --programs  # and the tests/*.odin programs (Linux-only tools), and that a
 #                                        # default build links no native H.264/H.265 coding
-#   bash .github/ci.sh test              # odin test, every package that has tests (-o:none:
+#   bash .github/ci.sh test              # odin test, every package that has tests, and those whose tests
+#                                        # depend on the gate again with -define:ODECS_PATENTED=true (-o:none:
 #                                        # -o:speed spends minutes compiling, tests run in ~40 s)
 #
 # GPU and fixture tests stay off: they need -define:ODECS_GPU_TEST and friends.
@@ -82,8 +83,8 @@ case ${1:-} in
 check)
 	run "layers" layers
 	for p in $(packages); do run "check $p" odin check "$p" -vet -strict-style -no-entry-point; done
-	# Native H.264 and H.265 are compiled out by default (on under odin test):
-	# check those branches as well.
+	# Native H.264 and H.265 are compiled out by default: check and test those
+	# branches with -define:ODECS_PATENTED=true as well.
 	for p in $(git grep -l ODECS_PATENTED -- '*.odin' ':!tests' | xargs -n1 dirname | sort -u); do
 		run "check $p ODECS_PATENTED" odin check "$p" -vet -strict-style -no-entry-point -define:ODECS_PATENTED=true
 	done
@@ -94,6 +95,10 @@ check)
 	;;
 test)
 	for p in $(test_packages); do run "test $p" odin test "$p" -o:none -out:"$out/odecs-test$exe"; done
+	# The packages whose tests change with the native H.264/H.265 gate, again with it on.
+	for p in $(git grep -l ODECS_NATIVE_H26 -- '*_test.odin' | xargs -n1 dirname | sort -u); do
+		run "test $p ODECS_PATENTED" odin test "$p" -o:none -define:ODECS_PATENTED=true -out:"$out/odecs-test$exe"
+	done
 	;;
 *)
 	echo "usage: bash .github/ci.sh check [--programs] | test" >&2

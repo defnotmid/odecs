@@ -201,6 +201,8 @@ create_output :: proc(w: ^Writer, config: Writer_Config, path: string, stream: i
 		video.ultrafast = c.ultrafast
 		if e := media.open(&w.video, video, providers[:]); e != .None {
 			w.error_detail = "video encoder unavailable for this configuration"
+			when !native.ODECS_NATIVE_H264 do if c.codec == .H264 do w.error_detail = "no VideoToolbox or Vulkan Video H.264 encoder admits this configuration, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
+			when !native.ODECS_NATIVE_H265 do if c.codec == .H265 do w.error_detail = "no VideoToolbox or Vulkan Video H.265 encoder admits this configuration, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
 			return media_error(e)
 		}
 		if c.codec == .VP9 do return create_webm(w, path, stream)

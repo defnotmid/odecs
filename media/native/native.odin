@@ -14,12 +14,12 @@ import vp9d "../../video/vp9/decoder"
 import vp9e "../../video/vp9/encoder"
 
 // Compile-time patent/bundling gates for software H.264 and H.265.
-// Outside `odin test`, native software H.264 and H.265 are omitted by default
-// so `media` routes H.264/H.265 exclusively through system/hardware providers
-// (VideoToolbox, Vulkan Video) without bundling software implementations.
+// Native software H.264 and H.265 are omitted by default so `media` routes
+// H.264/H.265 exclusively through system/hardware providers (VideoToolbox,
+// Vulkan Video) without bundling software implementations.
 // Pass `-define:ODECS_PATENTED=true` (or `-define:ODECS_NATIVE_H264=true` /
 // `-define:ODECS_NATIVE_H265=true`) to compile in the native software codecs.
-ODECS_PATENTED :: #config(ODECS_PATENTED, ODIN_TEST)
+ODECS_PATENTED :: #config(ODECS_PATENTED, false)
 ODECS_NATIVE_H264 :: #config(ODECS_NATIVE_H264, ODECS_PATENTED)
 ODECS_NATIVE_H265 :: #config(ODECS_NATIVE_H265, ODECS_PATENTED)
 
@@ -111,13 +111,11 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 	depth := config.bit_depth == 0 ? 8 : config.bit_depth
 	switch config.codec {
 	case .H264:
-		when !ODECS_NATIVE_H264 do return .Unsupported
 		// Decoding: Monochrome, 4:2:0, 4:2:2, 4:4:4 up to 10-bit. Encoding: 8-bit 4:2:0 (for now).
 		high := config.operation == .Decode
 		if depth < 8 || depth > (high ? 10 : 8) do return .Unsupported
 		if config.chroma != .YUV420 && !high do return .Unsupported
 	case .H265:
-		when !ODECS_NATIVE_H265 do return .Unsupported
 		if config.operation == .Encode && depth != 8 && depth != 10 do return .Unsupported
 	case .ProRes:
 		if config.operation == .Encode do return .Unsupported // decoder only
@@ -164,7 +162,11 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 	limit := config.operation == .Encode ? 8192 : 16888
 	if !media.is_audio(config.codec) && (config.width > limit || config.height > limit) do return .Unsupported
 	if config.operation == .Encode && !media.is_audio(config.codec) && (config.width < 16 || config.height < 16) do return .Unsupported
-	if user != nil do return options_error(config, (^Options)(user)^)
+	if user != nil {
+		if err := options_error(config, (^Options)(user)^); err != .None do return err
+	}
+	when !ODECS_NATIVE_H264 do if config.codec == .H264 do return .Unavailable
+	when !ODECS_NATIVE_H265 do if config.codec == .H265 do return .Unavailable
 	return .None
 }
 
@@ -219,13 +221,13 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 				s.avc_decoder = new(avcd.Decoder_State); avcd.init_decoder(s.avc_decoder)
 				s.avc_decoder.no_reordering = config.no_reordering
 			} else {
-				return .Unsupported
+				return .Unavailable
 			}
 		case .H265:
 			when ODECS_NATIVE_H265 {
 				s.hevc_decoder = new(hevcd.Decoder); hevcd.init_decoder(s.hevc_decoder)
 			} else {
-				return .Unsupported
+				return .Unavailable
 			}
 		case .ProRes:
 			s.prores_decoder = new(proresd.Decoder); proresd.init_decoder(s.prores_decoder, s.pool)
@@ -270,7 +272,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			if config.frame_rate_den > 0 do avc_config.fps = f32(f64(config.frame_rate_num) / f64(config.frame_rate_den))
 			if err := avce.init_encoder(s.avc_encoder, avc_config); err != .None do return map_avc_encoder_error(session, err)
 		} else {
-			return .Unsupported
+			return .Unavailable
 		}
 	case .H265:
 		when ODECS_NATIVE_H265 {
@@ -324,7 +326,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			}
 			hevce.init_encoder(s.hevc_encoder, hevc_config)
 		} else {
-			return .Unsupported
+			return .Unavailable
 		}
 	case .AAC:
 		cfg, e := aac_config(config)

@@ -1,7 +1,7 @@
-# Linux Vulkan Video
+# Vulkan Video
 
 This package uses Odin's `vendor:vulkan` definitions and loads the system Vulkan
-loader through `core:dynlib`. It links no codec library. FFmpeg and HM are used
+loader (`libvulkan.so.1` on Linux, `vulkan-1.dll` on Windows) through `core:dynlib`. It links no codec library. FFmpeg and HM are used
 only as optional test oracles. Use `media` for the
 common provider API; `provider()` here is the Vulkan provider, and the
 lower-level sessions in this package serve codec-specific callers.
@@ -211,8 +211,8 @@ Ordinary tests do not require a GPU. Hardware flags request actual execution
 and fail when the required hardware is unavailable.
 
 ```sh
-odin test media/vulkan -o:speed
-odin test media/vulkan -o:speed -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_TEST=true \
+odin test media/vulkan -o:speed -define:ODECS_PATENTED=true
+odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_TEST=true \
   -define:ODECS_GPU_CODEC=h265 -define:ODECS_GPU_WIDTH=384 \
   -define:ODECS_GPU_HEIGHT=240 -define:ODECS_GPU_DEPTH=10 \
   -define:ODECS_GPU_QP=26 -define:ODECS_GPU_GOP=15 \
@@ -232,7 +232,7 @@ For the resident shader gate, provide a low-delay HEVC fixture, optionally also
 a low-delay H.264 fixture:
 
 ```sh
-odin test media/vulkan -o:speed -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_SURFACE_TEST=true \
+odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_SURFACE_TEST=true \
   -define:ODECS_GPU_SURFACE_FIXTURE=/absolute/low-delay.265 \
   -define:ODECS_GPU_AVC_SURFACE_FIXTURE=/absolute/low-delay.264
 ```
@@ -247,7 +247,7 @@ a real second Context, lazy-frontend `Busy`, constructor refusal rollback and
 surface preflight without consuming history:
 
 ```sh
-odin test media/vulkan -o:speed -define:ODIN_TEST_THREADS=1 \
+odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 \
   -define:ODECS_GPU_CONTEXT_TEST=true -define:ODECS_GPU_CODEC=h265 \
   -define:ODECS_GPU_DEPTH=10 -define:ODECS_GPU_WIDTH=386 \
   -define:ODECS_GPU_HEIGHT=242 -define:ODECS_GPU_GOP=15

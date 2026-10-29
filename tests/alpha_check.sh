@@ -17,7 +17,7 @@ odin test video/vp9
 odin test video/vp9/decoder
 odin test container/webm
 odin test container/mp4
-odin test video -o:speed
+odin test video -o:speed -define:ODECS_PATENTED=true
 odin build tests/alpha_compare.odin -file -o:speed -out:"$work/alpha_compare"
 odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_alpha"
 odin build tests/alpha_fuzz.odin -file -o:speed -define:ODECS_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
