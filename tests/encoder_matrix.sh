@@ -35,6 +35,9 @@ run qp26_ref3           --qp 26 --refs 3
 run qp30_ref1           --qp 30
 run qp26_nodeblock      --qp 26 --no-deblock
 run qp26_threads        --qp 26 --threads
+run qp26_cabac          --qp 26 --cabac
+run qp26_cabac_8x8      --qp 26 --cabac --8x8
+run qp26_cabac_8x8_mt   --qp 26 --cabac --8x8 --threads
 run bitrate_2000        --bitrate 2000
 # Bitrate accuracy on the longer 151-frame clip
 LONG=$BUILD/enc/long.yuv

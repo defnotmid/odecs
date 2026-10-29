@@ -1,5 +1,7 @@
 package h264
 
+import common "../../common"
+
 // Locate Annex B NAL payloads. Returned offsets exclude start codes.
 find_nal_units :: proc(data: []u8, allocator := context.allocator) -> []Nal_Location {
 	nals := make([dynamic]Nal_Location, 0, 64, allocator)
@@ -20,7 +22,6 @@ find_nal_units :: proc(data: []u8, allocator := context.allocator) -> []Nal_Loca
 }
 
 import "base:intrinsics"
-import "core:math/bits"
 
 // ---------------------------------------------------------------------------
 // RBSP bit reader. `cache` holds the next unread bits MSB-aligned; `pos` is
@@ -192,46 +193,12 @@ write_nal_annex_b :: proc(out: ^[dynamic]u8, nal_ref_idc, nal_unit_type: u8, rbs
 }
 
 // ---------------------------------------------------------------------------
-// RBSP bit writer. `cache` holds up to 7 pending bits LSB-aligned; whole
-// bytes are appended to the caller-owned `buf` as they complete.
+// RBSP bit writer (shared via package common).
 // ---------------------------------------------------------------------------
 
-Bit_Writer :: struct {
-	buf:   ^[dynamic]u8,
-	cache: u64,
-	nbits: int,
-}
-
-init_bit_writer :: proc(out_buf: ^[dynamic]u8) -> Bit_Writer {
-	clear(out_buf)
-	return Bit_Writer{buf = out_buf}
-}
-
-// Append the low `n` bits of `value`, MSB first. n <= 32.
-write_bits :: proc(writer: ^Bit_Writer, value: u32, n: int) {
-	writer.cache = writer.cache << uint(n) | u64(bits.bitfield_extract(value, 0, uint(n)))
-	writer.nbits += n
-	for writer.nbits >= 8 {
-		writer.nbits -= 8
-		append(writer.buf, u8(writer.cache >> uint(writer.nbits)))
-	}
-}
-
-// Unsigned Exp-Golomb: len(val+1)-1 zeros followed by val+1 in binary.
-write_unsigned_exp_golomb :: proc(writer: ^Bit_Writer, val: u32) {
-	v := val + 1
-	lz := bits.len_u32(v) - 1
-	write_bits(writer, 0, lz)
-	write_bits(writer, v, lz + 1)
-}
-
-// Signed Exp-Golomb
-write_signed_exp_golomb :: proc(writer: ^Bit_Writer, val: i32) {
-	write_unsigned_exp_golomb(writer, val > 0 ? u32(2 * val - 1) : u32(-2 * val))
-}
-
-// rbsp_trailing_bits: a one bit, then zero bits up to the byte boundary.
-flush_bits_rbsp :: proc(writer: ^Bit_Writer) {
-	write_bits(writer, 1, 1)
-	write_bits(writer, 0, -writer.nbits & 7)
-}
+Bit_Writer :: common.Bit_Writer
+init_bit_writer :: common.init_bit_writer
+write_bits :: common.write_bits
+write_unsigned_exp_golomb :: common.write_ue
+write_signed_exp_golomb :: common.write_se
+flush_bits_rbsp :: common.write_rbsp_trailing_bits

@@ -13,7 +13,7 @@ Spec_Engine :: struct {
 	range, offset: u32,
 	data:          []u8,
 	bit:           int, // stream bits consumed
-	ctx:           [CABAC_CONTEXT_COUNT]u8,
+	ctx:           [h264.CABAC_TOTAL_CONTEXT_COUNT]u8,
 }
 
 @(private = "file")
@@ -119,7 +119,7 @@ test_cabac_cursor_matches_specification_engine :: proc(t: ^testing.T) {
 				}
 				steps: for step in 0 ..< 1500 {
 					seed = seed * 1664525 + 1013904223
-					index := int(seed >> 8) % CABAC_CONTEXT_COUNT
+					index := int(seed >> 8) % h264.CABAC_CONTEXT_COUNT
 					actual, expected: u32
 					switch (seed >> 28) % 7 {
 					case 0, 1:
@@ -160,13 +160,13 @@ test_cabac_cursor_matches_specification_engine :: proc(t: ^testing.T) {
 test_cabac_residual_levels_match_specification_engine :: proc(t: ^testing.T) {
 	seed: u32 = 0x5eed_1234
 	for trial in 0 ..< 70 {
-		if !check_levels(t, min(Block_Cat), trial, &seed) do return
+		if !check_levels(t, min(h264.Block_Cat), trial, &seed) do return
 	}
 }
 
 // Checks one category, then the next as a compile-time constant.
 @(private = "file")
-check_levels :: proc(t: ^testing.T, $cat: Block_Cat, trial: int, seed: ^u32) -> bool {
+check_levels :: proc(t: ^testing.T, $cat: h264.Block_Cat, trial: int, seed: ^u32) -> bool {
 	max_coeffs := ([6]int{16, 15, 16, 4, 15, 64})[cat]
 	data: [512]u8
 	for &value in data {seed^ = seed^ * 1664525 + 1013904223; value = u8(seed^ >> 24)}
@@ -200,7 +200,7 @@ check_levels :: proc(t: ^testing.T, $cat: Block_Cat, trial: int, seed: ^u32) -> 
 	num_last := max_coeffs - 1
 	for i in 0 ..< max_coeffs - 1 {
 		sig, last := i, i
-		if cat == .Luma_8x8 do sig, last = int(sig_coeff_ctx_8x8[i]), int(last_coeff_ctx_8x8[i])
+		if cat == .Luma_8x8 do sig, last = int(h264.sig_coeff_ctx_8x8[i]), int(h264.last_coeff_ctx_8x8[i])
 		if cat == .Chroma_DC do sig, last = min(i, 2), min(i, 2)
 		if spec_decision(&b, sig_base + sig) == 0 do continue
 		significant[i] = true
@@ -234,6 +234,6 @@ check_levels :: proc(t: ^testing.T, $cat: Block_Cat, trial: int, seed: ^u32) -> 
 		testing.expectf(t, false, "trial %d cat %v diverged", trial, cat)
 		return false
 	}
-	when cat < max(Block_Cat) do return check_levels(t, Block_Cat(int(cat) + 1), trial, seed)
+	when cat < max(h264.Block_Cat) do return check_levels(t, h264.Block_Cat(int(cat) + 1), trial, seed)
 	return true
 }

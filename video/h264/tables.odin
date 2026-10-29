@@ -116,6 +116,10 @@ inter_cbp_table: [48]u8 = {
 	41,
 }
 
+// Table 9-4(b): coded_block_pattern mapping when ChromaArrayType == 0 or 3
+intra4x4_cbp_table_400_444: [16]u8 = {15, 0, 7, 11, 13, 14, 3, 5, 10, 12, 1, 2, 4, 8, 6, 9}
+inter_cbp_table_400_444: [16]u8 = {0, 1, 2, 4, 8, 3, 5, 10, 12, 15, 7, 11, 13, 14, 6, 9}
+
 // Neighbor non-zero count mapping to VLC table index (0..3)
 nc_map_table: [17]u8 = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3}
 

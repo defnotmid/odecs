@@ -474,11 +474,12 @@ chroma_qp :: #force_inline proc "contextless" (qp_y, offset, qp_bd_offset: i32) 
 }
 
 // What the filter depends on besides the macroblocks: the sample bit depth
-// (thresholds scale by 1 << (bit_depth - 8), 8.7.2.2) and 4:2:2 chroma, whose
-// full-height planes have four horizontal chroma edges per macroblock.
+// (thresholds scale by 1 << (bit_depth - 8), 8.7.2.2) and 4:2:2 / 4:4:4 / 4:0:0 chroma.
 Deblock_Format :: struct {
 	bit_depth:  int, // 0 means 8
 	chroma_422: bool,
+	chroma_444: bool,
+	monochrome: bool,
 }
 
 @(private)
@@ -495,6 +496,8 @@ Deblock_MB_Data :: struct {
 	// 8x8 transform: the odd internal luma edges are not filtered, though
 	// 4:2:2 chroma filters the horizontal ones (their strengths are kept).
 	transform8: bool,
+	bypass_cur: bool,
+	bypass_p:   [2]bool,
 }
 
 @(private)
@@ -576,6 +579,8 @@ prepare_deblock_mb :: proc(
 	index := mb_y * columns + mb_x
 	cur := &macroblocks[index]
 	out.transform8 = cur.uses_8x8_transform
+	out.bypass_cur = cur.transform_bypass
+	out.bypass_p = {}
 	if cur.deblocking_mode == .Disabled do return
 	// Odd internal edges of each orientation: all of them without the 8x8
 	// transform, and the horizontal ones for 4:2:2 chroma regardless.
@@ -589,11 +594,13 @@ prepare_deblock_mb :: proc(
 	for orientation in 0 ..< 2 {
 		if (orientation == 0 ? mb_x == 0 : mb_y == 0) do continue
 		p := &macroblocks[neighbours[orientation]]
+		out.bypass_p[orientation] = p.transform_bypass
 		if cur.deblocking_mode == .Within_Slice && p.slice_index != cur.slice_index do continue
+		if p.transform_bypass && cur.transform_bypass do continue
 		if uncoded && !p.is_intra && p.luma_coded_block_mask == 0 && p.chroma_residual_mode == .None && p.has_uniform_motion && p.prediction_directions[0] == cur.prediction_directions[0] && p.reference_picture_ids == cur.reference_picture_ids && p.motion_vectors[0][0] == cur.motion_vectors[0][0] && p.motion_vectors[1][0] == cur.motion_vectors[1][0] do continue
 		out.strengths[orientation][0] = edge_strengths(p, cur, 0, orientation == 0)
 	}
-	if !uncoded {
+	if !uncoded && !cur.transform_bypass {
 		if cur.is_intra {
 			for orientation in 0 ..< 2 do for edge in 1 ..< 4 {
 				if odd_edges[orientation] || edge & 1 == 0 do out.strengths[orientation][edge] = {3, 3, 3, 3}
@@ -695,7 +702,7 @@ prepare_deblock_mb :: proc(
 				(qpc_p + qpc_q + 1) >> 1,
 				alpha_offset,
 				beta_offset,
-				true,
+				!format.chroma_444,
 				depth_shift,
 			)
 		}
@@ -723,10 +730,14 @@ filter_deblock_mb_edges :: proc(
 	if !active do return
 	luma_plane, cb, cr := buffer_planes(T, buf)
 	mb_pix_y: [^]T = &luma_plane[(mb_y * 16) * buf.y_stride + mb_x * 16]
-	chroma_height := buf.chroma_422 ? 16 : 8
-	chroma_pix := [2][^]T {
-		&cb[(mb_y * chroma_height) * buf.uv_stride + mb_x * 8],
-		&cr[(mb_y * chroma_height) * buf.uv_stride + mb_x * 8],
+	chroma_width := buf.chroma_444 ? 16 : 8
+	chroma_height := (buf.chroma_422 || buf.chroma_444) ? 16 : 8
+	chroma_pix: [2][^]T
+	if !buf.monochrome {
+		chroma_pix = {
+			&cb[(mb_y * chroma_height) * buf.uv_stride + mb_x * chroma_width],
+			&cr[(mb_y * chroma_height) * buf.uv_stride + mb_x * chroma_width],
+		}
 	}
 
 	for edge in 0 ..< 4 {
@@ -744,6 +755,22 @@ filter_deblock_mb_edges :: proc(
 			} else {
 				deblock_luma_horizontal(&mb_pix_y[edge * 4 * buf.y_stride], buf.y_stride, luma.alpha, luma.beta, bs, tc0, pixel_max)
 			}
+		}
+		if buf.monochrome do continue
+		if buf.chroma_444 {
+			if data.transform8 && edge & 1 != 0 do continue
+			for plane in 0 ..< 2 {
+				chroma := &data.thresholds[domain][plane + 1]
+				if chroma.alpha == 0 || chroma.beta == 0 do continue
+				c_tc: [4]i8
+				for k in 0 ..< 4 do if bs[k] > 0 && bs[k] < 4 do c_tc[k] = chroma.tc[bs[k]]
+				if vertical {
+					deblock_luma_vertical(&chroma_pix[plane][edge * 4], buf.uv_stride, chroma.alpha, chroma.beta, bs, c_tc, pixel_max)
+				} else {
+					deblock_luma_horizontal(&chroma_pix[plane][edge * 4 * buf.uv_stride], buf.uv_stride, chroma.alpha, chroma.beta, bs, c_tc, pixel_max)
+				}
+			}
+			continue
 		}
 		chroma_row_edge := !vertical && buf.chroma_422
 		if edge & 1 != 0 && !chroma_row_edge do continue
@@ -795,7 +822,12 @@ deblock_picture :: proc(
 		$T: typeid,
 	) {
 		data: Deblock_MB_Data
-		format := Deblock_Format{bit_depth, buf != nil && buf.chroma_422}
+		format := Deblock_Format {
+			bit_depth  = bit_depth,
+			chroma_422 = buf != nil && buf.chroma_422,
+			chroma_444 = buf != nil && buf.chroma_444,
+			monochrome = buf != nil && buf.monochrome,
+		}
 		for mb_y in 0 ..< macroblock_rows do for mb_x in 0 ..< macroblock_columns {
 			// Disabled pictures/MBs require neither scratch publication nor filters.
 			if macroblocks[mb_y * macroblock_columns + mb_x].deblocking_mode == .Disabled do continue

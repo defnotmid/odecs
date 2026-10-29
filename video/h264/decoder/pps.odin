@@ -56,19 +56,34 @@ parse_picture_parameter_set :: proc(
 		picture_parameters.pic_scaling_matrix_present_flag = h264.read_bit(reader) == 1
 		if picture_parameters.pic_scaling_matrix_present_flag {
 			// A PPS matrix falls back to the SPS lists (rule B) for lists not sent
-			limit := 6 + (picture_parameters.transform_8x8_mode_flag ? 2 : 0)
+			sps_id := picture_parameters.sequence_parameter_set_id
+			is_444 :=
+				state != nil &&
+				state.sequence_parameter_set_valid[sps_id] &&
+				state.sequence_parameters[sps_id].chroma_format == .YUV_444
+			limit := 6 + (picture_parameters.transform_8x8_mode_flag ? (is_444 ? 6 : 2) : 0)
 			for i in 0 ..< limit {
-				picture_parameters.has_scaling_list[i] = h264.read_bit(reader) == 1
-				if !picture_parameters.has_scaling_list[i] do continue
+				present := h264.read_bit(reader) == 1
+				if i < 8 {
+					picture_parameters.has_scaling_list[i] = present
+				} else {
+					picture_parameters.has_chroma_scaling_list[i - 8] = present
+				}
+				if !present do continue
 				if i < 6 {
 					picture_parameters.use_default_scaling_list[i] = parse_scaling_list(
 						reader,
 						picture_parameters.scaling_list_4x4[i][:],
 					)
-				} else {
+				} else if i < 8 {
 					picture_parameters.use_default_scaling_list[i] = parse_scaling_list(
 						reader,
 						picture_parameters.scaling_list_8x8[i - 6][:],
+					)
+				} else {
+					picture_parameters.use_default_chroma_scaling_list[i - 8] = parse_scaling_list(
+						reader,
+						picture_parameters.chroma_scaling_list_8x8[i - 8][:],
 					)
 				}
 			}

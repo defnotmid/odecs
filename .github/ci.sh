@@ -2,7 +2,9 @@
 # What CI runs (.github/workflows/ci.yml), runnable locally too:
 #
 #   bash .github/ci.sh check             # the facades' import layers; odin check -vet -strict-style, every package
-#   bash .github/ci.sh check --programs  # and the tests/*.odin programs (Linux-only tools)
+#                                        # (and with -define:ODECS_PATENTED=true where native H.264/H.265 is gated)
+#   bash .github/ci.sh check --programs  # and the tests/*.odin programs (Linux-only tools), and that a
+#                                        # default build links no native H.264/H.265 coding
 #   bash .github/ci.sh test              # odin test, every package that has tests (-o:none:
 #                                        # -o:speed spends minutes compiling, tests run in ~40 s)
 #
@@ -60,6 +62,14 @@ layers() {
 	[ -z "$bad" ] || { echo "image imports: $bad"; return 1; }
 }
 
+# A default build links no native H.264 or H.265 slice decoding or encoding:
+# only the parsing the hardware providers use (mp4_smoke reads and writes
+# through the video facade).
+patent_free() {
+	odin build tools/mp4_smoke -o:none -out:"$out/mp4_smoke" || return 1
+	! nm "$out/mp4_smoke" | grep -E 'h26[45]_decoder::decode_|h264_encoder::|h265_encoder::encode'
+}
+
 failed=()
 run() {
 	local name=$1; shift
@@ -72,8 +82,14 @@ case ${1:-} in
 check)
 	run "layers" layers
 	for p in $(packages); do run "check $p" odin check "$p" -vet -strict-style -no-entry-point; done
+	# Native H.264 and H.265 are compiled out by default (on under odin test):
+	# check those branches as well.
+	for p in $(git grep -l ODECS_PATENTED -- '*.odin' ':!tests' | xargs -n1 dirname | sort -u); do
+		run "check $p ODECS_PATENTED" odin check "$p" -vet -strict-style -no-entry-point -define:ODECS_PATENTED=true
+	done
 	if [ "${2:-}" = --programs ]; then
 		for f in tests/*.odin; do run "check $f" odin check "$f" -file -vet -strict-style; done
+		run "patent-free default build" patent_free
 	fi
 	;;
 test)

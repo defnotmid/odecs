@@ -1,14 +1,25 @@
-package h264_decoder
+package h264
 
-// CABAC tables from ITU-T H.264 clause 9.3 (Tables 9-12..9-33, 9-44, 9-45) and
-// 8x8 transform tables from clause 8.5 (Table 8-4 normAdjust8x8) and the
-// default scaling lists (Table 7-3/7-4), transcribed via OpenH264
-// (BSD-2-Clause, Copyright (c) 2013 Cisco Systems).
+// CABAC tables from ITU-T H.264 clause 9.3 (Tables 9-12..9-33, 9-40, 9-42, 9-43),
+// transcribed via OpenH264 (BSD-2-Clause, Copyright (c) 2013 Cisco Systems).
+
+// Residual block categories (ctxBlockCat, Table 9-42)
+Block_Cat :: enum u8 {
+	Luma_DC   = 0,
+	Luma_AC   = 1,
+	Luma_4x4  = 2,
+	Chroma_DC = 3,
+	Chroma_AC = 4,
+	Luma_8x8  = 5,
+}
 
 // (m, n) initialisation pairs per context: [ctx][init type: I, cabac_init_idc 0..2].
 // Contexts unused in I slices hold {0, 0}.
-CABAC_CONTEXT_COUNT :: 460
-cabac_context_init: [CABAC_CONTEXT_COUNT][4][2]i8 = {
+CABAC_CONTEXT_COUNT :: 464
+CABAC_PLANE_STRIDE :: 379
+CABAC_TOTAL_CONTEXT_COUNT :: CABAC_CONTEXT_COUNT + 2 * CABAC_PLANE_STRIDE
+@(rodata)
+cabac_context_init := [CABAC_CONTEXT_COUNT][4][2]i8 {
 	{{20, -15}, {20, -15}, {20, -15}, {20, -15}},
 	{{2, 54}, {2, 54}, {2, 54}, {2, 54}},
 	{{3, 74}, {3, 74}, {3, 74}, {3, 74}},
@@ -469,4 +480,299 @@ cabac_context_init: [CABAC_CONTEXT_COUNT][4][2]i8 = {
 	{{35, 20}, {61, 17}, {68, 10}, {37, 23}},
 	{{29, 36}, {55, 34}, {66, 27}, {31, 38}},
 	{{14, 67}, {42, 62}, {47, 57}, {20, 64}},
+	// Table 9-33: coded_block_flag for ctxBlockCat 5, 9, 13 (ctxIdx 1012..1023)
+	{{-3, 70}, {-3, 74}, {-2, 73}, {-5, 79}},
+	{{-8, 93}, {-9, 92}, {-12, 104}, {-11, 104}},
+	{{-10, 90}, {-8, 87}, {-9, 91}, {-11, 91}},
+	{{-30, 127}, {-23, 126}, {-31, 127}, {-30, 127}},
+}
+
+// ctxBlockCatOffset per block category (Table 9-40)
+@(rodata)
+coded_block_flag_cat_offset := [6]int{0, 4, 8, 12, 16, 0}
+@(rodata)
+significant_cat_offset := [6]int{0, 15, 29, 44, 47, 0}
+@(rodata)
+abs_level_cat_offset := [6]int{0, 10, 20, 30, 39, 0}
+
+// Significance map contexts of 8x8 blocks (Table 9-43, frame coded)
+@(rodata)
+sig_coeff_ctx_8x8 := [63]u8 {
+	0, 1, 2, 3, 4, 5, 5, 4, 4, 3, 3, 4, 4, 4, 5, 5,
+	4, 4, 4, 4, 3, 3, 6, 7, 7, 7, 8, 9, 10, 9, 8, 7,
+	7, 6, 11, 12, 13, 11, 6, 7, 8, 9, 14, 10, 9, 8, 6, 11,
+	12, 13, 11, 6, 9, 14, 10, 9, 11, 12, 13, 11, 14, 10, 12,
+}
+
+@(rodata)
+last_coeff_ctx_8x8 := [63]u8 {
+	0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4,
+	5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8,
+}
+
+// Initialise all context variables for a slice (9.3.1.1).
+cabac_init_contexts :: proc(
+	ctx: ^[CABAC_TOTAL_CONTEXT_COUNT]u8,
+	slice_type: Slice_Type,
+	cabac_init_idc: u32,
+	slice_qp: i32,
+) {
+	kind := slice_type == .I || slice_type == .SI ? 0 : int(cabac_init_idc) + 1
+	qp := clamp(slice_qp, 0, 51)
+	for i in 0 ..< CABAC_CONTEXT_COUNT {
+		m := i32(cabac_context_init[i][kind][0])
+		n := i32(cabac_context_init[i][kind][1])
+		pre := clamp(((m * qp) >> 4) + n, 1, 126)
+		state := pre <= 63 ? u8((63 - pre) << 1) : u8((pre - 64) << 1 | 1)
+		ctx[i] = state
+		if i >= 85 {
+			ctx[i + CABAC_PLANE_STRIDE] = state
+			ctx[i + 2 * CABAC_PLANE_STRIDE] = state
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CABAC context index derivation (9.3.3.1.1) shared by decoder and encoder
+// ---------------------------------------------------------------------------
+
+// Neighbouring 4x4 block of `block` in the given direction: macroblock index and block index, or -1.
+cabac_neighbour_block :: #force_inline proc(
+	macroblock_index, left_index, top_index, block: int,
+	left: bool,
+) -> (
+	idx, sub: int,
+) {
+	bx, by := subblock_to_xy(block)
+	if left {
+		if bx > 0 do return macroblock_index, xy_to_subblock(bx - 1, by)
+		return left_index, xy_to_subblock(3, by)
+	}
+	if by > 0 do return macroblock_index, xy_to_subblock(bx, by - 1)
+	return top_index, xy_to_subblock(bx, 3)
+}
+
+cabac_mb_skip_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+) -> int {
+	inc := 0
+	for idx in ([2]int{left_index, top_index}) {
+		if idx >= 0 && !macroblocks[idx].is_skip do inc += 1
+	}
+	return inc
+}
+
+cabac_intra_mb_type_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+) -> int {
+	inc := 0
+	for idx in ([2]int{left_index, top_index}) {
+		if idx >= 0 && macroblocks[idx].type != .I_4x4 && macroblocks[idx].type != .I_8x8 do inc += 1
+	}
+	return inc
+}
+
+cabac_b_mb_type_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+) -> int {
+	inc := 0
+	for idx in ([2]int{left_index, top_index}) {
+		if idx < 0 do continue
+		neighbour := &macroblocks[idx]
+		if neighbour.type != .B_Skip && neighbour.type != .B_Direct_16x16 do inc += 1
+	}
+	return inc
+}
+
+cabac_transform_8x8_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+) -> int {
+	inc := 0
+	for idx in ([2]int{left_index, top_index}) {
+		if idx >= 0 && macroblocks[idx].uses_8x8_transform do inc += 1
+	}
+	return inc
+}
+
+cabac_ref_idx_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	macroblock_index, left_index, top_index, list, block: int,
+) -> int {
+	inc := 0
+	for left, i in ([2]bool{true, false}) {
+		idx, sub := cabac_neighbour_block(macroblock_index, left_index, top_index, block, left)
+		if idx < 0 do continue
+		neighbour := &macroblocks[idx]
+		if neighbour.is_intra || neighbour.is_skip do continue
+		if neighbour.type == .B_Direct_16x16 || (neighbour.type == .B_8x8 && neighbour.subpartition_types[sub / 4] == .Direct_8x8) do continue
+		if neighbour.reference_indices[list][sub / 4] > 0 do inc += i == 0 ? 1 : 2
+	}
+	return inc
+}
+
+cabac_mvd_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	macroblock_index, left_index, top_index, list, block: int,
+) -> (
+	inc: [2]int,
+) {
+	sum: [2]int
+	for left in ([2]bool{true, false}) {
+		idx, sub := cabac_neighbour_block(macroblock_index, left_index, top_index, block, left)
+		if idx < 0 do continue
+		neighbour := &macroblocks[idx]
+		if neighbour.is_intra || neighbour.is_skip || neighbour.prediction_directions[sub / 4] & (list == 0 ? Prediction_Direction.List_0 : .List_1) == .None do continue
+		difference := neighbour.motion_differences[list][sub]
+		sum += {int(difference[0]), int(difference[1])}
+	}
+	for comp in 0 ..< 2 {
+		inc[comp] = sum[comp] < 3 ? 0 : sum[comp] <= 32 ? 1 : 2
+	}
+	return
+}
+
+cabac_intra_chroma_mode_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+) -> int {
+	inc := 0
+	for idx in ([2]int{left_index, top_index}) {
+		if idx < 0 do continue
+		neighbour := &macroblocks[idx]
+		if neighbour.is_intra && neighbour.type != .I_PCM && neighbour.chroma_prediction_mode != .DC do inc += 1
+	}
+	return inc
+}
+
+cabac_cbp_luma_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index, block8: int,
+	own_mask: u32,
+) -> int {
+	cond :: proc(macroblocks: #soa[]Macroblock, idx: int, bit: uint, own: u32, inside: bool) -> int {
+		if inside do return own >> bit & 1 == 0 ? 1 : 0
+		if idx < 0 do return 0
+		neighbour := &macroblocks[idx]
+		if neighbour.type == .I_PCM do return 0
+		if neighbour.is_skip do return 1
+		return neighbour.luma_coded_block_mask >> bit & 1 == 0 ? 1 : 0
+	}
+	bx, by := block8 & 1, block8 >> 1
+	a := bx > 0 ? cond(macroblocks, 0, uint(block8 - 1), own_mask, true) : cond(macroblocks, left_index, uint(block8 + 1), own_mask, false)
+	b := by > 0 ? cond(macroblocks, 0, uint(block8 - 2), own_mask, true) : cond(macroblocks, top_index, uint(block8 + 2), own_mask, false)
+	return a + 2 * b
+}
+
+cabac_cbp_chroma_ctx_inc :: #force_inline proc(
+	macroblocks: #soa[]Macroblock,
+	left_index, top_index: int,
+	want_two: bool,
+) -> int {
+	cond :: proc(macroblocks: #soa[]Macroblock, idx: int, want_two: bool) -> int {
+		if idx < 0 do return 0
+		neighbour := &macroblocks[idx]
+		if neighbour.type == .I_PCM do return 1
+		if neighbour.is_skip do return 0
+		return (want_two ? neighbour.chroma_residual_mode == .DC_And_AC : neighbour.chroma_residual_mode != .None) ? 1 : 0
+	}
+	return cond(macroblocks, left_index, want_two) + 2 * cond(macroblocks, top_index, want_two)
+}
+
+// coded_block_flag condTermFlag of a neighbouring macroblock for a block category (9.3.3.1.1.9)
+cabac_coded_block_cond :: proc(
+	macroblocks: #soa[]Macroblock,
+	macroblock_index, idx: int,
+	$cat: Block_Cat,
+	sub: int,
+	plane: int,
+	chroma_444 := false,
+) -> int {
+	if idx < 0 do return macroblocks[macroblock_index].is_intra ? 1 : 0
+	neighbour := &macroblocks[idx]
+	if neighbour.type == .I_PCM do return 1
+	if neighbour.is_skip do return 0
+	when cat == .Luma_DC {
+		return neighbour.type == .I_16x16 && neighbour.has_dc_coefficients[plane] ? 1 : 0
+	} else when cat == .Chroma_DC {
+		return neighbour.chroma_residual_mode != .None && neighbour.has_dc_coefficients[1 + plane] ? 1 : 0
+	} else when cat == .Chroma_AC {
+		return neighbour.chroma_residual_mode == .DC_And_AC && neighbour.nonzero_coefficient_counts[chroma_count_index(plane, sub)] > 0 ? 1 : 0
+	} else when cat == .Luma_8x8 {
+		if !neighbour.uses_8x8_transform || neighbour.luma_coded_block_mask >> uint(sub / 4) & 1 == 0 do return 0
+		return (plane == 0 ? neighbour.has_8x8_coefficients[sub / 4] : neighbour.chroma_has_8x8_coefficients[plane - 1][sub / 4]) ? 1 : 0
+	} else {
+		if neighbour.luma_coded_block_mask >> uint(sub / 4) & 1 == 0 do return 0
+		if neighbour.uses_8x8_transform {
+			if !chroma_444 do return 1 // inferred for 4:2:0 / 4:2:2
+			return (plane == 0 ? neighbour.has_8x8_coefficients[sub / 4] : neighbour.chroma_has_8x8_coefficients[plane - 1][sub / 4]) ? 1 : 0
+		}
+		return neighbour.nonzero_coefficient_counts[plane * 16 + sub] > 0 ? 1 : 0
+	}
+}
+
+// Full ctxIdx for coded_block_flag of a residual block (9.3.3.1.1.9).
+cabac_coded_block_ctx_idx :: proc(
+	macroblocks: #soa[]Macroblock,
+	macroblock_index, left_index, top_index: int,
+	$cat: Block_Cat,
+	block: int,
+	chroma_422 := false,
+	chroma_444 := false,
+	plane_444 := 0,
+) -> int {
+	plane_offset := plane_444 * CABAC_PLANE_STRIDE
+	when cat == .Luma_8x8 {
+		macroblock := &macroblocks[macroblock_index]
+		inc: int
+		for left, i in ([2]bool{true, false}) {
+			idx, sub := cabac_neighbour_block(macroblock_index, left_index, top_index, block * 4, left)
+			cond: int
+			if idx == macroblock_index {
+				has_8x8 := plane_444 == 0 ? macroblock.has_8x8_coefficients[sub / 4] : macroblock.chroma_has_8x8_coefficients[plane_444 - 1][sub / 4]
+				cond = macroblock.luma_coded_block_mask >> uint(sub / 4) & 1 != 0 && has_8x8 ? 1 : 0
+			} else {
+				cond = cabac_coded_block_cond(macroblocks, macroblock_index, idx, cat, sub, plane_444, chroma_444)
+			}
+			inc += i == 0 ? cond : 2 * cond
+		}
+		return plane_offset + 460 + inc
+	} else {
+		when cat != .Luma_DC && cat != .Chroma_DC {macroblock := &macroblocks[macroblock_index]}
+		inc: int
+		when cat == .Luma_DC || cat == .Chroma_DC {
+			plane := cat == .Chroma_DC ? block : plane_444
+			inc =
+				cabac_coded_block_cond(macroblocks, macroblock_index, left_index, cat, 0, plane, chroma_444) +
+				2 * cabac_coded_block_cond(macroblocks, macroblock_index, top_index, cat, 0, plane, chroma_444)
+		} else when cat == .Chroma_AC {
+			blocks := chroma_422 ? 8 : 4
+			plane, index := block / blocks, block % blocks
+			bx, by := index & 1, index >> 1
+			counts := &macroblock.nonzero_coefficient_counts
+			a :=
+				bx > 0 ? (counts[chroma_count_index(plane, by * 2)] > 0 ? 1 : 0) : cabac_coded_block_cond(macroblocks, macroblock_index, left_index, cat, by * 2 + 1, plane, chroma_444)
+			b :=
+				by > 0 ? (counts[chroma_count_index(plane, index - 2)] > 0 ? 1 : 0) : cabac_coded_block_cond(macroblocks, macroblock_index, top_index, cat, blocks - 2 + bx, plane, chroma_444)
+			inc = a + 2 * b
+		} else {
+			for left, i in ([2]bool{true, false}) {
+				idx, sub := cabac_neighbour_block(macroblock_index, left_index, top_index, block, left)
+				cond: int
+				if idx == macroblock_index {
+					cond =
+						macroblock.luma_coded_block_mask >> uint(sub / 4) & 1 != 0 && macroblock.nonzero_coefficient_counts[plane_444 * 16 + sub] > 0 ? 1 : 0
+				} else {
+					cond = cabac_coded_block_cond(macroblocks, macroblock_index, idx, cat, sub, plane_444, chroma_444)
+				}
+				inc += i == 0 ? cond : 2 * cond
+			}
+		}
+		return plane_offset + 85 + coded_block_flag_cat_offset[cat] + inc
+	}
 }

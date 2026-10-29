@@ -13,12 +13,24 @@ import proresd "../../video/prores/decoder"
 import vp9d "../../video/vp9/decoder"
 import vp9e "../../video/vp9/encoder"
 
+// Compile-time patent/bundling gates for software H.264 and H.265.
+// Outside `odin test`, native software H.264 and H.265 are omitted by default
+// so `media` routes H.264/H.265 exclusively through system/hardware providers
+// (VideoToolbox, Vulkan Video) without bundling software implementations.
+// Pass `-define:ODECS_PATENTED=true` (or `-define:ODECS_NATIVE_H264=true` /
+// `-define:ODECS_NATIVE_H265=true`) to compile in the native software codecs.
+ODECS_PATENTED :: #config(ODECS_PATENTED, ODIN_TEST)
+ODECS_NATIVE_H264 :: #config(ODECS_NATIVE_H264, ODECS_PATENTED)
+ODECS_NATIVE_H265 :: #config(ODECS_NATIVE_H265, ODECS_PATENTED)
+
 // The binding is read at probe/open. Each session snapshots its geometry and
 // borrows only the caller's persistent pool until close. Calls remain serial
 // per session, and the same pool must not be used by concurrent codec calls.
 Options :: struct {
 	pool:                           ^common.Work_Pool,
 	h264_slice_count:               int, // zero preserves the native default of four slices
+	h264_cabac:                     bool,
+	h264_transform_8x8:             bool,
 	h265_tile_cols, h265_tile_rows: int, // both zero preserves the untiled stream
 }
 
@@ -99,11 +111,13 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 	depth := config.bit_depth == 0 ? 8 : config.bit_depth
 	switch config.codec {
 	case .H264:
-		// Decoding: High 10 and High 4:2:2 too. Encoding: 8-bit 4:2:0.
+		when !ODECS_NATIVE_H264 do return .Unsupported
+		// Decoding: Monochrome, 4:2:0, 4:2:2, 4:4:4 up to 10-bit. Encoding: 8-bit 4:2:0 (for now).
 		high := config.operation == .Decode
 		if depth < 8 || depth > (high ? 10 : 8) do return .Unsupported
-		if config.chroma != .YUV420 && !(high && config.chroma == .YUV422) do return .Unsupported
+		if config.chroma != .YUV420 && !high do return .Unsupported
 	case .H265:
+		when !ODECS_NATIVE_H265 do return .Unsupported
 		if config.operation == .Encode && depth != 8 && depth != 10 do return .Unsupported
 	case .ProRes:
 		if config.operation == .Encode do return .Unsupported // decoder only
@@ -201,10 +215,18 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 	if config.operation == .Decode {
 		switch config.codec {
 		case .H264:
-			s.avc_decoder = new(avcd.Decoder_State); avcd.init_decoder(s.avc_decoder)
-			s.avc_decoder.no_reordering = config.no_reordering
+			when ODECS_NATIVE_H264 {
+				s.avc_decoder = new(avcd.Decoder_State); avcd.init_decoder(s.avc_decoder)
+				s.avc_decoder.no_reordering = config.no_reordering
+			} else {
+				return .Unsupported
+			}
 		case .H265:
-			s.hevc_decoder = new(hevcd.Decoder); hevcd.init_decoder(s.hevc_decoder)
+			when ODECS_NATIVE_H265 {
+				s.hevc_decoder = new(hevcd.Decoder); hevcd.init_decoder(s.hevc_decoder)
+			} else {
+				return .Unsupported
+			}
 		case .ProRes:
 			s.prores_decoder = new(proresd.Decoder); proresd.init_decoder(s.prores_decoder, s.pool)
 		case .VP9:
@@ -229,71 +251,81 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 	case .VP9:
 		return open_vp9_encoders(session, s, config, options)
 	case .H264:
-		s.avc_encoder = new(avce.Encoder_State)
-		avc_config := avce.Encoder_Config {
-			width               = config.width,
-			height              = config.height,
-			qp                  = config.qp,
-			gop_size            = config.gop_size == 0 ? 15 : config.gop_size,
-			slice_count         = options.h264_slice_count,
-			colour_primaries    = config.color.primaries,
-			transfer            = config.color.transfer,
-			matrix_coefficients = config.color.matrix_coeffs,
-			full_range          = config.color.full_range,
-			ultrafast           = config.ultrafast,
+		when ODECS_NATIVE_H264 {
+			s.avc_encoder = new(avce.Encoder_State)
+			avc_config := avce.Encoder_Config {
+				width               = config.width,
+				height              = config.height,
+				qp                  = config.qp,
+				gop_size            = config.gop_size == 0 ? 15 : config.gop_size,
+				slice_count         = options.h264_slice_count,
+				cabac               = options.h264_cabac,
+				transform_8x8       = options.h264_transform_8x8,
+				colour_primaries    = config.color.primaries,
+				transfer            = config.color.transfer,
+				matrix_coefficients = config.color.matrix_coeffs,
+				full_range          = config.color.full_range,
+				ultrafast           = config.ultrafast,
+			}
+			if config.frame_rate_den > 0 do avc_config.fps = f32(f64(config.frame_rate_num) / f64(config.frame_rate_den))
+			if err := avce.init_encoder(s.avc_encoder, avc_config); err != .None do return map_avc_encoder_error(session, err)
+		} else {
+			return .Unsupported
 		}
-		if config.frame_rate_den > 0 do avc_config.fps = f32(f64(config.frame_rate_num) / f64(config.frame_rate_den))
-		if err := avce.init_encoder(s.avc_encoder, avc_config); err != .None do return map_avc_encoder_error(session, err)
 	case .H265:
-		s.hevc_encoder = new(hevce.Encoder)
-		chroma: hevce.Chroma_Layout
-		switch config.chroma {
-		case .YUV420:
-			chroma = .YUV_420
-		case .YUV422:
-			chroma = .YUV_422
-		case .YUV444:
-			chroma = .YUV_444
-		case .Monochrome:
-			chroma = .Monochrome
+		when ODECS_NATIVE_H265 {
+			s.hevc_encoder = new(hevce.Encoder)
+			chroma: hevce.Chroma_Layout
+			switch config.chroma {
+			case .YUV420:
+				chroma = .YUV_420
+			case .YUV422:
+				chroma = .YUV_422
+			case .YUV444:
+				chroma = .YUV_444
+			case .Monochrome:
+				chroma = .Monochrome
+			}
+			gop := config.gop_size == 0 ? 15 : config.gop_size
+			hevc_config := hevce.Config {
+				width = config.width,
+				height = config.height,
+				qp = config.qp,
+				bit_depth = config.bit_depth,
+				chroma_format = chroma,
+				deblock = true,
+				sao = true,
+				forced_mode = -1,
+				refs = 1,
+				intra_only_i_slices = gop == 1,
+				idr_period = gop > 1 ? gop : 0,
+				pool = options.pool,
+				tiles_cols = options.h265_tile_cols,
+				tiles_rows = options.h265_tile_rows,
+				fps_num = config.frame_rate_num,
+				fps_den = config.frame_rate_den,
+				colour_primaries = config.color.primaries,
+				transfer = config.color.transfer,
+				matrix_coeffs = config.color.matrix_coeffs,
+				full_range = config.color.full_range,
+				ultrafast = config.ultrafast,
+			}
+			if config.alpha {
+				hevc_config.layer = .Base_With_Alpha
+				hevc_config.alpha_premultiplied = config.alpha_premultiplied
+				alpha_config := hevc_config
+				alpha_config.layer = .Alpha
+				// Full-range samples with no colour meaning, as Apple signals its
+				// alpha layer.
+				alpha_config.colour_primaries, alpha_config.transfer, alpha_config.matrix_coeffs = 2, 2, 2
+				alpha_config.full_range = true
+				s.hevc_alpha_encoder = new(hevce.Encoder)
+				hevce.init_encoder(s.hevc_alpha_encoder, alpha_config)
+			}
+			hevce.init_encoder(s.hevc_encoder, hevc_config)
+		} else {
+			return .Unsupported
 		}
-		gop := config.gop_size == 0 ? 15 : config.gop_size
-		hevc_config := hevce.Config {
-			width = config.width,
-			height = config.height,
-			qp = config.qp,
-			bit_depth = config.bit_depth,
-			chroma_format = chroma,
-			deblock = true,
-			sao = true,
-			forced_mode = -1,
-			refs = 1,
-			intra_only_i_slices = gop == 1,
-			idr_period = gop > 1 ? gop : 0,
-			pool = options.pool,
-			tiles_cols = options.h265_tile_cols,
-			tiles_rows = options.h265_tile_rows,
-			fps_num = config.frame_rate_num,
-			fps_den = config.frame_rate_den,
-			colour_primaries = config.color.primaries,
-			transfer = config.color.transfer,
-			matrix_coeffs = config.color.matrix_coeffs,
-			full_range = config.color.full_range,
-			ultrafast = config.ultrafast,
-		}
-		if config.alpha {
-			hevc_config.layer = .Base_With_Alpha
-			hevc_config.alpha_premultiplied = config.alpha_premultiplied
-			alpha_config := hevc_config
-			alpha_config.layer = .Alpha
-			// Full-range samples with no colour meaning, as Apple signals its
-			// alpha layer.
-			alpha_config.colour_primaries, alpha_config.transfer, alpha_config.matrix_coeffs = 2, 2, 2
-			alpha_config.full_range = true
-			s.hevc_alpha_encoder = new(hevce.Encoder)
-			hevce.init_encoder(s.hevc_alpha_encoder, alpha_config)
-		}
-		hevce.init_encoder(s.hevc_encoder, hevc_config)
 	case .AAC:
 		cfg, e := aac_config(config)
 		if e != .None do return .Invalid_Config
@@ -311,19 +343,24 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 @(private)
 close_native :: proc(session: ^media.Session) {
 	s := (^State)(session.state)
-	if s.avc_decoder != nil {avcd.destroy_decoder(s.avc_decoder); free(s.avc_decoder)}
-	if s.avc_encoder != nil {avce.destroy_encoder(s.avc_encoder); free(s.avc_encoder)}
-	if s.hevc_decoder != nil {
-		for p in s.decoded do hevcd.release_picture(s.hevc_decoder, p)
-		hevcd.destroy_decoder(s.hevc_decoder); free(s.hevc_decoder)
+	when ODECS_NATIVE_H264 {
+		if s.avc_decoder != nil {avcd.destroy_decoder(s.avc_decoder); free(s.avc_decoder)}
+		if s.avc_encoder != nil {avce.destroy_encoder(s.avc_encoder); free(s.avc_encoder)}
 	}
-	if s.hevc_alpha != nil {
-		for p in s.alpha_pictures do hevcd.release_picture(s.hevc_alpha, p)
-		hevcd.destroy_decoder(s.hevc_alpha); free(s.hevc_alpha)
+	when ODECS_NATIVE_H265 {
+		if s.hevc_decoder != nil {
+			for p in s.decoded do hevcd.release_picture(s.hevc_decoder, p)
+			hevcd.destroy_decoder(s.hevc_decoder); free(s.hevc_decoder)
+		}
+		if s.hevc_alpha != nil {
+			for p in s.alpha_pictures do hevcd.release_picture(s.hevc_alpha, p)
+			hevcd.destroy_decoder(s.hevc_alpha); free(s.hevc_alpha)
+		}
+		if s.hevc_encoder != nil {hevce.destroy_encoder(s.hevc_encoder); free(s.hevc_encoder)}
+		if s.hevc_alpha_encoder != nil {hevce.destroy_encoder(s.hevc_alpha_encoder); free(s.hevc_alpha_encoder)}
+		hevcd.destroy_nal_scratch(&s.nal_scratch)
 	}
 	delete(s.alpha_pictures)
-	if s.hevc_encoder != nil {hevce.destroy_encoder(s.hevc_encoder); free(s.hevc_encoder)}
-	if s.hevc_alpha_encoder != nil {hevce.destroy_encoder(s.hevc_alpha_encoder); free(s.hevc_alpha_encoder)}
 	delete(s.alpha_encoded); delete(s.alpha_input); delete(s.joined)
 	delete(s.chroma_planes)
 	if s.prores_decoder != nil {proresd.destroy_decoder(s.prores_decoder); free(s.prores_decoder)}
@@ -333,7 +370,6 @@ close_native :: proc(session: ^media.Session) {
 	delete(s.vp9_alpha_planes)
 	if s.audio_decoder != nil {audio.destroy_decoder(s.audio_decoder); free(s.audio_decoder)}
 	if s.aac_encoder != nil {aace.destroy_encoder(s.aac_encoder); free(s.aac_encoder)}
-	hevcd.destroy_nal_scratch(&s.nal_scratch)
 	delete(s.encoded); delete(s.decoded); delete(s.input); delete(s.pcm)
 	free(s)
 }
@@ -525,31 +561,30 @@ emit_avc :: proc(p: ^avcd.Picture, receiver: media.Receiver) {
 	if receiver.video == nil do return
 	b := p.buf
 	size := b.high_depth ? 2 : 1
-	sub_y := b.chroma_422 ? 1 : 2
+	sub_x := b.chroma_444 ? 1 : 2
+	sub_y := (b.chroma_422 || b.chroma_444) ? 1 : 2
 	// The displayed samples of a plane, `size` bytes each.
 	cropped :: proc(p: [^]u8, stride, x, y, w, h, size: int) -> media.Plane {
 		return {p[(y * stride + x) * size:][:((h - 1) * stride + w) * size], stride * size}
 	}
-	receiver.video(
-		{
-			width = b.width,
-			height = b.height,
-			coded_width = b.coded_width,
-			coded_height = b.coded_height,
-			crop_x = b.crop_x,
-			crop_y = b.crop_y,
-			bit_depth = p.bit_depth,
-			storage_bits = 8 * size,
-			chroma = b.chroma_422 ? .YUV422 : .YUV420,
-			poc = int(p.poc),
-			planes = {
-				cropped(b.y, b.y_stride, b.crop_x, b.crop_y, b.width, b.height, size),
-				cropped(b.u, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size),
-				cropped(b.v, b.uv_stride, b.crop_x / 2, b.crop_y / sub_y, b.width / 2, b.height / sub_y, size),
-			},
-		},
-		receiver.user,
-	)
+	f := media.Video_Frame {
+		width = b.width,
+		height = b.height,
+		coded_width = b.coded_width,
+		coded_height = b.coded_height,
+		crop_x = b.crop_x,
+		crop_y = b.crop_y,
+		bit_depth = p.bit_depth,
+		storage_bits = 8 * size,
+		chroma = b.monochrome ? .Monochrome : (b.chroma_444 ? .YUV444 : (b.chroma_422 ? .YUV422 : .YUV420)),
+		poc = int(p.poc),
+	}
+	f.planes[0] = cropped(b.y, b.y_stride, b.crop_x, b.crop_y, b.width, b.height, size)
+	if !b.monochrome {
+		f.planes[1] = cropped(b.u, b.uv_stride, b.crop_x / sub_x, b.crop_y / sub_y, b.width / sub_x, b.height / sub_y, size)
+		f.planes[2] = cropped(b.v, b.uv_stride, b.crop_x / sub_x, b.crop_y / sub_y, b.width / sub_x, b.height / sub_y, size)
+	}
+	receiver.video(f, receiver.user)
 }
 
 // Base-layer pictures in output order, each with the alpha picture of the
@@ -625,44 +660,49 @@ decode_one_nal :: proc(
 	data: []u8,
 	receiver: media.Receiver,
 ) -> media.Error {
-	if s.avc_decoder != nil {
-		if len(data) == 0 || data[0] & 0x80 != 0 do return .Invalid_Input
-		ready, err := avcd.decode_nal(s.avc_decoder, data)
-		if err != .None {
-			session.error_detail = avcd.error_description(err)
-			return avcd.is_unsupported(err) ? .Unsupported : .Codec_Error
+	when ODECS_NATIVE_H264 {
+		if s.avc_decoder != nil {
+			if len(data) == 0 || data[0] & 0x80 != 0 do return .Invalid_Input
+			ready, err := avcd.decode_nal(s.avc_decoder, data)
+			if err != .None {
+				session.error_detail = avcd.error_description(err)
+				return avcd.is_unsupported(err) ? .Unsupported : .Codec_Error
+			}
+			if ready do emit_avc(s.avc_decoder.output, receiver)
+			for {p := avcd.next_output_frame(s.avc_decoder); if p == nil do break; emit_avc(p, receiver)}
+			return .None
 		}
-		if ready do emit_avc(s.avc_decoder.output, receiver)
-		for {p := avcd.next_output_frame(s.avc_decoder); if p == nil do break; emit_avc(p, receiver)}
+	}
+	when ODECS_NATIVE_H265 {
+		nal, ok := hevcd.parse_nal_into(data, &s.nal_scratch)
+		if !ok do return .Invalid_Input
+		if nal.type == .PREFIX_SEI_NUT {
+			if use, found := hevcd.parse_alpha_channel_info(nal.rbsp); found do s.alpha_premultiplied = use == .Premultiplied
+		}
+		if !hevcd.decode_nal(
+			s.hevc_decoder,
+			nal,
+			&s.decoded,
+		) {session.error_detail = "native HEVC rejected NAL"; return .Codec_Error}
+		// A VPS that declares an auxiliary alpha layer starts its decoder.
+		if nal.type == .VPS_NUT && s.hevc_alpha == nil {
+			for _, v in s.hevc_decoder.vps do if v.alpha_layer_id != 0 {
+				s.hevc_alpha = new(hevcd.Decoder)
+				hevcd.init_decoder(s.hevc_alpha)
+				s.hevc_alpha.layer = v.alpha_layer_id
+				break
+			}
+		}
+		if s.hevc_alpha != nil && (nal.layer_id == s.hevc_alpha.layer || nal.type == .VPS_NUT) {
+			if !hevcd.decode_nal(s.hevc_alpha, nal, &s.alpha_pictures) {
+				session.error_detail = "native HEVC rejected an alpha-layer NAL"
+				return .Codec_Error
+			}
+		}
+		emit_hevc(s, receiver)
 		return .None
 	}
-	nal, ok := hevcd.parse_nal_into(data, &s.nal_scratch)
-	if !ok do return .Invalid_Input
-	if nal.type == .PREFIX_SEI_NUT {
-		if use, found := hevcd.parse_alpha_channel_info(nal.rbsp); found do s.alpha_premultiplied = use == .Premultiplied
-	}
-	if !hevcd.decode_nal(
-		s.hevc_decoder,
-		nal,
-		&s.decoded,
-	) {session.error_detail = "native HEVC rejected NAL"; return .Codec_Error}
-	// A VPS that declares an auxiliary alpha layer starts its decoder.
-	if nal.type == .VPS_NUT && s.hevc_alpha == nil {
-		for _, v in s.hevc_decoder.vps do if v.alpha_layer_id != 0 {
-			s.hevc_alpha = new(hevcd.Decoder)
-			hevcd.init_decoder(s.hevc_alpha)
-			s.hevc_alpha.layer = v.alpha_layer_id
-			break
-		}
-	}
-	if s.hevc_alpha != nil && (nal.layer_id == s.hevc_alpha.layer || nal.type == .VPS_NUT) {
-		if !hevcd.decode_nal(s.hevc_alpha, nal, &s.alpha_pictures) {
-			session.error_detail = "native HEVC rejected an alpha-layer NAL"
-			return .Codec_Error
-		}
-	}
-	emit_hevc(s, receiver)
-	return .None
+	return .Unsupported
 }
 
 @(private)
@@ -747,25 +787,28 @@ encode_video_native :: proc(
 	frame := frame
 	if frame.chroma_interleaved do split_chroma(s, &frame) or_return
 	if s.vp9_encoders[0] != nil do return encode_vp9(session, s, frame, receiver)
-	if s.avc_encoder != nil {
-		if frame.storage_bits != 8 || frame.planes[1].stride != frame.planes[2].stride do return .Unsupported
-		is_idr := s.avc_encoder.frames_coded % s.avc_encoder.config.gop_size == 0
-		lanes, err := avce.encode_frame_lanes(
-			s.avc_encoder,
-			raw_data(frame.planes[0].data),
-			raw_data(frame.planes[1].data),
-			raw_data(frame.planes[2].data),
-			frame.planes[0].stride,
-			frame.planes[1].stride,
-			is_idr,
-			s.pool,
-		)
-		if err != .None do return map_avc_encoder_error(session, err)
-		if receiver.packet != nil {
-			for nal in lanes do receiver.packet({data = nal, framing = .Annex_B}, receiver.user)
+	when ODECS_NATIVE_H264 {
+		if s.avc_encoder != nil {
+			if frame.storage_bits != 8 || frame.planes[1].stride != frame.planes[2].stride do return .Unsupported
+			is_idr := s.avc_encoder.frames_coded % s.avc_encoder.config.gop_size == 0
+			lanes, err := avce.encode_frame_lanes(
+				s.avc_encoder,
+				raw_data(frame.planes[0].data),
+				raw_data(frame.planes[1].data),
+				raw_data(frame.planes[2].data),
+				frame.planes[0].stride,
+				frame.planes[1].stride,
+				is_idr,
+				s.pool,
+			)
+			if err != .None do return map_avc_encoder_error(session, err)
+			if receiver.packet != nil {
+				for nal in lanes do receiver.packet({data = nal, framing = .Annex_B}, receiver.user)
+			}
+			return .None
 		}
-		return .None
-	} else {
+	}
+	when ODECS_NATIVE_H265 {
 		// The alpha plane is checked and copied before either layer advances.
 		if e := load_alpha(s, frame); e != .None do return e
 		sw, sh := media.chroma_subsampling(frame.chroma)
@@ -834,10 +877,11 @@ encode_video_native :: proc(
 			cw,
 			&s.encoded,
 		)
+		if e := encode_alpha_layer(s, frame); e != .None do return e
+		emit_packet(s, .Annex_B, receiver)
+		return .None
 	}
-	if e := encode_alpha_layer(s, frame); e != .None do return e
-	emit_packet(s, .Annex_B, receiver)
-	return .None
+	return .Unsupported
 }
 
 // Copies the frame's alpha plane (luma's size, depth and storage) into the
@@ -918,7 +962,9 @@ encode_audio_native :: proc(
 drain_native :: proc(session: ^media.Session, receiver: media.Receiver) -> media.Error {
 	s := (^State)(session.state)
 	if session.config.operation == .Encode {
-		if s.hevc_encoder != nil do hevce.flush_encoder(s.hevc_encoder, &s.encoded)
+		when ODECS_NATIVE_H265 {
+			if s.hevc_encoder != nil do hevce.flush_encoder(s.hevc_encoder, &s.encoded)
+		}
 		if s.aac_encoder != nil {
 			for {
 				if s.audio_sample_index > max(i64) - i64(s.aac_encoder.frame_samples) do return .Invalid_Input
@@ -931,14 +977,18 @@ drain_native :: proc(session: ^media.Session, receiver: media.Receiver) -> media
 		}
 		emit_packet(s, .Annex_B, receiver)
 	} else {
-		if s.avc_decoder != nil {
-			if avcd.flush_decoder(s.avc_decoder) do emit_avc(s.avc_decoder.output, receiver)
-			for {p := avcd.next_output_frame(s.avc_decoder); if p == nil do break; emit_avc(p, receiver)}
+		when ODECS_NATIVE_H264 {
+			if s.avc_decoder != nil {
+				if avcd.flush_decoder(s.avc_decoder) do emit_avc(s.avc_decoder.output, receiver)
+				for {p := avcd.next_output_frame(s.avc_decoder); if p == nil do break; emit_avc(p, receiver)}
+			}
 		}
-		if s.hevc_decoder != nil {
-			if !hevcd.flush_decoder(s.hevc_decoder, &s.decoded) do return .Codec_Error
-			if s.hevc_alpha != nil && !hevcd.flush_decoder(s.hevc_alpha, &s.alpha_pictures) do return .Codec_Error
-			emit_hevc(s, receiver, true)
+		when ODECS_NATIVE_H265 {
+			if s.hevc_decoder != nil {
+				if !hevcd.flush_decoder(s.hevc_decoder, &s.decoded) do return .Codec_Error
+				if s.hevc_alpha != nil && !hevcd.flush_decoder(s.hevc_alpha, &s.alpha_pictures) do return .Codec_Error
+				emit_hevc(s, receiver, true)
+			}
 		}
 	}
 	return .None

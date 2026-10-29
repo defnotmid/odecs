@@ -40,7 +40,7 @@ Picture :: struct {
 // CABAC arithmetic decoding engine: the cursor and every context variable.
 Cabac_Engine :: struct {
 	cursor: common.Cabac_Cursor,
-	ctx:    [CABAC_CONTEXT_COUNT]u8, // pStateIdx << 1 | valMPS
+	ctx:    [h264.CABAC_TOTAL_CONTEXT_COUNT]u8, // pStateIdx << 1 | valMPS
 }
 
 MAX_PICTURES :: 18

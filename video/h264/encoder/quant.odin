@@ -1,5 +1,6 @@
 package h264_encoder
 
+import h264 ".."
 import common "../../../common"
 
 import "base:intrinsics"
@@ -231,4 +232,212 @@ quantize_dc_prepared :: proc(
 	// the exact per-level limit; normalize before either inverse DC transform.
 	if q.qp < 10 do normalize_baseline_cavlc_dc_levels(levels)
 	return
+}
+
+// ---------------------------------------------------------------------------
+// 8x8 forward integer transform and quantisation (High profile)
+// ---------------------------------------------------------------------------
+
+forward_transform_eight_vectors :: #force_inline proc(
+	x: [8]#simd[8]i32,
+) -> [8]#simd[8]i32 {
+	one, two := (#simd[8]u32)(1), (#simd[8]u32)(2)
+	a0, a4 := simd.add(x[0], x[7]), simd.sub(x[0], x[7])
+	a1, a5 := simd.add(x[1], x[6]), simd.sub(x[1], x[6])
+	a2, a6 := simd.add(x[2], x[5]), simd.sub(x[2], x[5])
+	a3, a7 := simd.add(x[3], x[4]), simd.sub(x[3], x[4])
+
+	b0, b2 := simd.add(a0, a3), simd.sub(a0, a3)
+	b1, b3 := simd.add(a1, a2), simd.sub(a1, a2)
+	b4 := simd.add(simd.add(a5, a6), simd.add(a4, simd.shr(a4, one)))
+	b5 := simd.sub(simd.sub(a4, a7), simd.add(a6, simd.shr(a6, one)))
+	b6 := simd.sub(simd.add(a4, a7), simd.add(a5, simd.shr(a5, one)))
+	b7 := simd.add(simd.sub(a5, a6), simd.add(a7, simd.shr(a7, one)))
+
+	return {
+		simd.add(b0, b1),
+		simd.add(b4, simd.shr(b7, two)),
+		simd.add(b2, simd.shr(b3, one)),
+		simd.add(b5, simd.shr(b6, two)),
+		simd.sub(b0, b1),
+		simd.sub(b6, simd.shr(b5, two)),
+		simd.sub(simd.shr(b2, one), b3),
+		simd.sub(simd.shr(b4, two), b7),
+	}
+}
+
+forward_dct_8x8_rows :: #force_inline proc(
+	rows: [8]#simd[8]i32,
+) -> (
+	coefficients: [64]i32,
+) {
+	columns := forward_transform_eight_vectors(common.transpose(rows))
+	out := forward_transform_eight_vectors(common.transpose(columns))
+	for i in 0 ..< 8 do intrinsics.unaligned_store((^#simd[8]i32)(&coefficients[i * 8]), out[i])
+	return
+}
+
+forward_dct_8x8 :: proc(residual: ^[64]i32) -> [64]i32 {
+	rows: [8]#simd[8]i32 = ---
+	for i in 0 ..< 8 do rows[i] = intrinsics.unaligned_load((^#simd[8]i32)(&residual[i * 8]))
+	return forward_dct_8x8_rows(rows)
+}
+
+forward_dct_8x8_samples :: #force_inline proc(
+	source: [^]u8,
+	source_stride: int,
+	prediction: [^]u8,
+	prediction_stride: int,
+) -> [64]i32 #no_bounds_check {
+	rows: [8]#simd[8]i32 = ---
+	for y in 0 ..< 8 {
+		rows[y] = (#simd[8]i32)(
+			simd.sub(
+				h264.load_lanes(8, &source[y * source_stride]),
+				h264.load_lanes(8, &prediction[y * prediction_stride]),
+			),
+		)
+	}
+	return forward_dct_8x8_rows(rows)
+}
+
+// 8x8 quantisation multipliers (8-329 inverted): [qp % 6][class 0..5]
+@(rodata)
+quant_multiplier_8x8 := [6][6]i32 {
+	{13107, 11428, 20972, 12222, 16777, 15481},
+	{11916, 10826, 19174, 11058, 14980, 14290},
+	{10082, 8943, 15978, 9675, 12710, 11985},
+	{9362, 8228, 14913, 8931, 11984, 11259},
+	{8192, 7346, 13159, 7740, 10486, 9777},
+	{7282, 6428, 11570, 6830, 9118, 8640},
+}
+
+Quantizer_8x8 :: struct {
+	multipliers: #simd[64]i32,
+	shift:       u32,
+	deadzone:    i32,
+	qp:          i32,
+}
+
+@(private)
+quant_8x8_position_class :: #force_inline proc "contextless" (pos: int) -> int {
+	row, col := pos >> 3, pos & 7
+	r_type := (row & 1) != 0 ? 1 : (row & 2) != 0 ? 2 : 0
+	c_type := (col & 1) != 0 ? 1 : (col & 2) != 0 ? 2 : 0
+	if r_type == c_type do return r_type
+	sum := r_type + c_type
+	return sum == 1 ? 3 : sum == 2 ? 4 : 5
+}
+
+prepare_quantizer_8x8 :: proc(qp: i32, intra: bool) -> (q: Quantizer_8x8) {
+	q.qp = qp
+	q.shift = u32(16 + qp / 6)
+	q.deadzone = (i32(1) << q.shift) / (intra ? 3 : 6)
+	scales := quant_multiplier_8x8[qp % 6]
+	mult: [64]i32 = ---
+	for i in 0 ..< 64 {
+		pos := int(h264.zigzag_scan_8x8[i])
+		mult[i] = scales[quant_8x8_position_class(pos)]
+	}
+	q.multipliers = intrinsics.unaligned_load((^#simd[64]i32)(&mult))
+	return
+}
+
+quantize_8x8 :: proc(
+	coefficients: ^[64]i32,
+	levels: ^[64]i16,
+	qp: i32,
+	intra: bool,
+) -> int {
+	q := prepare_quantizer_8x8(qp, intra)
+	return quantize_8x8_prepared(coefficients, levels, &q)
+}
+
+quantize_8x8_prepared :: #force_inline proc(
+	coefficients: ^[64]i32,
+	levels: ^[64]i16,
+	q: ^Quantizer_8x8,
+) -> int {
+	Coefficients :: #simd[64]i32
+	raster := intrinsics.unaligned_load((^Coefficients)(coefficients))
+	scan := simd.shuffle(
+		raster,
+		raster,
+		0,
+		1,
+		8,
+		16,
+		9,
+		2,
+		3,
+		10,
+		17,
+		24,
+		32,
+		25,
+		18,
+		11,
+		4,
+		5,
+		12,
+		19,
+		26,
+		33,
+		40,
+		48,
+		41,
+		34,
+		27,
+		20,
+		13,
+		6,
+		7,
+		14,
+		21,
+		28,
+		35,
+		42,
+		49,
+		56,
+		57,
+		50,
+		43,
+		36,
+		29,
+		22,
+		15,
+		23,
+		30,
+		37,
+		44,
+		51,
+		58,
+		59,
+		52,
+		45,
+		38,
+		31,
+		39,
+		46,
+		53,
+		60,
+		61,
+		54,
+		47,
+		55,
+		62,
+		63,
+	)
+	magnitudes := simd.shr(
+		simd.add(simd.mul(simd.abs(scan), q.multipliers), Coefficients(q.deadzone)),
+		(#simd[64]u32)(q.shift),
+	)
+	signed_levels := simd.select(simd.lanes_lt(scan, 0), simd.neg(magnitudes), magnitudes)
+	quantized := simd.clamp(signed_levels, -32767, 32767)
+	intrinsics.unaligned_store((^#simd[64]i16)(levels), (#simd[64]i16)(quantized))
+	return int(
+		simd.reduce_add_ordered(
+			simd.select(simd.lanes_ne(quantized, 0), Coefficients(1), Coefficients(0)),
+		),
+	)
 }

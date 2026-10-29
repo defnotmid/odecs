@@ -189,15 +189,18 @@ truncated_exp_golomb_bit_count :: #force_inline proc(value, range: u32) -> int {
 	return range == 1 ? 1 : int(unsigned_exp_golomb_bit_count(value))
 }
 
-// Intra 4x4 mode syntax bits from the candidate modes, mirroring the
+// Intra 4x4 / 8x8 mode syntax bits from the candidate modes, mirroring the
 // write_macroblock_layer loop (1 bit on predicted match, else 1 + 3).
 intra_4x4_mode_bit_count :: proc(
 	grid: ^h264.Macroblock_Grid,
 	macroblock_index: int,
 	modes: ^[16]h264.Intra_4x4_Mode,
+	is_8x8 := false,
 ) -> int {
 	bits := 0
-	for block in 0 ..< 16 {
+	block_count := is_8x8 ? 4 : 16
+	for idx in 0 ..< block_count {
+		block := is_8x8 ? idx * 4 : idx
 		bx, by := h264.subblock_to_xy(block)
 		mode_a :=
 			bx > 0 ? int(modes[h264.xy_to_subblock(bx - 1, by)]) : neighbour_intra_4x4_mode(grid, macroblock_index, true, by)
@@ -293,6 +296,24 @@ luma_coefficient_bit_count :: proc(
 		}
 		return bits
 	}
+	if macroblock.uses_8x8_transform {
+		for block8 in 0 ..< 4 {
+			if macroblock.luma_coded_block_mask & (1 << uint(block8)) != 0 {
+				levels8 := luma_8x8_block(choice, block8)
+				for sub in 0 ..< 4 {
+					block := block8 * 4 + sub
+					nc := h264.cavlc_neighbour_coefficient_count(grid, macroblock_index, block, false)
+					if macroblock.nonzero_coefficient_counts[block] == 0 {
+						bits += cavlc_zero_coefficient_bit_count(nc)
+					} else {
+						sub_levels, _ := cavlc_deinterleave_8x8(levels8, sub)
+						bits += cavlc_coefficient_bit_count(sub_levels[:], nc)
+					}
+				}
+			}
+		}
+		return bits
+	}
 	for block in 0 ..< 16 {
 		if macroblock.luma_coded_block_mask & (1 << uint(block / 4)) != 0 {
 			nc := h264.cavlc_neighbour_coefficient_count(grid, macroblock_index, block, false)
@@ -336,11 +357,21 @@ macroblock_bit_count :: proc(
 	intra_chroma: ^Macroblock_Candidate = nil,
 	intra_luma: ^Intra_Luma_Cost = nil,
 ) -> int {
+	if task.state.config.cabac {
+		if macroblock.is_skip do return cabac_skip_bit_count(task, macroblock_index, true)
+		return cabac_macroblock_bit_count(
+			task,
+			macroblock,
+			choice,
+			macroblock_index,
+			!task.is_idr,
+		)
+	}
 	bits := 0
 	intra_type: u32
 	have_intra_type := false
 	switch macroblock.type {
-	case .I_4x4:
+	case .I_4x4, .I_8x8:
 		intra_type, have_intra_type = 0, true
 	case .I_16x16:
 		// Table 7-11: intra_type = pred_mode + 4*chroma_residual_mode +
@@ -352,8 +383,7 @@ macroblock_bit_count :: proc(
 			4 * u32(macroblock.chroma_residual_mode) +
 			(macroblock.luma_coded_block_mask != 0 ? 12 : 0),
 			true
-	case .I_8x8,
-	     .I_PCM,
+	case .I_PCM,
 	     .P_L0_16x16,
 	     .P_L0_L0_16x8,
 	     .P_L0_L0_8x16,
@@ -382,10 +412,9 @@ macroblock_bit_count :: proc(
 			bits += int(unsigned_exp_golomb_bit_count(2))
 		case .P_8x8:
 			bits += int(unsigned_exp_golomb_bit_count(3))
-		case .I_4x4, .I_16x16:
+		case .I_4x4, .I_8x8, .I_16x16:
 			bits += int(unsigned_exp_golomb_bit_count(5 + intra_type))
-		case .I_8x8,
-		     .I_PCM,
+		case .I_PCM,
 		     .P_8x8ref0,
 		     .P_Skip,
 		     .B_Direct_16x16,
@@ -399,16 +428,16 @@ macroblock_bit_count :: proc(
 	_ = have_intra_type
 
 	switch macroblock.type {
-	case .I_4x4:
+	case .I_4x4, .I_8x8:
+		if task.state.config.transform_8x8 do bits += 1 // transform_size_8x8_flag
 		bits +=
-			intra_luma != nil ? intra_luma.prediction_bits : intra_4x4_mode_bit_count(&task.grid, macroblock_index, &choice.intra_4x4_modes)
+			intra_luma != nil ? intra_luma.prediction_bits : intra_4x4_mode_bit_count(&task.grid, macroblock_index, &choice.intra_4x4_modes, macroblock.type == .I_8x8)
 		if intra_chroma == nil do bits += int(unsigned_exp_golomb_bit_count(u32(macroblock.chroma_prediction_mode)))
 	case .I_16x16:
 		if intra_chroma == nil do bits += int(unsigned_exp_golomb_bit_count(u32(macroblock.chroma_prediction_mode)))
 	case .P_L0_16x16, .P_L0_L0_16x8, .P_L0_L0_8x16, .P_8x8:
 		bits += inter_prediction_bit_count(task, macroblock, macroblock_index)
-	case .I_8x8,
-	     .I_PCM,
+	case .I_PCM,
 	     .P_8x8ref0,
 	     .P_Skip,
 	     .B_Direct_16x16,
@@ -419,7 +448,21 @@ macroblock_bit_count :: proc(
 	     .B_Skip:
 	}
 
-	if macroblock.type != .I_16x16 do bits += int(unsigned_exp_golomb_bit_count(coded_block_pattern_code(macroblock.luma_coded_block_mask | u8(macroblock.chroma_residual_mode) << 4, macroblock.is_intra)))
+	if macroblock.type != .I_16x16 {
+		bits += int(
+			unsigned_exp_golomb_bit_count(
+				coded_block_pattern_code(
+					macroblock.luma_coded_block_mask | u8(macroblock.chroma_residual_mode) << 4,
+					macroblock.is_intra,
+				),
+			),
+		)
+		if task.state.config.transform_8x8 &&
+		   macroblock.luma_coded_block_mask != 0 &&
+		   !macroblock.is_intra {
+			bits += 1 // transform_size_8x8_flag
+		}
+	}
 	if macroblock.luma_coded_block_mask != 0 || macroblock.chroma_residual_mode != .None || macroblock.type == .I_16x16 do bits += 1 // mb_qp_delta = 0
 
 	bits +=
@@ -618,6 +661,147 @@ evaluate_intra_4x4_candidate :: proc(
 	return true
 }
 
+// Choose each 8x8 prediction by transformed error plus mode bits, then code
+// its residual once. The reconstructed 8x8 block becomes the next block's neighbour.
+evaluate_intra_8x8_candidate :: proc(
+	task: ^Slice_Task,
+	macroblock: #soa^#soa[]h264.Macroblock,
+	candidate: ^Macroblock_Candidate,
+	macroblock_index: int,
+	source: [^]u8,
+	source_stride: int,
+	reconstruction: [^]u8,
+	reconstruction_stride: int,
+	neighbours: Neighbours,
+	motion_lambda: i32,
+	maximum_candidate_cost: f64 = max(f64),
+) -> bool {
+	grid := &task.grid
+	candidate.choice = {
+		type               = .I_8x8,
+		uses_8x8_transform = true,
+	}
+	candidate.nonzero_coefficient_counts = {}
+	selected_distortion: i32
+	selected_bit_count: int
+	q := &task.state.frame.quantizers_8x8[1]
+	for block8 in 0 ..< 4 {
+		bx8, by8 := block8 & 1, block8 >> 1
+		sub := block8 * 4
+		column, row := bx8 * 2, by8 * 2
+		source_block: [^]u8 = &source[by8 * 8 * source_stride + bx8 * 8]
+		reconstructed_block: [^]u8 = &reconstruction[by8 * 8 * reconstruction_stride + bx8 * 8]
+		have_top := by8 > 0 || neighbours.top
+		have_left := bx8 > 0 || neighbours.left
+		have_top_right: bool
+		switch {
+		case by8 == 0 && bx8 == 0:
+			have_top_right = neighbours.top
+		case by8 == 0 && bx8 == 1:
+			have_top_right = neighbours.top_right
+		case by8 == 1 && bx8 == 0:
+			have_top_right = true
+		case by8 == 1 && bx8 == 1:
+			have_top_right = false
+		}
+		have_top_left :=
+			(bx8 > 0 && by8 > 0) ||
+			(bx8 == 0 && by8 == 0 && neighbours.top_left) ||
+			(bx8 == 0 && by8 > 0 && neighbours.left) ||
+			(by8 == 0 && bx8 > 0 && neighbours.top)
+		left_mode :=
+			column > 0 ? int(candidate.choice.intra_4x4_modes[h264.xy_to_subblock(column - 1, row)]) : neighbour_intra_4x4_mode(grid, macroblock_index, true, row)
+		top_mode :=
+			row > 0 ? int(candidate.choice.intra_4x4_modes[h264.xy_to_subblock(column, row - 1)]) : neighbour_intra_4x4_mode(grid, macroblock_index, false, column)
+		predicted_mode :=
+			left_mode < 0 || top_mode < 0 ? int(h264.Intra_4x4_Mode.DC) : min(left_mode, top_mode)
+
+		selected_mode := h264.Intra_4x4_Mode.DC
+		prediction_cost := max(i32)
+		for mode in h264.Intra_4x4_Mode {
+			switch mode {
+			case .Vertical, .Diagonal_Down_Left, .Vertical_Left:
+				if !have_top do continue
+			case .Horizontal, .Horizontal_Up:
+				if !have_left do continue
+			case .Diagonal_Down_Right, .Vertical_Right, .Horizontal_Down:
+				if !have_top || !have_left || !have_top_left do continue
+			case .DC:
+			}
+			h264.predict_intra_8x8(
+				reconstructed_block,
+				reconstruction_stride,
+				mode,
+				have_top,
+				have_left,
+				have_top_right,
+				have_top_left,
+			)
+			cost :=
+				block_transformed_difference_sum(
+					source_block,
+					source_stride,
+					reconstructed_block,
+					reconstruction_stride,
+					8,
+					8,
+				) +
+				motion_lambda * (int(mode) == predicted_mode ? 1 : 4)
+			if cost < prediction_cost {
+				selected_mode = mode
+				prediction_cost = cost
+			}
+		}
+		h264.predict_intra_8x8(
+			reconstructed_block,
+			reconstruction_stride,
+			selected_mode,
+			have_top,
+			have_left,
+			have_top_right,
+			have_top_left,
+		)
+		levels := luma_8x8_block(&candidate.choice, block8)
+		nonzero_count := code_residual_8x8_samples(
+			task,
+			source_block,
+			source_stride,
+			reconstructed_block,
+			reconstruction_stride,
+			levels,
+			q,
+			true,
+		)
+		for k in 0 ..< 4 {
+			candidate.choice.intra_4x4_modes[sub + k] = selected_mode
+			_, sub_nz := cavlc_deinterleave_8x8(levels, k)
+			candidate.nonzero_coefficient_counts[sub + k] = sub_nz
+			macroblock.nonzero_coefficient_counts[sub + k] = sub_nz
+		}
+		has_nz := nonzero_count > 0
+		macroblock.has_8x8_coefficients[block8] = has_nz
+		selected_distortion += block_squared_difference_sum(
+			source_block,
+			source_stride,
+			reconstructed_block,
+			reconstruction_stride,
+			8,
+			8,
+		)
+		selected_bit_count += int(selected_mode) == predicted_mode ? 1 : 4
+		if has_nz {
+			candidate.choice.luma_coded_block_mask |= 1 << uint(block8)
+		}
+		if rate_distortion_cost(selected_distortion, selected_bit_count, task.distortion_lambda) > maximum_candidate_cost do return false
+	}
+	macroblock.is_intra = true
+	macroblock.is_skip = false
+	macroblock.type = .I_8x8
+	macroblock.uses_8x8_transform = true
+	macroblock.intra_4x4_modes = candidate.choice.intra_4x4_modes
+	return true
+}
+
 // Chroma syntax and reconstruction are shared by all intra luma candidates.
 // The picture's chroma pixels remain in place while only luma is searched.
 reuse_intra_chroma_candidate :: proc(
@@ -628,7 +812,11 @@ reuse_intra_chroma_candidate :: proc(
 	candidate.choice.chroma_residual_mode = chroma.choice.chroma_residual_mode
 	candidate.choice.chroma_dc_coefficients = chroma.choice.chroma_dc_coefficients
 	candidate.choice.chroma_ac_coefficients = chroma.choice.chroma_ac_coefficients
+	candidate.choice.has_dc_coefficients[1] = chroma.choice.has_dc_coefficients[1]
+	candidate.choice.has_dc_coefficients[2] = chroma.choice.has_dc_coefficients[2]
 	macroblock.chroma_prediction_mode = chroma.choice.chroma_prediction_mode
+	macroblock.has_dc_coefficients[1] = chroma.choice.has_dc_coefficients[1]
+	macroblock.has_dc_coefficients[2] = chroma.choice.has_dc_coefficients[2]
 	for k in 16 ..< 24 do macroblock.nonzero_coefficient_counts[k] = chroma.nonzero_coefficient_counts[k]
 }
 
@@ -764,6 +952,13 @@ score_macroblock_candidate :: proc(
 	// at this shared scoring boundary, as the final writer does at commit.
 	macroblock.luma_coded_block_mask, macroblock.chroma_residual_mode =
 		candidate.choice.luma_coded_block_mask, candidate.choice.chroma_residual_mode
+	macroblock.uses_8x8_transform = candidate.choice.uses_8x8_transform
+	macroblock.has_dc_coefficients = candidate.choice.has_dc_coefficients
+	for b8 in 0 ..< 4 {
+		macroblock.has_8x8_coefficients[b8] =
+			candidate.choice.uses_8x8_transform &&
+			candidate.choice.luma_coded_block_mask & (1 << uint(b8)) != 0
+	}
 	candidate.bit_count = macroblock_bit_count(
 		task,
 		macroblock,
@@ -869,13 +1064,21 @@ evaluate_inter_candidate :: proc(
 	}
 	macroblock.chroma_prediction_mode = motion_choice.chroma_prediction_mode
 	predict_inter_macroblock_encoder(task, macroblock, macroblock_index)
+	rec_luma: [^]u8 = &reconstruction.y[row * 16 * reconstruction.y_stride + column * 16]
+	try_8x8 := state.config.transform_8x8 && !state.config.ultrafast
+	predicted_luma: [256]u8 = ---
+	if try_8x8 {
+		for r in 0 ..< 16 {
+			copy(predicted_luma[r * 16:r * 16 + 16], rec_luma[r * reconstruction.y_stride:][:16])
+		}
+	}
 	code_luma_4x4(
 		task,
 		macroblock,
 		&candidate.choice,
 		source_luma,
 		luma_stride,
-		&reconstruction.y[row * 16 * reconstruction.y_stride + column * 16],
+		rec_luma,
 		reconstruction.y_stride,
 		false,
 		macroblock_index,
@@ -898,6 +1101,38 @@ evaluate_inter_candidate :: proc(
 		retain_candidate_reconstruction(task, candidate, macroblock_index)
 		selected_candidate^ = candidate^
 	}
+	if try_8x8 {
+		for r in 0 ..< 16 {
+			copy(rec_luma[r * reconstruction.y_stride:][:16], predicted_luma[r * 16:r * 16 + 16])
+		}
+		code_luma_8x8(
+			task,
+			macroblock,
+			&candidate.choice,
+			source_luma,
+			luma_stride,
+			rec_luma,
+			reconstruction.y_stride,
+			false,
+		)
+		score_macroblock_candidate(
+			task,
+			macroblock,
+			candidate,
+			macroblock_index,
+			source_luma,
+			luma_stride,
+			source_cb,
+			source_cr,
+			chroma_stride,
+		)
+		if cost := rate_distortion_cost(candidate.distortion, candidate.bit_count, distortion_lambda);
+		   cost < selected_cost^ {
+			selected_cost^ = cost
+			retain_candidate_reconstruction(task, candidate, macroblock_index)
+			selected_candidate^ = candidate^
+		}
+	}
 }
 
 // Probe the spatial skip predictor before motion search or any intra trials.
@@ -916,7 +1151,8 @@ evaluate_skip_candidate :: proc(
 	candidate^ = {}
 	candidate.choice.type = .P_L0_16x16
 	candidate.choice.is_skip = true
-	candidate.bit_count = ESTIMATED_SKIP_BITS
+	candidate.bit_count =
+		task.state.config.cabac ? cabac_skip_bit_count(task, macroblock_index, true) : ESTIMATED_SKIP_BITS
 	macroblock.type = .P_L0_16x16
 	macroblock.is_intra = false
 	macroblock.is_skip = false

@@ -452,7 +452,7 @@ predict_intra_8x8 :: proc(
 	if left_avail do for i in 0 ..< 8 do l[i] = i32(dst[i * stride - 1])
 	if top_left_avail do corner = i32(dst[-stride - 1])
 
-	// 8.3.2.2.1 filtering
+	// 8.3.2.2.2 reference sample filtering
 	if top_avail {
 		ft[0] = top_left_avail ? (corner + 2 * t[0] + t[1] + 2) >> 2 : (3 * t[0] + t[1] + 2) >> 2
 		for i in 1 ..< 15 do ft[i] = (t[i - 1] + 2 * t[i] + t[i + 1] + 2) >> 2

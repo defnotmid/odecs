@@ -17,9 +17,9 @@ bad() { printf '  %-48s FAIL\n' "$1"; fail=1; }
 
 odin test container/webm
 odin test video -o:speed
-odin build tests/movie_equal.odin -file -o:speed -out:"$work/movie_equal"
-odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
-odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"
+odin build tests/movie_equal.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_equal"
+odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_alpha"
+odin build tests/alpha_fuzz.odin -file -o:speed -define:ODECS_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
 odin build tests/vp9_encode_check.odin -file -o:speed -out:"$work/vp9_encode_check"
 
 echo "== WebM chapters round trip and ffprobe oracle"

@@ -168,7 +168,9 @@ parse_sequence_parameter_set :: proc(
 	     .Multiresolution_Frame_Compatible_Depth_High:
 		sequence_parameters.chroma_format = h264.Chroma_Format(h264.read_ue(reader))
 		if u32(sequence_parameters.chroma_format) > 3 do return sequence_parameters, false
-		if sequence_parameters.chroma_format == .YUV_444 do _ = h264.read_bit(reader) // separate_colour_plane_flag
+		if sequence_parameters.chroma_format == .YUV_444 {
+			sequence_parameters.separate_colour_plane_flag = h264.read_bit(reader) == 1
+		}
 		sequence_parameters.luma_bit_depth_minus_8 = h264.read_ue(reader)
 		sequence_parameters.chroma_bit_depth_minus_8 = h264.read_ue(reader)
 		sequence_parameters.bypass_transform_at_zero_quantizer = h264.read_bit(reader) == 1
@@ -177,7 +179,11 @@ parse_sequence_parameter_set :: proc(
 			limit := sequence_parameters.chroma_format != .YUV_444 ? 8 : 12
 			for i in 0 ..< limit {
 				present := h264.read_bit(reader) == 1
-				if i < 8 do sequence_parameters.has_scaling_list[i] = present
+				if i < 8 {
+					sequence_parameters.has_scaling_list[i] = present
+				} else {
+					sequence_parameters.has_chroma_scaling_list[i - 8] = present
+				}
 				if !present do continue
 				if i < 6 {
 					sequence_parameters.use_default_scaling_list[i] = parse_scaling_list(
@@ -190,8 +196,10 @@ parse_sequence_parameter_set :: proc(
 						sequence_parameters.scaling_list_8x8[i - 6][:],
 					)
 				} else {
-					dummy: [64]u8
-					parse_scaling_list(reader, dummy[:])
+					sequence_parameters.use_default_chroma_scaling_list[i - 8] = parse_scaling_list(
+						reader,
+						sequence_parameters.chroma_scaling_list_8x8[i - 8][:],
+					)
 				}
 			}
 		}
@@ -267,15 +275,27 @@ sequence_parameter_set_error :: proc(
 	sequence_parameters: ^h264.Sequence_Parameter_Set,
 	high_formats := false,
 ) -> Error {
+	if !high_formats {
+		switch {
+		case sequence_parameters.chroma_format != .YUV_420:
+			return .Unsupported_Chroma_Format
+		case sequence_parameters.luma_bit_depth_minus_8 > 0 ||
+		     sequence_parameters.chroma_bit_depth_minus_8 != sequence_parameters.luma_bit_depth_minus_8:
+			return .Unsupported_Bit_Depth
+		case sequence_parameters.bypass_transform_at_zero_quantizer:
+			return .Unsupported_Transform_Bypass
+		case !sequence_parameters.frames_only:
+			return .Unsupported_Interlaced
+		}
+		return .None
+	}
 	switch {
-	case sequence_parameters.chroma_format != .YUV_420 &&
-	     !(high_formats && sequence_parameters.chroma_format == .YUV_422):
+	case u32(sequence_parameters.chroma_format) > 3 || sequence_parameters.separate_colour_plane_flag:
 		return .Unsupported_Chroma_Format
-	case sequence_parameters.luma_bit_depth_minus_8 > (high_formats ? 2 : 0) ||
-	     sequence_parameters.chroma_bit_depth_minus_8 != sequence_parameters.luma_bit_depth_minus_8:
+	case sequence_parameters.luma_bit_depth_minus_8 > 2 ||
+	     (sequence_parameters.chroma_format != .Monochrome &&
+	      sequence_parameters.chroma_bit_depth_minus_8 != sequence_parameters.luma_bit_depth_minus_8):
 		return .Unsupported_Bit_Depth
-	case sequence_parameters.bypass_transform_at_zero_quantizer:
-		return .Unsupported_Transform_Bypass
 	case !sequence_parameters.frames_only:
 		return .Unsupported_Interlaced
 	}

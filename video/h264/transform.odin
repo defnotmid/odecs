@@ -94,7 +94,7 @@ compute_level_scales :: proc(
 	picture_parameters: ^Picture_Parameter_Set,
 ) {
 	lists_4x4: [6][16]u8 // raster order
-	lists_8x8: [2][64]u8
+	lists_8x8: [6][64]u8
 	for &list in lists_4x4 do for &v in list do v = 16
 	for &list in lists_8x8 do for &v in list do v = 16
 
@@ -103,10 +103,13 @@ compute_level_scales :: proc(
 		// Rule A from the SPS, rule B from the PPS on top of it
 		apply :: proc(
 			lists_4x4: ^[6][16]u8,
-			lists_8x8: ^[2][64]u8,
+			lists_8x8: ^[6][64]u8,
 			present, use_default: [8]bool,
 			sent_4x4: [6][16]u8,
 			sent_8x8: [2][64]u8,
+			chroma_present, chroma_use_default: [4]bool,
+			chroma_sent_8x8: [4][64]u8,
+			is_444: bool,
 			fallback_is_default: bool,
 		) {
 			for i in 0 ..< 8 {
@@ -130,7 +133,20 @@ compute_level_scales :: proc(
 					lists_8x8[i - 6] = default_scaling_8x8[i - 6]
 				}
 			}
+			if is_444 {
+				for c in 0 ..< 4 {
+					dst := 2 + c
+					if chroma_present[c] && !chroma_use_default[c] {
+						for k in 0 ..< 64 do lists_8x8[dst][zigzag_scan_8x8[k]] = chroma_sent_8x8[c][k]
+					} else if chroma_use_default[c] {
+						lists_8x8[dst] = default_scaling_8x8[c & 1]
+					} else if !chroma_present[c] {
+						lists_8x8[dst] = lists_8x8[dst - 2]
+					}
+				}
+			}
 		}
+		is_444 := sequence_parameters.chroma_format == .YUV_444
 		if sequence_parameters.has_scaling_matrices {
 			apply(
 				&lists_4x4,
@@ -139,6 +155,10 @@ compute_level_scales :: proc(
 				sequence_parameters.use_default_scaling_list,
 				sequence_parameters.scaling_list_4x4,
 				sequence_parameters.scaling_list_8x8,
+				sequence_parameters.has_chroma_scaling_list,
+				sequence_parameters.use_default_chroma_scaling_list,
+				sequence_parameters.chroma_scaling_list_8x8,
+				is_444,
 				true,
 			)
 		}
@@ -150,6 +170,10 @@ compute_level_scales :: proc(
 				picture_parameters.use_default_scaling_list,
 				picture_parameters.scaling_list_4x4,
 				picture_parameters.scaling_list_8x8,
+				picture_parameters.has_chroma_scaling_list,
+				picture_parameters.use_default_chroma_scaling_list,
+				picture_parameters.chroma_scaling_list_8x8,
+				is_444,
 				!sequence_parameters.has_scaling_matrices,
 			)
 		}
@@ -160,7 +184,8 @@ compute_level_scales :: proc(
 		class := x & 1 == 0 && y & 1 == 0 ? 0 : x & 1 == 1 && y & 1 == 1 ? 1 : 2
 		scales.scale_4x4[list][m][pos] = i32(lists_4x4[list][pos]) * norm_adjust_4x4[m][class]
 	}
-	for list in 0 ..< 2 do for m in 0 ..< 6 do for pos in 0 ..< 64 {
+	num_8x8 := sequence_parameters.chroma_format == .YUV_444 ? 6 : 2
+	for list in 0 ..< num_8x8 do for m in 0 ..< 6 do for pos in 0 ..< 64 {
 		scales.scale_8x8[list][m][pos] = i32(lists_8x8[list][pos]) * i32(norm_adjust_8x8[m][pos])
 	}
 }
@@ -371,8 +396,8 @@ store_dc :: #force_inline proc "contextless" (dc: ^$L, v: i32) {
 	when L == i16 {dc^ = i16(clamp(v, -32768, 32767))} else {dc^ = v}
 }
 
-// Intra 16x16 luma DC: levels in scan order -> inverse Hadamard -> scaled DC per 4x4 block in raster order (8.5.10)
-luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]$L, qp: i32) #no_bounds_check {
+// Intra 16x16 luma (or 4:4:4 Cb/Cr) DC: levels in scan order -> inverse Hadamard -> scaled DC per 4x4 block in raster order (8.5.10)
+luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]$L, qp: i32, list: int = 0) #no_bounds_check {
 	c: [16]i32
 	for i in 0 ..< 16 do c[zigzag_scan_4x4[i]] = i32(dc[i])
 	rows: [16]i32
@@ -383,7 +408,7 @@ luma_dc_dequant_idct :: proc(scales: ^Level_Scales, dc: ^[16]$L, qp: i32) #no_bo
 		rows[i * 4 + 2] = r[0] - r[1] - r[2] + r[3]
 		rows[i * 4 + 3] = r[0] - r[1] + r[2] - r[3]
 	}
-	scale := scales.scale_4x4[0][qp % 6][0]
+	scale := scales.scale_4x4[list][qp % 6][0]
 	qp_per := uint(qp / 6)
 	for j in 0 ..< 4 {
 		f := [4]i32 {
@@ -547,6 +572,133 @@ idct_8x8_add_lanes :: proc(
 			(^#simd[8]T)(&pixels[y * stride]),
 			(#simd[8]T)(simd.clamp(v, 0, V(pixel_max))),
 		)
+	}
+}
+
+// Transform-bypass reconstruction (8.5.10 - 8.5.15 when TransformBypassModeFlag == 1):
+// `dpcm_dir` is 0 for vertical DPCM (8.5.15), 1 for horizontal DPCM (8.5.15), or -1 for none.
+reconstruct_bypass_4x4 :: proc(
+	pixels: [^]$T,
+	stride: int,
+	levels: ^[16]$L,
+	has_ac: bool,
+	dc_separate: bool,
+	dc: i32,
+	dpcm_dir: int = -1,
+	pixel_max: i32 = 255,
+) #no_bounds_check {
+	r: [16]i32
+	if has_ac {
+		for k in 0 ..< 16 do r[zigzag_scan_4x4[k]] = i32(levels[k])
+	}
+	if dc_separate do r[0] = dc
+	if dpcm_dir == 0 {
+		for y in 1 ..< 4 do for x in 0 ..< 4 {
+			r[y * 4 + x] += r[(y - 1) * 4 + x]
+		}
+	} else if dpcm_dir == 1 {
+		for y in 0 ..< 4 do for x in 1 ..< 4 {
+			r[y * 4 + x] += r[y * 4 + x - 1]
+		}
+	}
+	for y in 0 ..< 4 do for x in 0 ..< 4 {
+		v := i32(pixels[y * stride + x]) + r[y * 4 + x]
+		pixels[y * stride + x] = T(clamp(v, 0, pixel_max))
+	}
+}
+
+reconstruct_bypass_8x8 :: proc(
+	pixels: [^]$T,
+	stride: int,
+	levels: ^[64]$L,
+	dpcm_dir: int = -1,
+	pixel_max: i32 = 255,
+) #no_bounds_check {
+	r: [64]i32
+	for k in 0 ..< 64 do r[zigzag_scan_8x8[k]] = i32(levels[k])
+	if dpcm_dir == 0 {
+		for y in 1 ..< 8 do for x in 0 ..< 8 {
+			r[y * 8 + x] += r[(y - 1) * 8 + x]
+		}
+	} else if dpcm_dir == 1 {
+		for y in 0 ..< 8 do for x in 1 ..< 8 {
+			r[y * 8 + x] += r[y * 8 + x - 1]
+		}
+	}
+	for y in 0 ..< 8 do for x in 0 ..< 8 {
+		v := i32(pixels[y * stride + x]) + r[y * 8 + x]
+		pixels[y * stride + x] = T(clamp(v, 0, pixel_max))
+	}
+}
+
+reconstruct_bypass_16x16 :: proc(
+	pixels: [^]$T,
+	stride: int,
+	dc_in: ^[16]$L,
+	blocks_4x4: ^[16][16]L,
+	nz_4x4: ^[16]bool,
+	dpcm_dir: int = -1,
+	pixel_max: i32 = 255,
+) #no_bounds_check {
+	dc: [16]L
+	for i in 0 ..< 16 do dc[zigzag_scan_4x4[i]] = dc_in[i]
+	r: [256]i32
+	for block in 0 ..< 16 {
+		bx, by := subblock_to_xy(block)
+		if nz_4x4[block] {
+			for k in 1 ..< 16 {
+				pos := int(zigzag_scan_4x4[k])
+				r[(by * 4 + (pos >> 2)) * 16 + bx * 4 + (pos & 3)] = i32(blocks_4x4[block][k])
+			}
+		}
+		r[(by * 4) * 16 + bx * 4] = i32(dc[by * 4 + bx])
+	}
+	if dpcm_dir == 0 {
+		for y in 1 ..< 16 do for x in 0 ..< 16 do r[y * 16 + x] += r[(y - 1) * 16 + x]
+	} else if dpcm_dir == 1 {
+		for y in 0 ..< 16 do for x in 1 ..< 16 do r[y * 16 + x] += r[y * 16 + x - 1]
+	}
+	for y in 0 ..< 16 do for x in 0 ..< 16 {
+		v := i32(pixels[y * stride + x]) + r[y * 16 + x]
+		pixels[y * stride + x] = T(clamp(v, 0, pixel_max))
+	}
+}
+
+reconstruct_bypass_chroma :: proc(
+	pixels: [^]$T,
+	stride: int,
+	dc_in: [8]$L,
+	ac_blocks: ^[8][16]L,
+	blocks: int,
+	has_ac: bool,
+	dpcm_dir: int = -1,
+	pixel_max: i32 = 255,
+) #no_bounds_check {
+	dc := dc_in
+	if blocks == 8 {
+		// 2x4 scan order (8-305) -> raster order (two per row)
+		dc = {dc[0], dc[2], dc[1], dc[5], dc[3], dc[6], dc[4], dc[7]}
+	}
+	ch := blocks == 8 ? 16 : 8
+	r: [128]i32
+	for block in 0 ..< blocks {
+		bx, by := block & 1, block >> 1
+		if has_ac {
+			for k in 1 ..< 16 {
+				pos := int(zigzag_scan_4x4[k])
+				r[(by * 4 + (pos >> 2)) * 8 + bx * 4 + (pos & 3)] = i32(ac_blocks[block][k])
+			}
+		}
+		r[(by * 4) * 8 + bx * 4] = i32(dc[block])
+	}
+	if dpcm_dir == 0 {
+		for y in 1 ..< ch do for x in 0 ..< 8 do r[y * 8 + x] += r[(y - 1) * 8 + x]
+	} else if dpcm_dir == 1 {
+		for y in 0 ..< ch do for x in 1 ..< 8 do r[y * 8 + x] += r[y * 8 + x - 1]
+	}
+	for y in 0 ..< ch do for x in 0 ..< 8 {
+		v := i32(pixels[y * stride + x]) + r[y * 8 + x]
+		pixels[y * stride + x] = T(clamp(v, 0, pixel_max))
 	}
 }
 

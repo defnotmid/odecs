@@ -18,10 +18,7 @@ bypass :: #force_inline proc(decoder: ^Slice_Decoder) -> u32 {
 }
 
 cabac_read_mb_skip :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -> bool {
-	inc := 0
-	for idx in ([2]int{decoder.left_index, decoder.top_index}) {
-		if idx >= 0 && !decoder.macroblocks[idx].is_skip do inc += 1
-	}
+	inc := h264.cabac_mb_skip_ctx_inc(decoder.macroblocks, decoder.left_index, decoder.top_index)
 	base := decoder.header.slice_type == .B ? 24 : 11
 	return decision(decoder, base + inc) == 1
 }
@@ -35,10 +32,7 @@ read_intra_mb_type :: proc(
 	in_i_slice: bool,
 ) -> u32 {
 	if in_i_slice {
-		inc := 0
-		for idx in ([2]int{decoder.left_index, decoder.top_index}) {
-			if idx >= 0 && decoder.macroblocks[idx].type != .I_4x4 && decoder.macroblocks[idx].type != .I_8x8 do inc += 1
-		}
+		inc := h264.cabac_intra_mb_type_ctx_inc(decoder.macroblocks, decoder.left_index, decoder.top_index)
 		if decision(decoder, base + inc) == 0 do return 0
 	} else if decision(decoder, base) == 0 {
 		return 0
@@ -66,12 +60,7 @@ cabac_read_mb_type :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -> u3
 		if decision(decoder, 15) == 0 do return decision(decoder, 16) == 0 ? 0 : 3
 		return decision(decoder, 17) == 0 ? 2 : 1
 	case .B:
-		inc := 0
-		for idx in ([2]int{decoder.left_index, decoder.top_index}) {
-			if idx < 0 do continue
-			neighbour := &decoder.macroblocks[idx]
-			if neighbour.type != .B_Skip && neighbour.type != .B_Direct_16x16 do inc += 1
-		}
+		inc := h264.cabac_b_mb_type_ctx_inc(decoder.macroblocks, decoder.left_index, decoder.top_index)
 		if decision(decoder, 27 + inc) == 0 do return 0
 		if decision(decoder, 27 + 3) == 0 do return 1 + decision(decoder, 27 + 5)
 		bits := decision(decoder, 27 + 4) << 3
@@ -111,41 +100,12 @@ cabac_read_sub_mb_type :: proc(decoder: ^Slice_Decoder) -> u32 {
 }
 
 cabac_read_transform_8x8_flag :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -> bool {
-	inc := 0
-	for idx in ([2]int{decoder.left_index, decoder.top_index}) {
-		if idx >= 0 && decoder.macroblocks[idx].uses_8x8_transform do inc += 1
-	}
+	inc := h264.cabac_transform_8x8_ctx_inc(decoder.macroblocks, decoder.left_index, decoder.top_index)
 	return decision(decoder, 399 + inc) == 1
 }
 
-// Neighbouring 4x4 block of `block` in the given direction: macroblock index and block index, or -1
-@(private = "file")
-neighbour_block :: proc(
-	decoder: ^Slice_Decoder,
-	macroblock_index, block: int,
-	left: bool,
-) -> (
-	idx, sub: int,
-) {
-	bx, by := h264.subblock_to_xy(block)
-	if left {
-		if bx > 0 do return macroblock_index, h264.xy_to_subblock(bx - 1, by)
-		return decoder.left_index, h264.xy_to_subblock(3, by)
-	}
-	if by > 0 do return macroblock_index, h264.xy_to_subblock(bx, by - 1)
-	return decoder.top_index, h264.xy_to_subblock(bx, 3)
-}
-
 cabac_read_ref_idx :: proc(decoder: ^Slice_Decoder, macroblock_index, list, block: int) -> i32 {
-	inc := 0
-	for left, i in ([2]bool{true, false}) {
-		idx, sub := neighbour_block(decoder, macroblock_index, block, left)
-		if idx < 0 do continue
-		neighbour := &decoder.macroblocks[idx]
-		if neighbour.is_intra || neighbour.is_skip do continue
-		if neighbour.type == .B_Direct_16x16 || (neighbour.type == .B_8x8 && neighbour.subpartition_types[sub / 4] == .Direct_8x8) do continue
-		if neighbour.reference_indices[list][sub / 4] > 0 do inc += i == 0 ? 1 : 2
-	}
+	inc := h264.cabac_ref_idx_ctx_inc(decoder.macroblocks, macroblock_index, decoder.left_index, decoder.top_index, list, block)
 	value: i32 = 0
 	ctx_idx := 54 + inc
 	for decision(decoder, ctx_idx) == 1 {
@@ -164,21 +124,12 @@ cabac_read_mvd_pair :: proc(
 ) -> (
 	mvd: [2]i32,
 ) {
-	sum: [2]int
-	for left in ([2]bool{true, false}) {
-		idx, sub := neighbour_block(decoder, macroblock_index, block, left)
-		if idx < 0 do continue
-		neighbour := &decoder.macroblocks[idx]
-		if neighbour.is_intra || neighbour.is_skip || neighbour.prediction_directions[sub / 4] & (list == 0 ? h264.Prediction_Direction.List_0 : .List_1) == .None do continue
-		difference := neighbour.motion_differences[list][sub]
-		sum += {int(difference[0]), int(difference[1])}
-	}
+	inc := h264.cabac_mvd_ctx_inc(decoder.macroblocks, macroblock_index, decoder.left_index, decoder.top_index, list, block)
 	c := decoder.engine.cursor
 	ctx := &decoder.engine.ctx
 	for comp in 0 ..< 2 {
 		base := comp == 0 ? 40 : 47
-		inc := sum[comp] < 3 ? 0 : sum[comp] <= 32 ? 1 : 2
-		if common.cabac_decision(&c, &ctx[base + inc]) == 0 do continue
+		if common.cabac_decision(&c, &ctx[base + inc[comp]]) == 0 do continue
 		// UEG3 prefix: truncated unary with cMax 9, contexts 3, 4, 5, 6, 6, ...
 		value: u32 = 1
 		ctx_idx := base + 3
@@ -202,12 +153,7 @@ cabac_read_intra_pred_mode :: proc(decoder: ^Slice_Decoder) -> (prev: bool, rem:
 }
 
 cabac_read_intra_chroma_mode :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -> u32 {
-	inc := 0
-	for idx in ([2]int{decoder.left_index, decoder.top_index}) {
-		if idx < 0 do continue
-		neighbour := &decoder.macroblocks[idx]
-		if neighbour.is_intra && neighbour.type != .I_PCM && neighbour.chroma_prediction_mode != .DC do inc += 1
-	}
+	inc := h264.cabac_intra_chroma_mode_ctx_inc(decoder.macroblocks, decoder.left_index, decoder.top_index)
 	if decision(decoder, 64 + inc) == 0 do return 0
 	if decision(decoder, 67) == 0 do return 1
 	return decision(decoder, 67) == 0 ? 2 : 3
@@ -217,43 +163,14 @@ cabac_read_coded_block_pattern :: proc(decoder: ^Slice_Decoder, macroblock_index
 	left, top := decoder.left_index, decoder.top_index
 	luma: u32 = 0
 	for block8 in 0 ..< 4 {
-		// condTermFlag is 0 for an unavailable, I_PCM, or coded neighbouring 8x8 block
-		cond :: proc(decoder: ^Slice_Decoder, idx: int, bit: uint, own: u32, inside: bool) -> int {
-			if inside do return own >> bit & 1 == 0 ? 1 : 0
-			if idx < 0 do return 0
-			neighbour := &decoder.macroblocks[idx]
-			if neighbour.type == .I_PCM do return 0
-			if neighbour.is_skip do return 1
-			return neighbour.luma_coded_block_mask >> bit & 1 == 0 ? 1 : 0
-		}
-		bx, by := block8 & 1, block8 >> 1
-		a :=
-			bx > 0 ? cond(decoder, 0, uint(block8 - 1), luma, true) : cond(decoder, left, uint(block8 + 1), luma, false)
-		b :=
-			by > 0 ? cond(decoder, 0, uint(block8 - 2), luma, true) : cond(decoder, top, uint(block8 + 2), luma, false)
-		luma |= decision(decoder, 73 + a + 2 * b) << uint(block8)
-	}
-	chroma_cond :: proc(decoder: ^Slice_Decoder, idx: int, want_two: bool) -> int {
-		if idx < 0 do return 0
-		neighbour := &decoder.macroblocks[idx]
-		if neighbour.type == .I_PCM do return 1
-		if neighbour.is_skip do return 0
-		return(
-			(want_two ? neighbour.chroma_residual_mode == .DC_And_AC : neighbour.chroma_residual_mode != .None) ? 1 : 0 \
-		)
+		inc := h264.cabac_cbp_luma_ctx_inc(decoder.macroblocks, left, top, block8, luma)
+		luma |= decision(decoder, 73 + inc) << uint(block8)
 	}
 	chroma: u32 = 0
-	if decision(
-		   decoder,
-		   77 + chroma_cond(decoder, left, false) + 2 * chroma_cond(decoder, top, false),
-	   ) ==
-	   1 {
-		chroma =
-			1 +
-			decision(
-				decoder,
-				77 + 4 + chroma_cond(decoder, left, true) + 2 * chroma_cond(decoder, top, true),
-			)
+	if !decoder.monochrome && !decoder.chroma_444 {
+		if decision(decoder, 77 + h264.cabac_cbp_chroma_ctx_inc(decoder.macroblocks, left, top, false)) == 1 {
+			chroma = 1 + decision(decoder, 77 + 4 + h264.cabac_cbp_chroma_ctx_inc(decoder.macroblocks, left, top, true))
+		}
 	}
 	return luma | chroma << 4
 }
@@ -274,225 +191,48 @@ cabac_read_qp_delta :: proc(decoder: ^Slice_Decoder, prev_delta_nz: bool) -> i32
 	return value & 1 == 1 ? (value + 1) >> 1 : -(value >> 1)
 }
 
-// ctxBlockCatOffset per block category (Table 9-40)
-@(private = "file")
-coded_block_flag_cat_offset: [6]int = {0, 4, 8, 12, 16, 0}
-@(private = "file")
-significant_cat_offset: [6]int = {0, 15, 29, 44, 47, 0}
-@(private = "file")
-abs_level_cat_offset: [6]int = {0, 10, 20, 30, 39, 0}
-
-// Significance map contexts of 8x8 blocks (Table 9-43, frame coded)
-@(private)
-sig_coeff_ctx_8x8: [63]u8 = {
-	0,
-	1,
-	2,
-	3,
-	4,
-	5,
-	5,
-	4,
-	4,
-	3,
-	3,
-	4,
-	4,
-	4,
-	5,
-	5,
-	4,
-	4,
-	4,
-	4,
-	3,
-	3,
-	6,
-	7,
-	7,
-	7,
-	8,
-	9,
-	10,
-	9,
-	8,
-	7,
-	7,
-	6,
-	11,
-	12,
-	13,
-	11,
-	6,
-	7,
-	8,
-	9,
-	14,
-	10,
-	9,
-	8,
-	6,
-	11,
-	12,
-	13,
-	11,
-	6,
-	9,
-	14,
-	10,
-	9,
-	11,
-	12,
-	13,
-	11,
-	14,
-	10,
-	12,
-}
-@(private)
-last_coeff_ctx_8x8: [63]u8 = {
-	0,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	1,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	2,
-	3,
-	3,
-	3,
-	3,
-	3,
-	3,
-	3,
-	3,
-	4,
-	4,
-	4,
-	4,
-	4,
-	4,
-	4,
-	4,
-	5,
-	5,
-	5,
-	5,
-	6,
-	6,
-	6,
-	6,
-	7,
-	7,
-	7,
-	7,
-	8,
-	8,
-	8,
-}
-
-// coded_block_flag condTermFlag of a neighbouring macroblock for a block category (9.3.3.1.1.9)
-@(private = "file")
-coded_block_cond :: proc(
-	decoder: ^Slice_Decoder,
-	macroblock_index, idx: int,
-	$cat: Block_Cat,
-	sub: int,
-	plane: int,
-) -> int {
-	if idx < 0 do return decoder.macroblocks[macroblock_index].is_intra ? 1 : 0
-	neighbour := &decoder.macroblocks[idx]
-	if neighbour.type == .I_PCM do return 1
-	if neighbour.is_skip do return 0
-	when cat == .Luma_DC {
-		return neighbour.type == .I_16x16 && neighbour.has_dc_coefficients[0] ? 1 : 0
-	} else when cat == .Chroma_DC {
-		return(
-			neighbour.chroma_residual_mode != .None && neighbour.has_dc_coefficients[1 + plane] ? 1 : 0 \
-		)
-	} else when cat == .Chroma_AC {
-		return(
-			neighbour.chroma_residual_mode == .DC_And_AC && neighbour.nonzero_coefficient_counts[h264.chroma_count_index(plane, sub)] > 0 ? 1 : 0 \
-		)
-	} else {
-		if neighbour.luma_coded_block_mask >> uint(sub / 4) & 1 == 0 do return 0
-		if neighbour.uses_8x8_transform do return 1 // inferred for 4:2:0
-		return neighbour.nonzero_coefficient_counts[sub] > 0 ? 1 : 0
-	}
-}
-
 // residual_block_cabac (7.3.5.3.3): levels in scan order, returns the number of non-zero levels
 cabac_read_residual_block :: proc(
 	decoder: ^Slice_Decoder,
 	macroblock_index: int,
-	$cat: Block_Cat,
+	$cat: h264.Block_Cat,
 	block: int,
 	levels: []$L,
 	max_coeffs: int,
+	plane_444 := 0,
 ) -> int {
-	// coded_block_flag (not sent for 8x8 blocks in 4:2:0)
-	when cat != .Luma_8x8 {
-		// The DC categories read only neighbours.
-		when cat != .Luma_DC && cat != .Chroma_DC {macroblock := &decoder.macroblocks[macroblock_index]}
-		inc: int
-		when cat == .Luma_DC || cat == .Chroma_DC {
-			plane := cat == .Chroma_DC ? block : 0
-			left, top := decoder.left_index, decoder.top_index
-			inc =
-				coded_block_cond(decoder, macroblock_index, left, cat, 0, plane) +
-				2 * coded_block_cond(decoder, macroblock_index, top, cat, 0, plane)
-		} else when cat == .Chroma_AC {
-			// Blocks in raster order, two per row: 2 rows, 4 in 4:2:2.
-			blocks := decoder.chroma_422 ? 8 : 4
-			plane, index := block / blocks, block % blocks
-			bx, by := index & 1, index >> 1
-			counts := &macroblock.nonzero_coefficient_counts
-			a :=
-				bx > 0 ? (counts[h264.chroma_count_index(plane, by * 2)] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.left_index, cat, by * 2 + 1, plane)
-			b :=
-				by > 0 ? (counts[h264.chroma_count_index(plane, index - 2)] > 0 ? 1 : 0) : coded_block_cond(decoder, macroblock_index, decoder.top_index, cat, blocks - 2 + bx, plane)
-			inc = a + 2 * b
-		} else {
-			for left, i in ([2]bool{true, false}) {
-				idx, sub := neighbour_block(decoder, macroblock_index, block, left)
-				cond: int
-				if idx == macroblock_index {
-					cond =
-						macroblock.luma_coded_block_mask >> uint(sub / 4) & 1 != 0 && macroblock.nonzero_coefficient_counts[sub] > 0 ? 1 : 0
-				} else {
-					cond = coded_block_cond(decoder, macroblock_index, idx, cat, sub, 0)
-				}
-				inc += i == 0 ? cond : 2 * cond
-			}
+	plane_offset := plane_444 * h264.CABAC_PLANE_STRIDE
+	// coded_block_flag (not sent for 8x8 blocks unless ChromaArrayType == 3)
+	when cat == .Luma_8x8 {
+		if decoder.chroma_444 {
+			ctx_idx := h264.cabac_coded_block_ctx_idx(
+				decoder.macroblocks,
+				macroblock_index,
+				decoder.left_index,
+				decoder.top_index,
+				cat,
+				block,
+				decoder.chroma_422,
+				decoder.chroma_444,
+				plane_444,
+			)
+			if decision(decoder, ctx_idx) == 0 do return 0
 		}
-		if decision(decoder, 85 + coded_block_flag_cat_offset[cat] + inc) == 0 do return 0
+	} else {
+		ctx_idx := h264.cabac_coded_block_ctx_idx(
+			decoder.macroblocks,
+			macroblock_index,
+			decoder.left_index,
+			decoder.top_index,
+			cat,
+			block,
+			decoder.chroma_422,
+			decoder.chroma_444,
+			plane_444,
+		)
+		if decision(decoder, ctx_idx) == 0 do return 0
 	}
-	return cabac_residual_levels(decoder.engine, cat, levels, max_coeffs)
+	return cabac_residual_levels(decoder.engine, cat, levels, max_coeffs, plane_offset)
 }
 
 // The significance map and levels of one coded block (7.3.5.3.3, 9.3.3.1.3),
@@ -502,18 +242,19 @@ cabac_read_residual_block :: proc(
 @(private)
 cabac_residual_levels :: proc(
 	engine: ^Cabac_Engine,
-	$cat: Block_Cat,
+	$cat: h264.Block_Cat,
 	levels: []$L,
 	max_coeffs: int,
+	plane_offset := 0,
 ) -> int #no_bounds_check {
 	when cat == .Luma_8x8 {
-		SIG :: 402
-		LAST :: 417
-		ABS :: 426
+		SIG := plane_offset + 402
+		LAST := plane_offset + 417
+		ABS := plane_offset + 426
 	} else {
-		SIG := 105 + significant_cat_offset[cat]
-		LAST := 166 + significant_cat_offset[cat]
-		ABS := 227 + abs_level_cat_offset[cat]
+		SIG := plane_offset + 105 + h264.significant_cat_offset[cat]
+		LAST := plane_offset + 166 + h264.significant_cat_offset[cat]
+		ABS := plane_offset + 227 + h264.abs_level_cat_offset[cat]
 	}
 	// coeff_abs_level_minus1's greater-than-one contexts stop one lower for
 	// chroma DC (9.3.3.1.3).
@@ -529,7 +270,7 @@ cabac_residual_levels :: proc(
 	final := true
 	for i in 0 ..< max_coeffs - 1 {
 		when cat == .Luma_8x8 {
-			sig_ctx, last_ctx := int(sig_coeff_ctx_8x8[i]), int(last_coeff_ctx_8x8[i])
+			sig_ctx, last_ctx := int(h264.sig_coeff_ctx_8x8[i]), int(h264.last_coeff_ctx_8x8[i])
 		} else when cat == .Chroma_DC {
 			sig_ctx := min(i >> dc_step, 2)
 			last_ctx := sig_ctx

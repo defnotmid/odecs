@@ -73,11 +73,13 @@ activate_sequence_parameter_set :: proc(
 	return .None
 }
 
-// Picture sample layout of a sequence: u16 above 8 bits, full-height chroma for 4:2:2.
+// Picture sample layout of a sequence: u16 above 8 bits, full-height chroma for 4:2:2, full-size for 4:4:4, luma-only for 4:0:0.
 sequence_buffer_format :: proc(sequence_parameters: ^h264.Sequence_Parameter_Set) -> h264.Buffer_Format {
 	return {
 		chroma_422 = sequence_parameters.chroma_format == .YUV_422,
 		high_depth = sequence_parameters.luma_bit_depth_minus_8 != 0,
+		chroma_444 = sequence_parameters.chroma_format == .YUV_444,
+		monochrome = sequence_parameters.chroma_format == .Monochrome,
 	}
 }
 
@@ -136,8 +138,9 @@ activate_sequence_parameter_set_metadata :: proc(
 		state.max_reorder = min(int(sequence_parameters.max_reordered_frames), state.dpb_size)
 	} else if sequence_parameters.profile == .Baseline ||
 	   sequence_parameters.constraint_set_0 ||
-	   sequence_parameters.constraint_set_1 {
-		state.max_reorder = 0 // no B pictures in Baseline / Constrained Baseline
+	   sequence_parameters.constraint_set_1 ||
+	   sequence_parameters.picture_order_mode == .Frame_Number {
+		state.max_reorder = 0 // no B pictures in Baseline / Constrained Baseline / POC type 2
 	} else {
 		state.max_reorder = state.dpb_size
 	}
@@ -149,9 +152,11 @@ set_picture_display :: proc(pic: ^Picture, sequence_parameters: ^h264.Sequence_P
 	pic.bit_depth = 8 + int(sequence_parameters.luma_bit_depth_minus_8)
 	pic.buf.width = sequence_parameters.width
 	pic.buf.height = sequence_parameters.height
-	// CropUnitY is SubHeightC, doubled for field coding (7-19, 7-20).
-	sub_height := sequence_parameters.chroma_format == .YUV_422 ? 1 : 2
-	pic.buf.crop_x = int(sequence_parameters.crop_left) * 2
+	// CropUnitX is SubWidthC (1 for Monochrome/4:4:4, 2 for 4:2:0/4:2:2);
+	// CropUnitY is SubHeightC (1 for Monochrome/4:2:2/4:4:4, 2 for 4:2:0), doubled for field coding (7-19, 7-20).
+	sub_width := (sequence_parameters.chroma_format == .Monochrome || sequence_parameters.chroma_format == .YUV_444) ? 1 : 2
+	sub_height := sequence_parameters.chroma_format == .YUV_420 ? 2 : 1
+	pic.buf.crop_x = int(sequence_parameters.crop_left) * sub_width
 	pic.buf.crop_y = int(sequence_parameters.crop_top) * (sequence_parameters.frames_only ? sub_height : 2 * sub_height)
 }
 

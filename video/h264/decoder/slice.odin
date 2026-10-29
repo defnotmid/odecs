@@ -82,7 +82,9 @@ parse_slice_header :: proc(
 	   (picture_parameters.weighted_bipred_idc == 1 && header.slice_type == .B) {
 		w := &header.weights
 		w.luma_log2_denom = h264.read_ue(reader)
-		w.chroma_log2_denom = h264.read_ue(reader)
+		if sequence_parameters.chroma_format != .Monochrome {
+			w.chroma_log2_denom = h264.read_ue(reader)
+		}
 		if w.luma_log2_denom > 7 || w.chroma_log2_denom > 7 do return header, false
 		lists := header.slice_type == .B ? 2 : 1
 		for l in 0 ..< lists {
@@ -93,11 +95,13 @@ parse_slice_header :: proc(
 					w.luma_weight[l][i] = h264.read_se(reader)
 					w.luma_offset[l][i] = h264.read_se(reader)
 				}
-				w.chroma_weight[l][i] = {1 << w.chroma_log2_denom, 1 << w.chroma_log2_denom}
-				if h264.read_bit(reader) == 1 { 	// chroma_weight_lX_flag
-					for c in 0 ..< 2 {
-						w.chroma_weight[l][i][c] = h264.read_se(reader)
-						w.chroma_offset[l][i][c] = h264.read_se(reader)
+				if sequence_parameters.chroma_format != .Monochrome {
+					w.chroma_weight[l][i] = {1 << w.chroma_log2_denom, 1 << w.chroma_log2_denom}
+					if h264.read_bit(reader) == 1 { 	// chroma_weight_lX_flag
+						for c in 0 ..< 2 {
+							w.chroma_weight[l][i][c] = h264.read_se(reader)
+							w.chroma_offset[l][i][c] = h264.read_se(reader)
+						}
 					}
 				}
 			}

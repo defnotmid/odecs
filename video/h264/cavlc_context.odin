@@ -17,6 +17,7 @@ cavlc_neighbour_coefficient_count_resolving :: proc(
 	block: int,
 	chroma: bool,
 	chroma_blocks := 4,
+	plane_444 := 0,
 ) -> i8 {
 	return cavlc_neighbour_coefficient_count_resolved(
 		grid,
@@ -26,6 +27,7 @@ cavlc_neighbour_coefficient_count_resolving :: proc(
 		block,
 		chroma,
 		chroma_blocks,
+		plane_444,
 	)
 }
 
@@ -35,6 +37,7 @@ cavlc_neighbour_coefficient_count_resolved :: proc(
 	block: int,
 	chroma: bool,
 	chroma_blocks := 4,
+	plane_444 := 0,
 ) -> i8 #no_bounds_check {
 	macroblock := &grid.macroblocks[macroblock_index]
 	// Coefficient count of a 4x4 block of a neighbouring macroblock, -1 if unusable
@@ -58,11 +61,12 @@ cavlc_neighbour_coefficient_count_resolved :: proc(
 		nb =
 			by > 0 ? int(macroblock.nonzero_coefficient_counts[chroma_count_index(plane, index - 2)]) : neighbour_count(grid, top, chroma_count_index(plane, last_row * 2 + bx))
 	} else {
+		base := plane_444 * 16
 		bx, by := subblock_to_xy(block)
 		na =
-			bx > 0 ? int(macroblock.nonzero_coefficient_counts[xy_to_subblock(bx - 1, by)]) : neighbour_count(grid, left, xy_to_subblock(3, by))
+			bx > 0 ? int(macroblock.nonzero_coefficient_counts[base + xy_to_subblock(bx - 1, by)]) : neighbour_count(grid, left, base + xy_to_subblock(3, by))
 		nb =
-			by > 0 ? int(macroblock.nonzero_coefficient_counts[xy_to_subblock(bx, by - 1)]) : neighbour_count(grid, top, xy_to_subblock(bx, 3))
+			by > 0 ? int(macroblock.nonzero_coefficient_counts[base + xy_to_subblock(bx, by - 1)]) : neighbour_count(grid, top, base + xy_to_subblock(bx, 3))
 	}
 	switch {
 	case na >= 0 && nb >= 0:

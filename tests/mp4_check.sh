@@ -12,8 +12,8 @@ bad() { printf '  %-44s FAIL\n' "$1"; fail=1; }
 
 odin test container/mp4
 odin test video -o:speed
-odin build tools/mp4_smoke -o:speed -out:"$work/mp4_smoke"
-odin build tests/mp4_interop.odin -file -o:speed -out:"$work/mp4_interop"
+odin build tools/mp4_smoke -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_smoke"
+odin build tests/mp4_interop.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_interop"
 
 reference() { # file -> ref.rgba / ref.pcm next to it
 	if ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 "$1" | grep -q .; then

@@ -4,6 +4,8 @@ package h264
 Buffer_Format :: struct {
 	chroma_422: bool,
 	high_depth: bool, // u16 samples
+	chroma_444: bool,
+	monochrome: bool,
 }
 
 // Allocate a contiguous padded frame buffer
@@ -16,8 +18,14 @@ alloc_yuv_buffer :: proc(width, height: int, allocator := context.allocator, for
 
 yuv_buffer_size :: proc(width, height: int, format := Buffer_Format{}) -> int {
 	pad := PADDING_LENGTH
-	chroma_height := format.chroma_422 ? height : height / 2
-	samples := (height + pad * 2) * (width + pad * 2) + 2 * (chroma_height + pad) * (width / 2 + pad)
+	y_samples := (height + pad * 2) * (width + pad * 2)
+	if format.monochrome {
+		return format.high_depth ? 2 * y_samples : y_samples
+	}
+	cpad := format.chroma_444 ? pad * 2 : pad
+	chroma_width := format.chroma_444 ? width : width / 2
+	chroma_height := (format.chroma_422 || format.chroma_444) ? height : height / 2
+	samples := y_samples + 2 * (chroma_height + cpad) * (chroma_width + cpad)
 	return format.high_depth ? 2 * samples : samples
 }
 
@@ -25,11 +33,28 @@ yuv_buffer_size :: proc(width, height: int, format := Buffer_Format{}) -> int {
 yuv_buffer_view :: proc(width, height: int, mem_buf: [^]u8, format := Buffer_Format{}) -> YUV_Buffer {
 	pad := PADDING_LENGTH
 	size := format.high_depth ? 2 : 1
-	chroma_height := format.chroma_422 ? height : height / 2
 	y_stride := width + pad * 2
 	y_size := (height + pad * 2) * y_stride
-	uv_stride := (width / 2) + pad
-	uv_size := (chroma_height + pad) * uv_stride
+	if format.monochrome {
+		return YUV_Buffer {
+			width = width,
+			height = height,
+			coded_width = width,
+			coded_height = height,
+			y_stride = y_stride,
+			uv_stride = 0,
+			high_depth = format.high_depth,
+			monochrome = true,
+			y = &mem_buf[(pad * y_stride + pad) * size],
+			u = nil,
+			v = nil,
+		}
+	}
+	cpad := format.chroma_444 ? pad : pad / 2
+	chroma_width := format.chroma_444 ? width : width / 2
+	chroma_height := (format.chroma_422 || format.chroma_444) ? height : height / 2
+	uv_stride := chroma_width + cpad * 2
+	uv_size := (chroma_height + cpad * 2) * uv_stride
 	return YUV_Buffer {
 		width = width,
 		height = height,
@@ -39,9 +64,11 @@ yuv_buffer_view :: proc(width, height: int, mem_buf: [^]u8, format := Buffer_For
 		uv_stride = uv_stride,
 		chroma_422 = format.chroma_422,
 		high_depth = format.high_depth,
+		chroma_444 = format.chroma_444,
+		monochrome = false,
 		y = &mem_buf[(pad * y_stride + pad) * size],
-		u = &mem_buf[(y_size + (pad / 2) * uv_stride + pad / 2) * size],
-		v = &mem_buf[(y_size + uv_size + (pad / 2) * uv_stride + pad / 2) * size],
+		u = &mem_buf[(y_size + cpad * uv_stride + cpad) * size],
+		v = &mem_buf[(y_size + uv_size + cpad * uv_stride + cpad) * size],
 	}
 }
 
@@ -57,7 +84,14 @@ buffer_planes :: #force_inline proc "contextless" ($T: typeid, buf: ^YUV_Buffer)
 
 // Chroma rows of the coded picture.
 chroma_rows :: #force_inline proc "contextless" (buf: ^YUV_Buffer) -> int {
-	return buf.chroma_422 ? buf.coded_height : buf.coded_height / 2
+	if buf.monochrome do return 0
+	return (buf.chroma_422 || buf.chroma_444) ? buf.coded_height : buf.coded_height / 2
+}
+
+// Chroma columns of the coded picture.
+chroma_cols :: #force_inline proc "contextless" (buf: ^YUV_Buffer) -> int {
+	if buf.monochrome do return 0
+	return buf.chroma_444 ? buf.coded_width : buf.coded_width / 2
 }
 
 // Index in Macroblock.nonzero_coefficient_counts of chroma 4x4 block `block`

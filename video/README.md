@@ -8,7 +8,10 @@ with H.264/H.265 and AAC-LC tracks, or a VP9 WebM. It also reads such files
 `Automatic` decodes in hardware when the machine admits the stream:
 VideoToolbox on macOS (H.264 and HEVC), Vulkan Video on Linux. Encoding
 likewise uses VideoToolbox on macOS and Vulkan Video on Linux, and the
-native codecs elsewhere (and for alpha and VP9).
+native codecs elsewhere (and for alpha and VP9). Native H.264 and H.265 are
+built only with `-define:ODECS_PATENTED=true` ([media](../media/README.md));
+without it they need VideoToolbox or Vulkan Video, and H.265 transparency is
+unavailable.
 
 ## Writing
 
@@ -80,7 +83,7 @@ video.destroy(&w)
   BlockAdditional 1, which Chrome, Firefox and Edge composite. Files are
   still several times larger than libvpx's (see `video/vp9/encoder`).
 - **Transparency:** `transparency = .Premultiplied` or `.Straight` keeps alpha
-  as an H.265 auxiliary alpha layer (native encoder; Annex F, laid out as
+  as an H.265 auxiliary alpha layer (native encoder, `ODECS_PATENTED` builds; Annex F, laid out as
   Apple's VideoToolbox encoder writes it), which Safari, QuickTime and
   AVFoundation play as transparent video. `alpha` still says how the RGBA
   input relates to its alpha; `write_i420` and `write_nv12` take an alpha

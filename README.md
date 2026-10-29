@@ -5,7 +5,8 @@
 Native Odin media codecs and containers: video, audio and image decoding and
 encoding with no FFmpeg or other codec library at runtime. Hardware video
 coding goes through Vulkan Video on Linux and VideoToolbox on macOS, with the
-native codecs as the software path. MIT licensed ([LICENSE](LICENSE)).
+native codecs as the software path; native H.264 and H.265 are compiled in only
+with `-define:ODECS_PATENTED=true` ([media](media/README.md)). MIT licensed ([LICENSE](LICENSE)).
 
 ## Packages
 
@@ -82,7 +83,8 @@ Each package's README covers its API, limits and how it was verified.
 Requirements:
 - A recent Odin nightly; odecs is built and tested with `dev-2026-10`.
 - For hardware video, a Vulkan driver with Vulkan Video (loaded at runtime;
-  without one the native codecs are used) or macOS VideoToolbox.
+  without one the native codecs are used) or macOS VideoToolbox. Without
+  `-define:ODECS_PATENTED=true`, H.264 and H.265 have only these.
 - The viewer uses `vendor:sdl3`: `odin build viewer -o:speed && ./viewer.bin FILE`.
 - The SPIR-V for the compute shaders is committed; `shaders/build.sh`
   rebuilds it with `slangc`.

@@ -202,10 +202,11 @@ cavlc_read_runs :: proc(
 cavlc_read_residual_block :: proc(
 	decoder: ^Slice_Decoder,
 	macroblock_index: int,
-	$cat: Block_Cat,
+	$cat: h264.Block_Cat,
 	block: int,
 	levels: []$L,
 	max_coeffs: int,
+	plane_444 := 0,
 ) -> int #no_bounds_check {
 	when cat == .Chroma_DC {
 		nc := i8(decoder.chroma_422 ? -2 : -1)
@@ -218,6 +219,7 @@ cavlc_read_residual_block :: proc(
 			0 when cat == .Luma_DC else block,
 			cat == .Chroma_AC,
 			decoder.chroma_422 ? 8 : 4,
+			plane_444,
 		)
 	}
 	// The block parses on a local reader, kept in registers, stored back once.

@@ -67,6 +67,10 @@ main :: proc() {
 			config.exhaustive_intra = true
 		case "--ultrafast":
 			config.ultrafast = true
+		case "--cabac":
+			config.cabac = true
+		case "--8x8":
+			config.transform_8x8 = true
 		case "--verbose":
 			verbose = true
 		case:

@@ -20,10 +20,12 @@ Slice_Decoder :: struct {
 	picture:             ^Picture,
 	macroblock_count:    int,
 	// Sample format: bit depth with QpBdOffset = 6 * (bit_depth - 8), and
-	// 4:2:2 chroma (8 chroma 4x4 blocks per plane instead of 4).
+	// 4:2:2 / 4:4:4 / 4:0:0 chroma.
 	bit_depth:           int,
 	qp_bd_offset:        i32,
 	chroma_422:          bool,
+	chroma_444:          bool,
+	monochrome:          bool,
 	qp:                  i32, // running QP_Y (from -qp_bd_offset to 51)
 	prev_qp_delta_nz:    bool, // CABAC context for mb_qp_delta
 	chroma_qp:           [2]i32, // QP'_C of Cb and Cr for the current macroblock
@@ -39,23 +41,18 @@ Slice_Decoder :: struct {
 // i32 above 8 bits (the levels of 10-bit residuals exceed 16 bits). Chroma
 // has 4 DC levels and 4 AC blocks per plane, 8 of each in 4:2:2.
 Residual :: struct($L: typeid) {
-	luma_dc_coefficients:   [16]L,
-	luma:                   [16][16]L, // per 4x4 block in decoding order (AC-only for I_16x16: index 0 unused)
-	luma8x8:                [4][64]L,
-	chroma_dc_coefficients: [2][8]L,
-	chroma_ac_coefficients: [2][8][16]L, // raster order, two per row; index 0 unused (DC)
-	luma_nz:                [16]bool,
-	luma8x8_nz:             [4]bool,
-}
-
-// Residual block categories (ctxBlockCat, Table 9-42)
-Block_Cat :: enum u8 {
-	Luma_DC   = 0,
-	Luma_AC   = 1,
-	Luma_4x4  = 2,
-	Chroma_DC = 3,
-	Chroma_AC = 4,
-	Luma_8x8  = 5,
+	luma_dc_coefficients:      [16]L,
+	luma:                      [16][16]L, // per 4x4 block in decoding order (AC-only for I_16x16: index 0 unused)
+	luma8x8:                   [4][64]L,
+	chroma_dc_coefficients:    [2][8]L,
+	chroma_ac_coefficients:    [2][8][16]L, // raster order, two per row; index 0 unused (DC)
+	chroma_444_dc:             [2][16]L,
+	chroma_444:                [2][16][16]L,
+	chroma_444_8x8:            [2][4][64]L,
+	luma_nz:                   [16]bool,
+	luma8x8_nz:                [4]bool,
+	chroma_444_nz:             [2][16]bool,
+	chroma_444_8x8_nz:         [2][4]bool,
 }
 
 // Decode all macroblocks of the slice. Returns an error for malformed data.
@@ -137,6 +134,9 @@ decode_skip_macroblock :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $
 	macroblock := &decoder.macroblocks[macroblock_index]
 	macroblock.is_skip = true
 	macroblock.quantizer = i8(decoder.qp)
+	macroblock.transform_bypass =
+		decoder.sequence_parameters.bypass_transform_at_zero_quantizer &&
+		decoder.qp + decoder.qp_bd_offset == 0
 	decoder.prev_qp_delta_nz = false
 	if decoder.header.slice_type == .B {
 		macroblock.type = .B_Skip
@@ -278,15 +278,19 @@ decode_macroblock :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: ty
 	switch macroblock.type {
 	case .I_4x4, .I_8x8:
 		read_intra_modes(decoder, macroblock_index)
-		macroblock.chroma_prediction_mode = h264.Intra_Chroma_Mode(
-			read_intra_chroma_mode(decoder, macroblock_index),
-		)
-		if macroblock.chroma_prediction_mode > .Plane do return .Invalid_Chroma_Prediction_Mode
+		if !decoder.monochrome && !decoder.chroma_444 {
+			macroblock.chroma_prediction_mode = h264.Intra_Chroma_Mode(
+				read_intra_chroma_mode(decoder, macroblock_index),
+			)
+			if macroblock.chroma_prediction_mode > .Plane do return .Invalid_Chroma_Prediction_Mode
+		}
 	case .I_16x16:
-		macroblock.chroma_prediction_mode = h264.Intra_Chroma_Mode(
-			read_intra_chroma_mode(decoder, macroblock_index),
-		)
-		if macroblock.chroma_prediction_mode > .Plane do return .Invalid_Chroma_Prediction_Mode
+		if !decoder.monochrome && !decoder.chroma_444 {
+			macroblock.chroma_prediction_mode = h264.Intra_Chroma_Mode(
+				read_intra_chroma_mode(decoder, macroblock_index),
+			)
+			if macroblock.chroma_prediction_mode > .Plane do return .Invalid_Chroma_Prediction_Mode
+		}
 	case .B_Direct_16x16:
 		derive_direct(decoder, macroblock_index, 0xF)
 	case .P_8x8, .P_8x8ref0, .B_8x8:
@@ -325,6 +329,9 @@ decode_macroblock :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: ty
 	}
 	macroblock.quantizer = i8(decoder.qp)
 	macroblock.has_quantizer_delta = decoder.prev_qp_delta_nz
+	macroblock.transform_bypass =
+		decoder.sequence_parameters.bypass_transform_at_zero_quantizer &&
+		decoder.qp + decoder.qp_bd_offset == 0
 	for offset, plane in ([2]i32{picture_parameters.chroma_qp_index_offset, picture_parameters.second_chroma_qp_index_offset}) {
 		decoder.chroma_qp[plane] = h264.chroma_qp(decoder.qp, offset, decoder.qp_bd_offset) + decoder.qp_bd_offset
 	}
@@ -334,6 +341,10 @@ decode_macroblock :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: ty
 	residual: Residual(L) = ---
 	residual.luma_nz = {}
 	residual.luma8x8_nz = {}
+	if decoder.chroma_444 {
+		residual.chroma_444_nz = {}
+		residual.chroma_444_8x8_nz = {}
+	}
 	if macroblock.luma_coded_block_mask != 0 ||
 	   macroblock.chroma_residual_mode != .None ||
 	   macroblock.type == .I_16x16 {
@@ -348,7 +359,9 @@ decode_macroblock :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: ty
 		predict_inter_macroblock(decoder, macroblock_index, T)
 		reconstruct_inter_luma(decoder, macroblock_index, &residual, T)
 	}
-	reconstruct_chroma(decoder, macroblock_index, &residual, T)
+	if !decoder.monochrome && !decoder.chroma_444 {
+		reconstruct_chroma(decoder, macroblock_index, &residual, T)
+	}
 	return .None
 }
 
@@ -389,15 +402,19 @@ inter_allows_8x8 :: proc(decoder: ^Slice_Decoder, macroblock: #soa^#soa[]h264.Ma
 decode_pcm :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: typeid) -> Error {
 	macroblock := &decoder.macroblocks[macroblock_index]
 	macroblock.quantizer = i8(decoder.qp)
+	macroblock.transform_bypass =
+		decoder.sequence_parameters.bypass_transform_at_zero_quantizer &&
+		decoder.qp + decoder.qp_bd_offset == 0
 	macroblock.luma_coded_block_mask = 15
-	macroblock.chroma_residual_mode = .DC_And_AC
+	macroblock.chroma_residual_mode = (decoder.monochrome || decoder.chroma_444) ? .None : .DC_And_AC
 	for &count in macroblock.nonzero_coefficient_counts do count = 16
 	macroblock.has_dc_coefficients = {true, true, true}
 	decoder.prev_qp_delta_nz = false
 	h264.byte_align(decoder.reader)
-	chroma_rows := decoder.chroma_422 ? 16 : 8
+	chroma_cols := decoder.monochrome ? 0 : (decoder.chroma_444 ? 16 : 8)
+	chroma_rows := decoder.monochrome ? 0 : ((decoder.chroma_422 || decoder.chroma_444) ? 16 : 8)
 	bits := uint(decoder.bit_depth)
-	if decoder.reader.bit_pos + (256 + 16 * chroma_rows) * int(bits) > 8 * len(decoder.reader.data) do return .Truncated_PCM
+	if decoder.reader.bit_pos + (256 + 2 * chroma_cols * chroma_rows) * int(bits) > 8 * len(decoder.reader.data) do return .Truncated_PCM
 	buf := &decoder.picture.buf
 	luma, cb, cr := h264.buffer_planes(T, buf)
 	mb_x, mb_y :=
@@ -409,10 +426,12 @@ decode_pcm :: proc(decoder: ^Slice_Decoder, macroblock_index: int, $T: typeid) -
 		row := luma[(mb_y * 16 + y) * buf.y_stride + mb_x * 16:]
 		for x in 0 ..< 16 do row[x] = T(h264.read_bits(decoder.reader, bits))
 	}
-	for plane in ([2][^]T{cb, cr}) {
-		for y in 0 ..< chroma_rows {
-			row := plane[(mb_y * chroma_rows + y) * buf.uv_stride + mb_x * 8:]
-			for x in 0 ..< 8 do row[x] = T(h264.read_bits(decoder.reader, bits))
+	if !decoder.monochrome {
+		for plane in ([2][^]T{cb, cr}) {
+			for y in 0 ..< chroma_rows {
+				row := plane[(mb_y * chroma_rows + y) * buf.uv_stride + mb_x * chroma_cols:]
+				for x in 0 ..< chroma_cols do row[x] = T(h264.read_bits(decoder.reader, bits))
+			}
 		}
 	}
 	if decoder.cabac do cabac_init_engine(decoder.engine, decoder.reader)
@@ -519,7 +538,7 @@ read_macroblock_prediction :: proc(decoder: ^Slice_Decoder, macroblock_index: in
 			)
 			motion_differences := read_mvd_pair(decoder, macroblock_index, list, part.block)
 			fill_partition_mv(macroblock, list, part, predicted + motion_differences)
-			if decoder.cabac do store_mvd(macroblock, list, part, motion_differences)
+			if decoder.cabac do h264.store_mvd(macroblock, list, part, motion_differences)
 		}
 	}
 	return .None
@@ -588,7 +607,7 @@ read_sub_macroblock_prediction :: proc(decoder: ^Slice_Decoder, macroblock_index
 				)
 				motion_differences := read_mvd_pair(decoder, macroblock_index, list, part.block)
 				fill_partition_mv(macroblock, list, part, predicted + motion_differences)
-				if decoder.cabac do store_mvd(macroblock, list, part, motion_differences)
+				if decoder.cabac do h264.store_mvd(macroblock, list, part, motion_differences)
 			}
 		}
 	}
@@ -618,24 +637,6 @@ read_mvd_pair :: proc(decoder: ^Slice_Decoder, macroblock_index, list, block: in
 		mvd = {h264.read_se(decoder.reader), h264.read_se(decoder.reader)}
 	}
 	return {i16(clamp(mvd[0], -32768, 32767)), i16(clamp(mvd[1], -32768, 32767))}
-}
-
-// |mvd| per 4x4 block, read only by the CABAC contexts of later macroblocks
-// in the same slice.
-store_mvd :: proc(
-	macroblock: #soa^#soa[]h264.Macroblock,
-	list: int,
-	part: h264.Partition,
-	motion_differences: [2]i16,
-) {
-	bx, by := h264.subblock_to_xy(part.block)
-	value := [2]u8 {
-		u8(min(abs(int(motion_differences[0])), 255)),
-		u8(min(abs(int(motion_differences[1])), 255)),
-	}
-	for y in 0 ..< part.height do for x in 0 ..< part.width {
-		macroblock.motion_differences[list][h264.xy_to_subblock(bx + x, by + y)] = value
-	}
 }
 
 // Resolve reference indices to picture ids for deblocking and direct prediction
@@ -690,39 +691,74 @@ macroblock_samples :: proc(
 	buf := &decoder.picture.buf
 	y, u, v := h264.buffer_planes(T, buf)
 	mb_x, mb_y := macroblock_index % decoder.macroblock_columns, macroblock_index / decoder.macroblock_columns
-	chroma_offset := (mb_y * (decoder.chroma_422 ? 16 : 8)) * buf.uv_stride + mb_x * 8
+	if decoder.monochrome {
+		return &y[(mb_y * 16) * buf.y_stride + mb_x * 16], {nil, nil}
+	}
+	cw := decoder.chroma_444 ? 16 : 8
+	ch := (decoder.chroma_422 || decoder.chroma_444) ? 16 : 8
+	chroma_offset := (mb_y * ch) * buf.uv_stride + mb_x * cw
 	return &y[(mb_y * 16) * buf.y_stride + mb_x * 16], {&u[chroma_offset], &v[chroma_offset]}
 }
 
-reconstruct_intra :: proc(decoder: ^Slice_Decoder, macroblock_index: int, residual: ^Residual($L), $T: typeid) {
-	macroblock := &decoder.macroblocks[macroblock_index]
-	buf := &decoder.picture.buf
-	stride := buf.y_stride
-	pixels, chroma_pixels := macroblock_samples(decoder, macroblock_index, T)
-	top, left, top_right, top_left := intra_neighbours(decoder, macroblock_index)
-	qp := i32(macroblock.quantizer) + decoder.qp_bd_offset
-	bit_depth := decoder.bit_depth
-	pixel_max := i32(1) << uint(bit_depth) - 1
+@(private = "file")
+bypass_dpcm_dir :: #force_inline proc(decoder: ^Slice_Decoder, mode: int) -> int {
+	p := decoder.sequence_parameters.profile
+	if (p == .High_444_Predictive || p == .CAVLC_444_Intra) && (mode == 0 || mode == 1) {
+		return mode
+	}
+	return -1
+}
 
+@(private = "file")
+reconstruct_intra_plane :: proc(
+	decoder: ^Slice_Decoder,
+	macroblock: #soa^#soa[]h264.Macroblock,
+	pixels: [^]$T,
+	stride: int,
+	top, left, top_right, top_left: bool,
+	dc_in: ^[16]$L,
+	blocks_4x4: ^[16][16]L,
+	blocks_8x8: ^[4][64]L,
+	nz_4x4: ^[16]bool,
+	nz_8x8: ^[4]bool,
+	qp: i32,
+	list_4x4: int,
+	list_8x8: int,
+	bypass: bool,
+	bit_depth: int,
+	pixel_max: i32,
+) {
 	switch macroblock.type {
 	case .I_16x16:
 		h264.predict_intra_16x16(pixels, stride, macroblock.intra_16x16_mode, top, left, bit_depth)
-		dc := residual.luma_dc_coefficients
-		h264.luma_dc_dequant_idct(&decoder.state.scales, &dc, qp)
-		for block in 0 ..< 16 {
-			bx, by := h264.subblock_to_xy(block)
-			h264.reconstruct_4x4(
-				&decoder.state.scales,
-				&pixels[by * 4 * stride + bx * 4],
+		if bypass {
+			h264.reconstruct_bypass_16x16(
+				pixels,
 				stride,
-				&residual.luma[block],
-				residual.luma_nz[block],
-				qp,
-				0,
-				true,
-				i32(dc[by * 4 + bx]),
+				dc_in,
+				blocks_4x4,
+				nz_4x4,
+				bypass_dpcm_dir(decoder, int(macroblock.intra_16x16_mode)),
 				pixel_max,
 			)
+		} else {
+			dc := dc_in^
+			h264.luma_dc_dequant_idct(&decoder.state.scales, &dc, qp, list_4x4)
+			for block in 0 ..< 16 {
+				bx, by := h264.subblock_to_xy(block)
+				h264.reconstruct_4x4(
+					&decoder.state.scales,
+					&pixels[by * 4 * stride + bx * 4],
+					stride,
+					&blocks_4x4[block],
+					nz_4x4[block],
+					qp,
+					list_4x4,
+					true,
+					i32(dc[by * 4 + bx]),
+					pixel_max,
+				)
+			}
 		}
 	case .I_8x8:
 		for block8 in 0 ..< 4 {
@@ -733,17 +769,30 @@ reconstruct_intra :: proc(decoder: ^Slice_Decoder, macroblock_index: int, residu
 			avail_top_right := block8 == 0 ? top : block8 == 1 ? top_right : block8 == 2
 			avail_top_left :=
 				block8 == 0 ? top_left : block8 == 1 ? top : block8 == 2 ? left : true
+			mode := macroblock.intra_4x4_modes[block8 * 4]
 			h264.predict_intra_8x8(
 				block_pixels,
 				stride,
-				macroblock.intra_4x4_modes[block8 * 4],
+				mode,
 				avail_top,
 				avail_left,
 				avail_top_right,
 				avail_top_left,
 				bit_depth,
 			)
-			if residual.luma8x8_nz[block8] do h264.reconstruct_8x8(&decoder.state.scales, block_pixels, stride, &residual.luma8x8[block8], qp, 0, pixel_max)
+			if nz_8x8[block8] {
+				if bypass {
+					h264.reconstruct_bypass_8x8(
+						block_pixels,
+						stride,
+						&blocks_8x8[block8],
+						bypass_dpcm_dir(decoder, int(mode)),
+						pixel_max,
+					)
+				} else {
+					h264.reconstruct_8x8(&decoder.state.scales, block_pixels, stride, &blocks_8x8[block8], qp, list_8x8, pixel_max)
+				}
+			}
 		}
 	case .I_4x4:
 		for block in 0 ..< 16 {
@@ -760,16 +809,32 @@ reconstruct_intra :: proc(decoder: ^Slice_Decoder, macroblock_index: int, residu
 			case bx < 3:
 				avail_top_right = block != 3 && block != 11
 			}
+			mode := macroblock.intra_4x4_modes[block]
 			h264.predict_intra_4x4(
 				block_pixels,
 				stride,
-				macroblock.intra_4x4_modes[block],
+				mode,
 				avail_top,
 				avail_left,
 				avail_top_right,
 				bit_depth,
 			)
-			if residual.luma_nz[block] do h264.reconstruct_4x4(&decoder.state.scales, block_pixels, stride, &residual.luma[block], true, qp, 0, false, 0, pixel_max)
+			if nz_4x4[block] {
+				if bypass {
+					h264.reconstruct_bypass_4x4(
+						block_pixels,
+						stride,
+						&blocks_4x4[block],
+						true,
+						false,
+						0,
+						bypass_dpcm_dir(decoder, int(mode)),
+						pixel_max,
+					)
+				} else {
+					h264.reconstruct_4x4(&decoder.state.scales, block_pixels, stride, &blocks_4x4[block], true, qp, list_4x4, false, 0, pixel_max)
+				}
+			}
 		}
 	case .I_PCM,
 	     .P_L0_16x16,
@@ -785,8 +850,110 @@ reconstruct_intra :: proc(decoder: ^Slice_Decoder, macroblock_index: int, residu
 	     .B_8x8,
 	     .B_Skip:
 	}
+}
+
+reconstruct_intra :: proc(decoder: ^Slice_Decoder, macroblock_index: int, residual: ^Residual($L), $T: typeid) {
+	macroblock := &decoder.macroblocks[macroblock_index]
+	buf := &decoder.picture.buf
+	stride := buf.y_stride
+	pixels, chroma_pixels := macroblock_samples(decoder, macroblock_index, T)
+	top, left, top_right, top_left := intra_neighbours(decoder, macroblock_index)
+	qp := i32(macroblock.quantizer) + decoder.qp_bd_offset
+	bit_depth := decoder.bit_depth
+	pixel_max := i32(1) << uint(bit_depth) - 1
+	bypass := macroblock.transform_bypass
+
+	reconstruct_intra_plane(
+		decoder,
+		macroblock,
+		pixels,
+		stride,
+		top,
+		left,
+		top_right,
+		top_left,
+		&residual.luma_dc_coefficients,
+		&residual.luma,
+		&residual.luma8x8,
+		&residual.luma_nz,
+		&residual.luma8x8_nz,
+		qp,
+		0,
+		0,
+		bypass,
+		bit_depth,
+		pixel_max,
+	)
+
+	if decoder.monochrome do return
+	if decoder.chroma_444 {
+		for plane in 0 ..< 2 {
+			reconstruct_intra_plane(
+				decoder,
+				macroblock,
+				chroma_pixels[plane],
+				buf.uv_stride,
+				top,
+				left,
+				top_right,
+				top_left,
+				&residual.chroma_444_dc[plane],
+				&residual.chroma_444[plane],
+				&residual.chroma_444_8x8[plane],
+				&residual.chroma_444_nz[plane],
+				&residual.chroma_444_8x8_nz[plane],
+				decoder.chroma_qp[plane],
+				1 + plane,
+				2 + 2 * plane,
+				bypass,
+				bit_depth,
+				pixel_max,
+			)
+		}
+		return
+	}
 
 	for plane in 0 ..< 2 do h264.predict_intra_chroma(chroma_pixels[plane], buf.uv_stride, macroblock.chroma_prediction_mode, top, left, decoder.chroma_422, bit_depth)
+}
+
+@(private = "file")
+reconstruct_inter_plane :: proc(
+	decoder: ^Slice_Decoder,
+	macroblock: #soa^#soa[]h264.Macroblock,
+	pixels: [^]$T,
+	stride: int,
+	blocks_4x4: ^[16][16]$L,
+	blocks_8x8: ^[4][64]L,
+	nz_4x4: ^[16]bool,
+	nz_8x8: ^[4]bool,
+	qp: i32,
+	list_4x4: int,
+	list_8x8: int,
+	bypass: bool,
+	pixel_max: i32,
+) {
+	if macroblock.uses_8x8_transform {
+		for block8 in 0 ..< 4 {
+			if !nz_8x8[block8] do continue
+			p: [^]T = &pixels[(block8 >> 1) * 8 * stride + (block8 & 1) * 8]
+			if bypass {
+				h264.reconstruct_bypass_8x8(p, stride, &blocks_8x8[block8], -1, pixel_max)
+			} else {
+				h264.reconstruct_8x8(&decoder.state.scales, p, stride, &blocks_8x8[block8], qp, list_8x8, pixel_max)
+			}
+		}
+		return
+	}
+	for block in 0 ..< 16 {
+		if !nz_4x4[block] do continue
+		bx, by := h264.subblock_to_xy(block)
+		p: [^]T = &pixels[by * 4 * stride + bx * 4]
+		if bypass {
+			h264.reconstruct_bypass_4x4(p, stride, &blocks_4x4[block], true, false, 0, -1, pixel_max)
+		} else {
+			h264.reconstruct_4x4(&decoder.state.scales, p, stride, &blocks_4x4[block], true, qp, list_4x4, false, 0, pixel_max)
+		}
+	}
 }
 
 reconstruct_inter_luma :: proc(
@@ -796,40 +963,45 @@ reconstruct_inter_luma :: proc(
 	$T: typeid,
 ) {
 	macroblock := &decoder.macroblocks[macroblock_index]
-	stride := decoder.picture.buf.y_stride
-	pixels, _ := macroblock_samples(decoder, macroblock_index, T)
+	buf := &decoder.picture.buf
+	stride := buf.y_stride
+	pixels, chroma_pixels := macroblock_samples(decoder, macroblock_index, T)
 	qp := i32(macroblock.quantizer) + decoder.qp_bd_offset
 	pixel_max := i32(1) << uint(decoder.bit_depth) - 1
-	if macroblock.uses_8x8_transform {
-		for block8 in 0 ..< 4 {
-			if !residual.luma8x8_nz[block8] do continue
-			h264.reconstruct_8x8(
-				&decoder.state.scales,
-				&pixels[(block8 >> 1) * 8 * stride + (block8 & 1) * 8],
-				stride,
-				&residual.luma8x8[block8],
-				qp,
-				1,
+	bypass := macroblock.transform_bypass
+	reconstruct_inter_plane(
+		decoder,
+		macroblock,
+		pixels,
+		stride,
+		&residual.luma,
+		&residual.luma8x8,
+		&residual.luma_nz,
+		&residual.luma8x8_nz,
+		qp,
+		3,
+		1,
+		bypass,
+		pixel_max,
+	)
+	if decoder.chroma_444 {
+		for plane in 0 ..< 2 {
+			reconstruct_inter_plane(
+				decoder,
+				macroblock,
+				chroma_pixels[plane],
+				buf.uv_stride,
+				&residual.chroma_444[plane],
+				&residual.chroma_444_8x8[plane],
+				&residual.chroma_444_nz[plane],
+				&residual.chroma_444_8x8_nz[plane],
+				decoder.chroma_qp[plane],
+				4 + plane,
+				3 + 2 * plane,
+				bypass,
 				pixel_max,
 			)
 		}
-		return
-	}
-	for block in 0 ..< 16 {
-		if !residual.luma_nz[block] do continue
-		bx, by := h264.subblock_to_xy(block)
-		h264.reconstruct_4x4(
-			&decoder.state.scales,
-			&pixels[by * 4 * stride + bx * 4],
-			stride,
-			&residual.luma[block],
-			true,
-			qp,
-			3,
-			false,
-			0,
-			pixel_max,
-		)
 	}
 }
 
@@ -842,10 +1014,33 @@ reconstruct_chroma :: proc(decoder: ^Slice_Decoder, macroblock_index: int, resid
 	_, planes := macroblock_samples(decoder, macroblock_index, T)
 	pixel_max := i32(1) << uint(decoder.bit_depth) - 1
 	blocks := decoder.chroma_422 ? 8 : 4
+	bypass := macroblock.transform_bypass
 	for plane in 0 ..< 2 {
 		list_idx := (macroblock.is_intra ? 1 : 4) + plane
 		qp := decoder.chroma_qp[plane]
 		dc := residual.chroma_dc_coefficients[plane]
+		if bypass {
+			dpcm := -1
+			if macroblock.is_intra {
+				mode := macroblock.chroma_prediction_mode
+				if mode == .Vertical {
+					dpcm = bypass_dpcm_dir(decoder, 0)
+				} else if mode == .Horizontal {
+					dpcm = bypass_dpcm_dir(decoder, 1)
+				}
+			}
+			h264.reconstruct_bypass_chroma(
+				planes[plane],
+				stride,
+				dc,
+				&residual.chroma_ac_coefficients[plane],
+				blocks,
+				macroblock.chroma_residual_mode == .DC_And_AC,
+				dpcm,
+				pixel_max,
+			)
+			continue
+		}
 		if decoder.chroma_422 {
 			h264.chroma_dc_dequant_idct_422(&decoder.state.scales, &dc, qp, list_idx)
 		} else {
@@ -873,22 +1068,30 @@ reconstruct_chroma :: proc(decoder: ^Slice_Decoder, macroblock_index: int, resid
 // which order (7.3.5.3), coefficient reading is per entropy coder.
 // ---------------------------------------------------------------------------
 
-read_residual :: proc(
+@(private = "file")
+read_residual_luma_plane :: proc(
 	decoder: ^Slice_Decoder,
 	macroblock_index: int,
-	residual: ^Residual($L),
-) -> Error {
+	plane_444: int,
+	dc_coeffs: ^[16]$L,
+	blocks_4x4: ^[16][16]L,
+	blocks_8x8: ^[4][64]L,
+	nz_4x4: ^[16]bool,
+	nz_8x8: ^[4]bool,
+) {
 	macroblock := &decoder.macroblocks[macroblock_index]
+	base_nzc := plane_444 * 16
 	if macroblock.type == .I_16x16 {
 		dc_total := read_residual_block(
 			decoder,
 			macroblock_index,
 			.Luma_DC,
 			0,
-			residual.luma_dc_coefficients[:],
+			dc_coeffs[:],
 			16,
+			plane_444,
 		)
-		macroblock.has_dc_coefficients[0] = dc_total > 0
+		macroblock.has_dc_coefficients[plane_444] = dc_total > 0
 		for block in 0 ..< 16 {
 			if macroblock.luma_coded_block_mask & (1 << uint(block / 4)) == 0 do continue
 			total := read_residual_block(
@@ -896,11 +1099,12 @@ read_residual :: proc(
 				macroblock_index,
 				.Luma_AC,
 				block,
-				residual.luma[block][1:],
+				blocks_4x4[block][1:],
 				15,
+				plane_444,
 			)
-			macroblock.nonzero_coefficient_counts[block] = u8(total)
-			residual.luma_nz[block] = total > 0
+			macroblock.nonzero_coefficient_counts[base_nzc + block] = u8(total)
+			nz_4x4[block] = total > 0
 		}
 	} else if macroblock.uses_8x8_transform {
 		for block8 in 0 ..< 4 {
@@ -911,12 +1115,17 @@ read_residual :: proc(
 					macroblock_index,
 					.Luma_8x8,
 					block8,
-					residual.luma8x8[block8][:],
+					blocks_8x8[block8][:],
 					64,
+					plane_444,
 				)
-				residual.luma8x8_nz[block8] = total > 0
-				macroblock.has_8x8_coefficients[block8] = total > 0
-				for k in 0 ..< 4 do macroblock.nonzero_coefficient_counts[block8 * 4 + k] = u8(min(total, 16))
+				nz_8x8[block8] = total > 0
+				if plane_444 == 0 {
+					macroblock.has_8x8_coefficients[block8] = total > 0
+				} else {
+					macroblock.chroma_has_8x8_coefficients[plane_444 - 1][block8] = total > 0
+				}
+				for k in 0 ..< 4 do macroblock.nonzero_coefficient_counts[base_nzc + block8 * 4 + k] = u8(min(total, 16))
 			} else {
 				// CAVLC: four interleaved 4x4 blocks (7.3.5.3.2)
 				for k in 0 ..< 4 {
@@ -928,13 +1137,18 @@ read_residual :: proc(
 						block8 * 4 + k,
 						levels[:],
 						16,
+						plane_444,
 					)
-					macroblock.nonzero_coefficient_counts[block8 * 4 + k] = u8(count)
+					macroblock.nonzero_coefficient_counts[base_nzc + block8 * 4 + k] = u8(count)
 					if count > 0 {
-						residual.luma8x8_nz[block8] = true
-						macroblock.has_8x8_coefficients[block8] = true
+						nz_8x8[block8] = true
+						if plane_444 == 0 {
+							macroblock.has_8x8_coefficients[block8] = true
+						} else {
+							macroblock.chroma_has_8x8_coefficients[plane_444 - 1][block8] = true
+						}
 					}
-					for i in 0 ..< 16 do residual.luma8x8[block8][4 * i + k] = levels[i]
+					for i in 0 ..< 16 do blocks_8x8[block8][4 * i + k] = levels[i]
 				}
 			}
 		}
@@ -946,12 +1160,47 @@ read_residual :: proc(
 				macroblock_index,
 				.Luma_4x4,
 				block,
-				residual.luma[block][:],
+				blocks_4x4[block][:],
 				16,
+				plane_444,
 			)
-			macroblock.nonzero_coefficient_counts[block] = u8(total)
-			residual.luma_nz[block] = total > 0
+			macroblock.nonzero_coefficient_counts[base_nzc + block] = u8(total)
+			nz_4x4[block] = total > 0
 		}
+	}
+}
+
+read_residual :: proc(
+	decoder: ^Slice_Decoder,
+	macroblock_index: int,
+	residual: ^Residual($L),
+) -> Error {
+	macroblock := &decoder.macroblocks[macroblock_index]
+	read_residual_luma_plane(
+		decoder,
+		macroblock_index,
+		0,
+		&residual.luma_dc_coefficients,
+		&residual.luma,
+		&residual.luma8x8,
+		&residual.luma_nz,
+		&residual.luma8x8_nz,
+	)
+	if decoder.monochrome do return .None
+	if decoder.chroma_444 {
+		for plane in 0 ..< 2 {
+			read_residual_luma_plane(
+				decoder,
+				macroblock_index,
+				1 + plane,
+				&residual.chroma_444_dc[plane],
+				&residual.chroma_444[plane],
+				&residual.chroma_444_8x8[plane],
+				&residual.chroma_444_nz[plane],
+				&residual.chroma_444_8x8_nz[plane],
+			)
+		}
+		return .None
 	}
 	// Chroma blocks: 4 per plane, 8 in 4:2:2. A chroma AC block is passed as
 	// plane * blocks + its raster index.
@@ -1019,6 +1268,12 @@ read_intra_chroma_mode :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -
 read_coded_block_pattern :: proc(decoder: ^Slice_Decoder, macroblock_index: int) -> u32 {
 	if decoder.cabac do return cabac_read_coded_block_pattern(decoder, macroblock_index)
 	code := h264.read_ue(decoder.reader)
+	if decoder.monochrome || decoder.chroma_444 {
+		if code >= 16 do return 0xFF
+		return u32(
+			decoder.macroblocks[macroblock_index].is_intra ? h264.intra4x4_cbp_table_400_444[code] : h264.inter_cbp_table_400_444[code],
+		)
+	}
 	if code >= 48 do return 0xFF
 	return u32(
 		decoder.macroblocks[macroblock_index].is_intra ? h264.intra4x4_cbp_table[code] : h264.inter_cbp_table[code],
@@ -1035,12 +1290,13 @@ read_qp_delta :: proc(decoder: ^Slice_Decoder, prev_delta_nz: bool) -> i32 {
 read_residual_block :: proc(
 	decoder: ^Slice_Decoder,
 	macroblock_index: int,
-	$cat: Block_Cat,
+	$cat: h264.Block_Cat,
 	block: int,
 	levels: []$L,
 	max_coeffs: int,
+	plane_444 := 0,
 ) -> int {
 	for &level in levels do level = 0
-	if decoder.cabac do return cabac_read_residual_block(decoder, macroblock_index, cat, block, levels, max_coeffs)
-	return cavlc_read_residual_block(decoder, macroblock_index, cat, block, levels, max_coeffs)
+	if decoder.cabac do return cabac_read_residual_block(decoder, macroblock_index, cat, block, levels, max_coeffs, plane_444)
+	return cavlc_read_residual_block(decoder, macroblock_index, cat, block, levels, max_coeffs, plane_444)
 }

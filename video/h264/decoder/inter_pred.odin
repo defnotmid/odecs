@@ -167,12 +167,14 @@ predict_inter_block :: proc(
 		}
 		return
 	}
-	// Chroma blocks are half the luma width, and half its height in 4:2:0.
-	chroma_height := decoder.chroma_422 ? height * 4 : height * 2
+	// Chroma blocks are half the luma width (full width in 4:4:4), and half its height in 4:2:0.
+	chroma_width := decoder.chroma_444 ? width * 4 : width * 2
+	chroma_height := (decoder.chroma_422 || decoder.chroma_444) ? height * 4 : height * 2
+	chroma_stride := decoder.chroma_444 ? 16 : 8
 	// Uninitialized: every sample read is predicted first, or zeroed for a
 	// missing reference.
 	luma_pred: [2][16 * 16]T = ---
-	chroma_pred: [2][2][8 * 16]T = ---
+	chroma_pred: [2][2][16 * 16]T = ---
 	for list in 0 ..< 2 {
 		if dir & (list == 0 ? h264.Prediction_Direction.List_0 : .List_1) == .None do continue
 		pic := reference(state, list, ref[list])
@@ -183,7 +185,7 @@ predict_inter_block :: proc(
 				luma          = &luma_pred[list][0],
 				chroma        = {&chroma_pred[list][0][0], &chroma_pred[list][1][0]},
 				luma_stride   = 16,
-				chroma_stride = 8,
+				chroma_stride = chroma_stride,
 			}
 			mv := macroblock.motion_vectors[list][block]
 			h264.motion_compensate(&pic.buf, x_pos, y_pos, width * 4, height * 4, mv, &pred, pixel_max)
@@ -202,20 +204,22 @@ predict_inter_block :: proc(
 		weighted,
 		pixel_max,
 	)
-	for p in 0 ..< 2 {
-		write_prediction(
-			target.chroma[p],
-			target.chroma_stride,
-			&chroma_pred[0][p][0],
-			&chroma_pred[1][p][0],
-			8,
-			width * 2,
-			chroma_height,
-			dir,
-			weights[1 + p],
-			weighted,
-			pixel_max,
-		)
+	if !decoder.monochrome {
+		for p in 0 ..< 2 {
+			write_prediction(
+				target.chroma[p],
+				target.chroma_stride,
+				&chroma_pred[0][p][0],
+				&chroma_pred[1][p][0],
+				chroma_stride,
+				chroma_width,
+				chroma_height,
+				dir,
+				weights[1 + p],
+				weighted,
+				pixel_max,
+			)
+		}
 	}
 }
 

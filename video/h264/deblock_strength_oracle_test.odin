@@ -9,7 +9,7 @@ import "core:testing"
 Deblock_Facts_Oracle :: struct {
 	intra, transform8: bool,
 	group_coded:       [4]bool,
-	counts:            [32]u8,
+	counts:            [48]u8,
 	directions:        [4]Prediction_Direction,
 	pictures:          [2][4]i32,
 	motion:            [2][16][2]i16,

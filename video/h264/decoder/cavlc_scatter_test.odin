@@ -65,7 +65,7 @@ check_category :: proc(
 	bytes: []u8,
 	offset: int,
 	nc: i8,
-	$cat: Block_Cat,
+	$cat: h264.Block_Cat,
 ) {
 	max_coeffs := cat == .Chroma_DC ? 4 : cat == .Chroma_AC || cat == .Luma_AC ? 15 : 16
 	actual, expected: [18]i16
@@ -99,7 +99,7 @@ check_category :: proc(
 	testing.expect_value(t, actual, expected)
 	cavlc_expect_reader(t, &new_reader, &old_reader)
 	// CAVLC codes 8x8 transform blocks as four 4x4 blocks.
-	when cat < .Chroma_AC do check_category(t, macroblocks, bytes, offset, nc, Block_Cat(int(cat) + 1))
+	when cat < .Chroma_AC do check_category(t, macroblocks, bytes, offset, nc, h264.Block_Cat(int(cat) + 1))
 }
 
 @(test)

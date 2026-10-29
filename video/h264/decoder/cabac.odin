@@ -9,24 +9,13 @@ import common "../../../common"
 // ---------------------------------------------------------------------------
 
 // Initialise all context variables for a slice (9.3.1.1).
-cabac_init_contexts :: proc(
+cabac_init_contexts :: #force_inline proc(
 	engine: ^Cabac_Engine,
 	slice_type: h264.Slice_Type,
 	cabac_init_idc: u32,
 	slice_qp: i32,
 ) {
-	kind := slice_type == .I || slice_type == .SI ? 0 : int(cabac_init_idc) + 1
-	qp := clamp(slice_qp, 0, 51)
-	for ctx in 0 ..< CABAC_CONTEXT_COUNT {
-		m := i32(cabac_context_init[ctx][kind][0])
-		n := i32(cabac_context_init[ctx][kind][1])
-		pre := clamp(((m * qp) >> 4) + n, 1, 126)
-		if pre <= 63 {
-			engine.ctx[ctx] = u8((63 - pre) << 1)
-		} else {
-			engine.ctx[ctx] = u8((pre - 64) << 1 | 1)
-		}
-	}
+	h264.cabac_init_contexts(&engine.ctx, slice_type, cabac_init_idc, slice_qp)
 }
 
 // Initialise the decoding engine (common's, shared with HEVC) at the reader's

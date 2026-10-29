@@ -28,6 +28,8 @@ Encoder_Config :: struct {
 	matrix_coefficients: u8,
 	full_range:          bool,
 	ultrafast:           bool, // prefer speed over size: one reference, 16x16 motion, earlier inter decisions
+	cabac:               bool, // CABAC entropy coding (Main/High profile) instead of CAVLC
+	transform_8x8:       bool, // 8x8 luma transform and I_8x8 modes (High profile)
 }
 
 // A reconstructed picture used as reference
@@ -89,6 +91,7 @@ Encoder_Phase :: enum {
 
 Encoder_Frame :: struct {
 	quantizers:      [2][2]Quantizer_4x4, // luma/chroma, inter/intra; immutable during slice coding
+	quantizers_8x8:  [2]Quantizer_8x8, // luma inter/intra 8x8; immutable during slice coding
 	phase:           Encoder_Phase,
 	generation:      u64,
 	is_idr:          bool,
@@ -133,6 +136,7 @@ Slice_Task :: struct {
 	rbsp:              [dynamic]u8,
 	nal:               [dynamic]u8, // Annex B NAL of this slice
 	writer:            h264.Bit_Writer,
+	cabac:             Cabac_State,
 	next_macroblock:   int,
 	work_limit:        int,
 	skip_run:          int,

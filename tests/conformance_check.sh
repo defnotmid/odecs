@@ -14,7 +14,7 @@ W=${WORK:-.work/conformance-check}
 MODE=${MODE:-hardware}
 HEVC=${HEVC:-.work/hevc-conformance}
 mkdir -p "$W"
-odin build tests/decode_media.odin -file -o:speed -out:"$W/decode"
+odin build tests/decode_media.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$W/decode"
 exact=0 refused=0 damaged=0 limits=0 failed=0
 
 # Streams with pictures lost on purpose. How a decoder conceals the loss is not

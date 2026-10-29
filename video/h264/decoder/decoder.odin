@@ -210,6 +210,8 @@ decode_nal :: proc(state: ^Decoder_State, nal_bytes: []u8) -> (frame_ready: bool
 			bit_depth = 8 + int(sequence_parameters.luma_bit_depth_minus_8),
 			qp_bd_offset = 6 * i32(sequence_parameters.luma_bit_depth_minus_8),
 			chroma_422 = sequence_parameters.chroma_format == .YUV_422,
+			chroma_444 = sequence_parameters.chroma_format == .YUV_444,
+			monochrome = sequence_parameters.chroma_format == .Monochrome,
 		}
 		slice_err := decode_slice_data(&slice_decoder)
 

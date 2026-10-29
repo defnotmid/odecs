@@ -10,10 +10,10 @@ platforms, so it can be listed everywhere.
 
 | Operation | Native provider | Vulkan provider | VideoToolbox provider |
 | --- | --- | --- | --- |
-| H.264 encode | Progressive 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
-| H.264 decode | Supported progressive tools; 4:2:0 or 4:2:2, 8 to 10 bits (High 10, High 4:2:2) | Baseline/Main/High, progressive 8-bit 4:2:0 | Baseline/Main/High, progressive 8-bit 4:2:0, host output |
-| HEVC encode | 8/10-bit, 4:2:0/4:2:2/4:4:4/mono, periodic IDR/P | Main/Main10, 8/10-bit 4:2:0, periodic IDR/P | Main, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
-| HEVC decode | Implemented Main/Main10 and RExt tools | Main/Main10 4:2:0, 8/10-bit | Main/Main10 4:2:0, 8/10-bit, host output |
+| H.264 encode | `ODECS_PATENTED` builds: progressive 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P | High, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
+| H.264 decode | `ODECS_PATENTED` builds: supported progressive tools; 4:0:0, 4:2:0, 4:2:2 or 4:4:4, 8 to 10 bits, lossless | Baseline/Main/High, progressive 8-bit 4:2:0 | Baseline/Main/High, progressive 8-bit 4:2:0, host output |
+| HEVC encode | `ODECS_PATENTED` builds: 8/10-bit, 4:2:0/4:2:2/4:4:4/mono, periodic IDR/P | Main/Main10, 8/10-bit 4:2:0, periodic IDR/P | Main, 8-bit 4:2:0, constant QP, periodic IDR/P (I420 or NV12) |
+| HEVC decode | `ODECS_PATENTED` builds: implemented Main/Main10 and RExt tools | Main/Main10 4:2:0, 8/10-bit | Main/Main10 4:2:0, 8/10-bit, host output |
 | AAC encode/decode | AAC-LC, 1..8 channels, 960/1024 samples, standard 7350..96000-Hz rates | Unsupported; selects native in Automatic mode | Unsupported |
 | ProRes decode | 422 Proxy/LT/Standard/HQ (10-bit), 4444/XQ (12-bit) with alpha, interlaced | Unsupported | Unsupported |
 | VP9 decode | Profiles 0–3, 8/10/12-bit, 4:2:0/4:2:2/4:4:4/sRGB, alpha stream | Unsupported | Unsupported |
@@ -26,6 +26,16 @@ platforms, so it can be listed everywhere.
 Hardware capabilities depend on the actual device, driver, dimensions, profile,
 bit depth, formats and queue operations. Driver support is separate from
 implemented Annex-B support. Vulkan Video has no AAC codec operation.
+
+Native H.264 and HEVC, decoding and encoding, are compiled in only with
+`-define:ODECS_PATENTED=true` (`ODECS_NATIVE_H264` or `ODECS_NATIVE_H265` for
+one of them); `odin test` turns it on. Both formats are licensed by patent
+pools, so a default build leaves their software codecs out: the native provider
+refuses H.264 and HEVC as `Unsupported`, they go through VideoToolbox or Vulkan
+Video, and only the header parsing and reference bookkeeping those providers
+use is linked. Without a hardware provider (Windows, Linux without Vulkan
+Video) there is no H.264 or HEVC, and HEVC with an alpha layer (decoding and
+encoding) and RExt formats need the native codecs on every platform.
 
 ```odin
 import media "../media"
@@ -57,7 +67,8 @@ HEVC's advanced API keeps its existing unbounded low-delay behavior when
 Fallback happens at initialization. For video decoding, supply indexed source
 width, height, chroma and bit depth; native also accepts unspecified dimensions.
 Optional `profile_idc` is source metadata for hardware admission (AVC 66/77/100;
-HEVC 1/2, or 4 for RExt). A known RExt source selects native before stream input.
+HEVC 1/2, or 4 for RExt). A known RExt source selects native before stream input
+(refused without `ODECS_PATENTED`).
 Unknown SPS tools, DPB requirements, reordering or resource changes can still
 produce a typed refusal when parsed. A stream failure requires a new session
 and replay from a random-access point; the API never switches codec history
@@ -186,7 +197,7 @@ by the packet's `sample_index` when `sample_rate` is set, else by the frame
 header. `is_audio` tells AAC, FLAC and MP3 from the video codecs.
 HEVC with an auxiliary alpha layer (H.265 Annex F: a second layer whose
 VPS extension gives it AuxId 1, as Apple's "HEVC with alpha" and x265
-`--alpha` write) decodes natively: the VPS starts a second decoder for that
+`--alpha` write) decodes natively (`ODECS_PATENTED` builds): the VPS starts a second decoder for that
 layer, each decoder ignores the other layer's NAL units, and each base
 picture is delivered with the alpha picture of the same POC as
 `Video_Frame.alpha`. Other second layers (MV-HEVC's second view) are
@@ -269,7 +280,7 @@ Validation:
 odin test media -o:speed
 odin test media/native -o:speed
 odin test media/vulkan -o:speed
-odin build tests/media_gpu.odin -file -o:speed -out:/tmp/odecs-media-gpu
+odin build tests/media_gpu.odin -file -o:speed -define:ODECS_PATENTED=true -out:/tmp/odecs-media-gpu
 /tmp/odecs-media-gpu --hardware /tmp/odecs-media h264 8 15 37
 ffmpeg -v error -i /tmp/odecs-media.264 -f rawvideo -pix_fmt yuv420p -y /tmp/odecs-media-reference.yuv
 cmp /tmp/odecs-media.yuv /tmp/odecs-media-reference.yuv

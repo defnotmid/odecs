@@ -189,10 +189,20 @@ level_for_size :: proc(macroblock_count: int) -> h264.Sequence_Level {
 
 write_sequence_parameter_set :: proc(state: ^Encoder_State, out: ^[dynamic]u8) {
 	writer := h264.init_bit_writer(&state.out_rbsp)
-	h264.write_bits(&writer, u32(h264.Sequence_Profile.Baseline), 8)
-	h264.write_bits(&writer, 0b1100_0000, 8) // constraint_set0 and set1: Constrained Baseline
+	profile :=
+		state.config.transform_8x8 ? h264.Sequence_Profile.High : state.config.cabac ? h264.Sequence_Profile.Main : h264.Sequence_Profile.Baseline
+	constraints: u32 = profile == .Baseline ? 0b1100_0000 : profile == .Main ? 0b0100_0000 : 0
+	h264.write_bits(&writer, u32(profile), 8)
+	h264.write_bits(&writer, constraints, 8)
 	h264.write_bits(&writer, u32(level_for_rate(state.macroblock_count, state.config.fps)), 8)
 	h264.write_unsigned_exp_golomb(&writer, 0) // seq_parameter_set_id
+	if profile == .High {
+		h264.write_unsigned_exp_golomb(&writer, u32(h264.Chroma_Format.YUV_420))
+		h264.write_unsigned_exp_golomb(&writer, 0) // bit_depth_luma_minus8
+		h264.write_unsigned_exp_golomb(&writer, 0) // bit_depth_chroma_minus8
+		h264.write_bits(&writer, 0, 1) // qpprime_y_zero_transform_bypass_flag
+		h264.write_bits(&writer, 0, 1) // seq_scaling_matrix_present_flag
+	}
 	h264.write_unsigned_exp_golomb(&writer, 4) // log2_max_frame_num_minus4: 8-bit frame_num
 	h264.write_unsigned_exp_golomb(&writer, u32(h264.Picture_Order_Mode.Frame_Number))
 	h264.write_unsigned_exp_golomb(&writer, u32(state.config.num_ref_frames))
@@ -246,7 +256,7 @@ write_picture_parameter_set :: proc(state: ^Encoder_State, out: ^[dynamic]u8) {
 	writer := h264.init_bit_writer(&state.out_rbsp)
 	h264.write_unsigned_exp_golomb(&writer, 0) // pic_parameter_set_id
 	h264.write_unsigned_exp_golomb(&writer, 0) // seq_parameter_set_id
-	h264.write_bits(&writer, 0, 1) // entropy_coding_mode_flag: CAVLC
+	h264.write_bits(&writer, state.config.cabac ? 1 : 0, 1) // entropy_coding_mode_flag
 	h264.write_bits(&writer, 0, 1) // bottom_field_pic_order_in_frame_present_flag
 	h264.write_unsigned_exp_golomb(&writer, 0) // num_slice_groups_minus1
 	h264.write_unsigned_exp_golomb(&writer, u32(state.config.num_ref_frames - 1)) // num_ref_idx_l0_default_active_minus1
@@ -259,6 +269,11 @@ write_picture_parameter_set :: proc(state: ^Encoder_State, out: ^[dynamic]u8) {
 	h264.write_bits(&writer, 1, 1) // deblocking_filter_control_present_flag
 	h264.write_bits(&writer, 0, 1) // constrained_intra_pred_flag
 	h264.write_bits(&writer, 0, 1) // redundant_pic_cnt_present_flag
+	if state.config.transform_8x8 {
+		h264.write_bits(&writer, 1, 1) // transform_8x8_mode_flag
+		h264.write_bits(&writer, 0, 1) // pic_scaling_matrix_present_flag
+		h264.write_signed_exp_golomb(&writer, 0) // second_chroma_qp_index_offset
+	}
 	h264.flush_bits_rbsp(&writer)
 	h264.write_nal_annex_b(out, 3, 8, state.out_rbsp[:])
 }
@@ -281,11 +296,18 @@ write_slice_header :: proc(task: ^Slice_Task, writer: ^h264.Bit_Writer) {
 	} else {
 		h264.write_bits(writer, 0, 1) // adaptive_ref_pic_marking_mode_flag: sliding window
 	}
+	if state.config.cabac && !task.is_idr {
+		h264.write_unsigned_exp_golomb(writer, 0) // cabac_init_idc
+	}
 	h264.write_signed_exp_golomb(writer, task.quantizer - 26) // slice_qp_delta
 	h264.write_unsigned_exp_golomb(writer, state.config.disable_deblocking ? 1 : 0)
 	if !state.config.disable_deblocking {
 		h264.write_signed_exp_golomb(writer, 0)
 		h264.write_signed_exp_golomb(writer, 0)
+	}
+	if state.config.cabac {
+		for writer.nbits & 7 != 0 do h264.write_bits(writer, 1, 1) // cabac_alignment_one_bit
+		cabac_init_slice(task)
 	}
 }
 
@@ -474,6 +496,9 @@ begin_encode_frame :: proc(
 	chroma_qp := i32(h264.chroma_qp_table[qp])
 	for plane in 0 ..< 2 do for kind in 0 ..< 2 {
 		state.frame.quantizers[plane][kind] = prepare_quantizer_4x4(plane == 0 ? qp : chroma_qp, kind == 1)
+	}
+	if state.config.transform_8x8 {
+		for kind in 0 ..< 2 do state.frame.quantizers_8x8[kind] = prepare_quantizer_8x8(qp, kind == 1)
 	}
 	rows_per_slice := state.macroblock_rows / num_slices
 	extra_rows := state.macroblock_rows % num_slices

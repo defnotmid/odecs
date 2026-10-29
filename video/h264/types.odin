@@ -166,12 +166,16 @@ Sequence_Parameter_Set :: struct {
 	level:                              Sequence_Level,
 	sequence_parameter_set_id:          u32,
 	chroma_format:                      Chroma_Format,
+	separate_colour_plane_flag:         bool,
 	luma_bit_depth_minus_8:             u32,
 	chroma_bit_depth_minus_8:           u32,
 	bypass_transform_at_zero_quantizer: bool,
 	has_scaling_matrices:               bool,
 	scaling_list_4x4:                   [6][16]u8,
 	scaling_list_8x8:                   [2][64]u8,
+	chroma_scaling_list_8x8:            [4][64]u8,
+	has_chroma_scaling_list:            [4]bool,
+	use_default_chroma_scaling_list:    [4]bool,
 	frame_number_bits:                  u32,
 	picture_order_mode:                 Picture_Order_Mode,
 	picture_order_low_bits:             u32,
@@ -234,6 +238,9 @@ Picture_Parameter_Set :: struct {
 	scaling_list_8x8:                             [2][64]u8,
 	has_scaling_list:                             [8]bool,
 	use_default_scaling_list:                     [8]bool,
+	chroma_scaling_list_8x8:                      [4][64]u8,
+	has_chroma_scaling_list:                      [4]bool,
+	use_default_chroma_scaling_list:              [4]bool,
 	second_chroma_qp_index_offset:                i32,
 	redundant_pic_cnt:                            u32, // unused, slices with redundant_pic_cnt > 0 are dropped
 }
@@ -314,6 +321,8 @@ YUV_Buffer :: struct {
 	uv_stride:    int,
 	chroma_422:   bool,
 	high_depth:   bool,
+	chroma_444:   bool,
+	monochrome:   bool,
 	y:            [^]u8,
 	u:            [^]u8,
 	v:            [^]u8,
@@ -382,11 +391,13 @@ Macroblock :: struct {
 	reference_indices:          [2][4]i8,
 	reference_picture_ids:      [2][4]i32, // pic_id of the referenced picture, -1 if none
 	motion_vectors:             [2][16][2]i16,
-	motion_differences:         [2][16][2]u8, // |mvd| clipped, CABAC context of neighbours
-	nonzero_coefficient_counts: [32]u8, // non-zero coefficients per 4x4: 16 luma, then chroma_count_index
-	has_8x8_coefficients:       [4]bool, // 8x8 transform block has coefficients (deblocking)
-	has_dc_coefficients:        [3]bool, // coded_block_flag of the luma DC, Cb DC and Cr DC blocks
-	slice_index:                u16,
+	motion_differences:          [2][16][2]u8, // |mvd| clipped, CABAC context of neighbours
+	nonzero_coefficient_counts:  [48]u8, // non-zero coefficients per 4x4: 16 luma, then chroma_count_index
+	has_8x8_coefficients:        [4]bool, // 8x8 transform block has coefficients (deblocking)
+	chroma_has_8x8_coefficients: [2][4]bool, // 4:4:4 Cb/Cr 8x8 transform block has coefficients
+	has_dc_coefficients:         [3]bool, // coded_block_flag of the luma DC, Cb DC and Cr DC blocks
+	transform_bypass:            bool, // TransformBypassModeFlag (qpprime_y_zero_transform_bypass_flag && QP'_Y == 0)
+	slice_index:                 u16,
 	deblocking_mode:            Deblocking_Mode,
 	alpha_offset:               i8,
 	beta_offset:                i8,
@@ -407,5 +418,5 @@ Macroblock_Grid :: struct {
 // LevelScale tables (8.5.9): [list][qp % 6][raster position]
 Level_Scales :: struct {
 	scale_4x4: [6][6][16]i32,
-	scale_8x8: [2][6][64]i32,
+	scale_8x8: [6][6][64]i32,
 }

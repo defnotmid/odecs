@@ -38,8 +38,14 @@ expand_picture :: proc(buf: ^YUV_Buffer) {
 		y, u, v := buffer_planes(T, buf)
 		w, h := buf.coded_width, buf.coded_height
 		expand_plane(y, buf.y_stride, w, h, PADDING_LENGTH)
-		expand_plane(u, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
-		expand_plane(v, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
+		if buf.monochrome do return
+		if buf.chroma_444 {
+			expand_plane(u, buf.uv_stride, w, h, PADDING_LENGTH)
+			expand_plane(v, buf.uv_stride, w, h, PADDING_LENGTH)
+		} else {
+			expand_plane(u, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
+			expand_plane(v, buf.uv_stride, w / 2, chroma_rows(buf), PADDING_LENGTH / 2)
+		}
 	}
 	if buf.high_depth {expand(u16, buf)} else {expand(u8, buf)}
 }
@@ -612,7 +618,12 @@ Prediction_Target :: struct($T: typeid) {
 // The target at luma sample (x, y) of a picture buffer of T samples.
 prediction_target :: proc($T: typeid, buf: ^YUV_Buffer, x, y: int) -> Prediction_Target(T) {
 	luma, cb, cr := buffer_planes(T, buf)
-	c := (buf.chroma_422 ? y : y / 2) * buf.uv_stride + x / 2
+	if buf.monochrome {
+		return {&luma[y * buf.y_stride + x], {nil, nil}, buf.y_stride, 0}
+	}
+	cx := buf.chroma_444 ? x : x / 2
+	cy := (buf.chroma_422 || buf.chroma_444) ? y : y / 2
+	c := cy * buf.uv_stride + cx
 	return {&luma[y * buf.y_stride + x], {&cb[c], &cr[c]}, buf.y_stride, buf.uv_stride}
 }
 
@@ -641,6 +652,23 @@ motion_compensate :: proc(
 		mc_luma_lanes(8, luma_src, buf.y_stride, out.luma, out.luma_stride, luma_x, luma_y, height, pixel_max)
 	case:
 		mc_luma_lanes(4, luma_src, buf.y_stride, out.luma, out.luma_stride, luma_x, luma_y, height, pixel_max)
+	}
+	if buf.monochrome do return
+
+	if buf.chroma_444 {
+		planes := [2][^]T{cb, cr}
+		for p in 0 ..< 2 {
+			src: [^]T = &planes[p][ly * buf.uv_stride + lx]
+			switch width {
+			case 16:
+				mc_luma_lanes(16, src, buf.uv_stride, out.chroma[p], out.chroma_stride, luma_x, luma_y, height, pixel_max)
+			case 8:
+				mc_luma_lanes(8, src, buf.uv_stride, out.chroma[p], out.chroma_stride, luma_x, luma_y, height, pixel_max)
+			case:
+				mc_luma_lanes(4, src, buf.uv_stride, out.chroma[p], out.chroma_stride, luma_x, luma_y, height, pixel_max)
+			}
+		}
+		return
 	}
 
 	cpad :: PADDING_LENGTH / 2

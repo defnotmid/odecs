@@ -19,9 +19,9 @@ odin test container/webm
 odin test container/mp4
 odin test video -o:speed
 odin build tests/alpha_compare.odin -file -o:speed -out:"$work/alpha_compare"
-odin build tests/movie_alpha.odin -file -o:speed -out:"$work/movie_alpha"
-odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:"$work/alpha_fuzz"
-odin build tests/movie_planar.odin -file -o:speed -out:"$work/movie_planar"
+odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_alpha"
+odin build tests/alpha_fuzz.odin -file -o:speed -define:ODECS_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
+odin build tests/movie_planar.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_planar"
 bash tests/alpha_fixtures.sh "$work/fx" $large > /dev/null
 
 echo "== decoded planes against FFmpeg (ProRes colour within 1, VP9 and alpha exact)"

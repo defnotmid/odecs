@@ -120,7 +120,7 @@ build() {
 	c++ -std=c++17 -O3 tests/x264_benchmark.cpp $($pc --cflags --libs x264) -o "$BIN/x264"
 	# shellcheck disable=SC2046
 	c++ -std=c++17 -O3 tests/x265_benchmark.cpp $($pc --cflags --libs x265) -o "$BIN/x265"
-	odin_build() { odin build "$1" -file -o:speed -microarch:native "${@:2}"; }
+	odin_build() { odin build "$1" -file -o:speed -microarch:native -define:ODECS_PATENTED=true "${@:2}"; }
 	odin_build tests/decode_benchmark.odin -out:"$BIN/odecs_decode"
 	odin_build tests/benchmark.odin -out:"$BIN/odecs_h264"
 	odin_build tests/encode_timing_h265.odin -out:"$BIN/odecs_h265"
@@ -138,7 +138,7 @@ build() {
 	odin build tests/jpeg_compare.odin -file -o:speed -extra-linker-flags:"-L$prefix/lib" -out:"$BIN/jpeg_compare_default"
 	odin_build tests/vorbis_compare.odin -extra-linker-flags:"-L$prefix/lib" -out:"$BIN/vorbis_compare"
 	# The figures onimite sees: its builds are -o:speed for any x86-64.
-	odin build tests/movie_alpha.odin -file -o:speed -out:"$BIN/odecs_alpha"
+	odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$BIN/odecs_alpha"
 	for depth in 1 3; do
 		odin build tests/movie_decode_timing.odin -file -o:speed -define:ODECS_DECODE_DEPTH=$depth -out:"$BIN/gpu_decode$depth"
 		odin build tests/movie_encode_timing.odin -file -o:speed -define:ODECS_ENCODE_DEPTH=$depth -out:"$BIN/gpu_encode$depth"

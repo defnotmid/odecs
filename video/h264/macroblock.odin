@@ -63,3 +63,20 @@ sub_partitions :: proc(shape: Subpartition_Shape) -> []Partition {
 	}
 	return s8x8
 }
+
+// Store |mvd| per 4x4 block of a partition for CABAC mvd context derivation (9.3.3.1.1.7).
+store_mvd :: proc(
+	macroblock: #soa^#soa[]Macroblock,
+	list: int,
+	part: Partition,
+	motion_differences: [2]$I,
+) {
+	bx, by := subblock_to_xy(part.block)
+	value := [2]u8 {
+		u8(min(abs(int(motion_differences[0])), 255)),
+		u8(min(abs(int(motion_differences[1])), 255)),
+	}
+	for y in 0 ..< part.height do for x in 0 ..< part.width {
+		macroblock.motion_differences[list][xy_to_subblock(bx + x, by + y)] = value
+	}
+}

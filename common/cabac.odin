@@ -111,6 +111,172 @@ cabac_terminate :: proc "contextless" (c: ^Cabac_Cursor) -> u32 {
 	return 0
 }
 
+// ---------------------------------------------------------------------------
+// CABAC arithmetic encoding engine (H.264 9.3.4, HEVC 9.3.4.3), shared by
+// H.264 and HEVC encoders. Plain value state so RDO can copy/restore it.
+// ---------------------------------------------------------------------------
+
+Cabac_Enc :: struct {
+	stream:             ^Bit_Writer,
+	low:                u32,
+	range:              u32,
+	buffered_byte:      u32,
+	num_buffered_bytes: i32,
+	bits_left:          i32,
+}
+
+cabac_enc_start :: proc "contextless" (c: ^Cabac_Enc, stream: ^Bit_Writer = nil) {
+	c.stream = stream
+	c.low = 0
+	c.range = 510
+	c.bits_left = 23
+	c.num_buffered_bytes = 0
+	c.buffered_byte = 0xff
+}
+
+// Total output size in bits, including pending bits in buffered bytes and low.
+cabac_enc_rate :: #force_inline proc(c: ^Cabac_Enc) -> int {
+	written := c.stream != nil ? bits_written(c.stream) : 0
+	return written + int(c.num_buffered_bytes) * 8 + (32 - int(c.bits_left))
+}
+
+cabac_enc_write :: proc(c: ^Cabac_Enc) {
+	if c.stream == nil {
+		c.bits_left += 8
+		c.num_buffered_bytes += 1
+		return
+	}
+	lead_byte := c.low >> uint(24 - c.bits_left)
+	c.bits_left += 8
+	c.low &= 0xffff_ffff >> uint(c.bits_left)
+
+	if lead_byte == 0xff {
+		c.num_buffered_bytes += 1
+	} else {
+		if c.num_buffered_bytes > 0 {
+			carry := lead_byte >> 8
+			b := c.buffered_byte + carry
+			c.buffered_byte = lead_byte & 0xff
+			if c.stream != nil do append(c.stream.buf, u8(b))
+
+			b = (0xff + carry) & 0xff
+			for c.num_buffered_bytes > 1 {
+				if c.stream != nil do append(c.stream.buf, u8(b))
+				c.num_buffered_bytes -= 1
+			}
+		} else {
+			c.num_buffered_bytes = 1
+			c.buffered_byte = lead_byte
+		}
+	}
+}
+
+cabac_enc_decision :: #force_inline proc(c: ^Cabac_Enc, ctx: ^u8, bin: u32) #no_bounds_check {
+	st := ctx^
+	lps := u32(CABAC_LPS_RANGE[st][(c.range >> 6) & 3])
+	c.range -= lps
+	is_lps := (bin & 1) != u32(st & 1)
+	ctx^ = CABAC_NEXT[st][int(is_lps)]
+	if is_lps {
+		num_bits := u32(intrinsics.count_leading_zeros(lps)) - 23
+		c.low = (c.low + c.range) << num_bits
+		c.range = lps << num_bits
+		c.bits_left -= i32(num_bits)
+	} else {
+		if c.range >= 256 do return
+		c.low <<= 1
+		c.range <<= 1
+		c.bits_left -= 1
+	}
+	if c.bits_left < 12 do cabac_enc_write(c)
+}
+
+cabac_enc_bypass :: #force_inline proc(c: ^Cabac_Enc, bin: u32) {
+	c.low <<= 1
+	if bin != 0 do c.low += c.range
+	c.bits_left -= 1
+	if c.bits_left < 12 do cabac_enc_write(c)
+}
+
+cabac_enc_bypass_bins :: proc(c: ^Cabac_Enc, bins: u32, num_bins: int) {
+	n := num_bins
+	v := bins
+	for n > 8 {
+		n -= 8
+		pattern := v >> uint(n)
+		c.low = (c.low << 8) + c.range * pattern
+		v -= pattern << uint(n)
+		c.bits_left -= 8
+		if c.bits_left < 12 do cabac_enc_write(c)
+	}
+	c.low = (c.low << uint(n)) + c.range * v
+	c.bits_left -= i32(n)
+	if c.bits_left < 12 do cabac_enc_write(c)
+}
+
+cabac_enc_terminate :: proc(c: ^Cabac_Enc, bin: u32) {
+	c.range -= 2
+	if bin != 0 {
+		c.low += c.range
+		c.low <<= 7
+		c.range = 2 << 7
+		c.bits_left -= 7
+	} else if c.range >= 256 {
+		return
+	} else {
+		c.low <<= 1
+		c.range <<= 1
+		c.bits_left -= 1
+	}
+	if c.bits_left < 12 do cabac_enc_write(c)
+}
+
+// Flush the arithmetic coder into `c.stream` (including the final rbsp_stop_one_bit
+// when `stop_bit` is true: H.264 9.3.4.5 PutBit(1) at termination).
+cabac_enc_finish :: proc(c: ^Cabac_Enc, write_stop_bit := false) {
+	if c.low >> uint(32 - c.bits_left) != 0 {
+		if c.stream != nil do append(c.stream.buf, u8(c.buffered_byte + 1))
+		for c.num_buffered_bytes > 1 {
+			if c.stream != nil do append(c.stream.buf, 0)
+			c.num_buffered_bytes -= 1
+		}
+		c.low -= 1 << uint(32 - c.bits_left)
+	} else {
+		if c.num_buffered_bytes > 0 {
+			if c.stream != nil do append(c.stream.buf, u8(c.buffered_byte))
+		}
+		for c.num_buffered_bytes > 1 {
+			if c.stream != nil do append(c.stream.buf, 0xff)
+			c.num_buffered_bytes -= 1
+		}
+	}
+	bits := int(24 - c.bits_left)
+	if c.stream != nil {
+		write_bits(c.stream, c.low >> 8, bits)
+		if write_stop_bit do write_bits(c.stream, 1, 1)
+	}
+}
+
+// Exp-Golomb suffix of order k in bypass mode (UEGk with unary prefix already emitted).
+cabac_enc_exp_golomb :: proc(c: ^Cabac_Enc, symbol: u32, k: uint) -> u32 {
+	bins: u32
+	num_bins: int
+	k := k
+	s := symbol
+	for s >= (1 << k) {
+		bins = 2 * bins + 1
+		num_bins += 1
+		s -= 1 << k
+		k += 1
+	}
+	bins = 2 * bins
+	num_bins += 1
+	bins = (bins << k) | s
+	num_bins += int(k)
+	cabac_enc_bypass_bins(c, bins, num_bins)
+	return u32(num_bins)
+}
+
 // Context bytes index these directly: the LPS range per codIRange
 // quantization, and the next byte after an MPS or an LPS bin (valMPS flips
 // on an LPS at pStateIdx 0).
