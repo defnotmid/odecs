@@ -369,15 +369,15 @@ encode_frame_internal :: proc(e: ^Encoder, planes: [3][]u8, strides: [3]int, is_
 	}
 	// A failed append leaves the reference and frame counter untouched.
 	failed := e.header.failed
-	for t in e.tiles do failed ||= t.b.failed
+	for &t in e.tiles do failed ||= t.b.failed
 	if failed {e.probs = saved; return nil, false, .Out_Of_Memory}
 	clear(&e.packet)
 	if !build_uncompressed_header(e) {e.probs = saved; return nil, false, .Out_Of_Memory}
 	total := len(e.packet) + len(e.header.data)
-	for t in e.tiles do total += 4 + len(t.b.data)
+	for &t in e.tiles do total += 4 + len(t.b.data)
 	if reserve(&e.packet, total) != nil {e.probs = saved; return nil, false, .Out_Of_Memory}
 	append(&e.packet, ..e.header.data[:])
-	for t, i in e.tiles {
+	for &t, i in e.tiles {
 		if i + 1 < len(e.tiles) {
 			n := len(t.b.data)
 			for k := 3; k >= 0; k -= 1 do append(&e.packet, u8(n >> uint(k * 8)))
