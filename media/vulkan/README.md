@@ -6,6 +6,13 @@ only as optional test oracles. Use `media` for the
 common provider API; `provider()` here is the Vulkan provider, and the
 lower-level sessions in this package serve codec-specific callers.
 
+The loader is opened once and one `VkInstance` serves the process; neither is
+released, and devices and sessions come and go on it. Creating an instance per
+probe let a `vkCreateInstance` overlap another thread's
+`vkEnumerateInstanceExtensionProperties` (SDL creating its GPU device), which
+crashed inside the loader with NVIDIA's driver 615.78 installed. One instance
+leaves a single creation, at first use.
+
 The native codecs own bitstream syntax, POC, reference derivation and display
 order. The Vulkan frontends reuse those facts to build StdVideo descriptors and
 associate reference pictures with GPU DPB slots. Pixel reconstruction runs in

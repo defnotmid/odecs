@@ -3,6 +3,7 @@ package media_vulkan
 import "core:dynlib"
 import "core:reflect"
 import "core:strings"
+import "core:sync"
 import vk "vendor:vulkan"
 
 // Vulkan is loaded only when a hardware session/probe is requested. Importing
@@ -50,7 +51,6 @@ Capability :: struct {
 
 @(private)
 Instance_API :: struct {
-	DestroyInstance:                           vk.ProcDestroyInstance,
 	EnumeratePhysicalDevices:                  vk.ProcEnumeratePhysicalDevices,
 	GetPhysicalDeviceProperties:               vk.ProcGetPhysicalDeviceProperties,
 	GetPhysicalDeviceMemoryProperties:         vk.ProcGetPhysicalDeviceMemoryProperties,
@@ -66,7 +66,6 @@ Instance_API :: struct {
 
 @(private)
 Device :: struct {
-	loader:                        dynlib.Library,
 	get_instance_proc:             vk.ProcGetInstanceProcAddr,
 	instance:                      vk.Instance,
 	i:                             Instance_API,
@@ -82,19 +81,34 @@ Device :: struct {
 	memory:                        vk.PhysicalDeviceMemoryProperties,
 }
 
+// One Vulkan instance serves the process: the loader is opened once, the
+// instance created once, and neither is released. With the Khronos loader
+// (1.4.363), a vkCreateInstance on one thread while another thread was in
+// vkEnumerateInstanceExtensionProperties (SDL creating its GPU device) made
+// the loader call a null driver entry; each probe used to create and destroy
+// its own instance.
 @(private)
-load_instance :: proc(d: ^Device) -> (err: Error) {
-	path: string
-	when ODIN_OS == .Linux {path = "libvulkan.so.1"} else when ODIN_OS == .Windows {path = "vulkan-1.dll"} else {return .Unsupported}
-	lib, loaded := dynlib.load_library(path)
-	if !loaded do return .Loader_Unavailable
-	d.loader = lib
-	defer if err != .None do destroy_device(d)
+Shared_Instance :: struct {
+	once:              sync.Once,
+	err:               Error,
+	get_instance_proc: vk.ProcGetInstanceProcAddr,
+	instance:          vk.Instance,
+	i:                 Instance_API,
+}
+@(private)
+shared_instance: Shared_Instance
+
+@(private)
+create_shared_instance :: proc() {
+	s := &shared_instance
+	s.err = .Loader_Unavailable
+	lib, loaded := dynlib.load_library(ODIN_OS == .Windows ? "vulkan-1.dll" : "libvulkan.so.1")
+	if !loaded do return
 	address, found := dynlib.symbol_address(lib, "vkGetInstanceProcAddr")
-	if !found do return .Loader_Unavailable
-	d.get_instance_proc = cast(vk.ProcGetInstanceProcAddr)address
-	create := cast(vk.ProcCreateInstance)d.get_instance_proc(nil, "vkCreateInstance")
-	if create == nil do return .Loader_Unavailable
+	if !found do return
+	s.get_instance_proc = cast(vk.ProcGetInstanceProcAddr)address
+	create := cast(vk.ProcCreateInstance)s.get_instance_proc(nil, "vkCreateInstance")
+	if create == nil do return
 	app := vk.ApplicationInfo {
 		sType            = .APPLICATION_INFO,
 		pApplicationName = "odecs hardware video",
@@ -104,17 +118,29 @@ load_instance :: proc(d: ^Device) -> (err: Error) {
 		sType            = .INSTANCE_CREATE_INFO,
 		pApplicationInfo = &app,
 	}
-	if create(&info, nil, &d.instance) != .SUCCESS do return .Driver_Error
+	s.err = .Driver_Error
+	if create(&info, nil, &s.instance) != .SUCCESS do return
 	for field in reflect.struct_fields_zipped(Instance_API) {
 		name := strings.clone_to_cstring(
 			strings.concatenate({"vk", field.name}, context.temp_allocator),
 			context.temp_allocator,
 		)
-		(cast(^rawptr)(uintptr(&d.i) + field.offset))^ = rawptr(
-			d.get_instance_proc(d.instance, name),
+		(cast(^rawptr)(uintptr(&s.i) + field.offset))^ = rawptr(
+			s.get_instance_proc(s.instance, name),
 		)
 	}
-	if d.i.DestroyInstance == nil || d.i.EnumeratePhysicalDevices == nil do return .Driver_Error
+	if s.i.EnumeratePhysicalDevices == nil do return
+	s.err = .None
+}
+
+@(private)
+load_instance :: proc(d: ^Device) -> Error {
+	when ODIN_OS != .Linux && ODIN_OS != .Windows do return .Unsupported
+	sync.once_do(&shared_instance.once, create_shared_instance)
+	if shared_instance.err != .None do return shared_instance.err
+	d.get_instance_proc = shared_instance.get_instance_proc
+	d.instance = shared_instance.instance
+	d.i = shared_instance.i
 	return .None
 }
 
@@ -129,8 +155,6 @@ destroy_device :: proc(d: ^Device) {
 		d.a.DeviceWaitIdle(d.handle)
 		d.a.DestroyDevice(d.handle, nil)
 	}
-	if d.instance != nil && d.i.DestroyInstance != nil do d.i.DestroyInstance(d.instance, nil)
-	if d.loader != nil do dynlib.unload_library(d.loader)
 	d^ = {}
 }
 
