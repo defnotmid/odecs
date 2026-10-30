@@ -46,6 +46,7 @@ Putting them together:
 - `media/videotoolbox`: the VideoToolbox provider, H.264 and HEVC hardware decoding and encoding on macOS ([README](media/videotoolbox/README.md)).
 - `media/avcodec`: the runtime-loaded `libavcodec` system provider for H.264 and H.265 ([README](media/avcodec/README.md)).
 - `media/mediafoundation`: the Windows Media Foundation system provider, H.264 and H.265 decoding and H.264 encoding through the transforms Windows ships ([README](media/mediafoundation/README.md)).
+- `media/audiotoolbox`: the macOS AudioToolbox system provider, AAC-LC, HE-AAC and HE-AAC v2 decoding and AAC-LC encoding ([README](media/audiotoolbox/README.md)).
 - `audio`: any file's first audio track (AAC, PCM, FLAC, MP3, Opus, ALAC, Vorbis in MP4, Matroska, WAV, FLAC, MP3 or Ogg) as interleaved `f32` in WAVE channel order, with seeking; `decode` for a file in memory ([README](audio/README.md)).
 - `video`: RGBA or planar frames and `f32` PCM from and to movie files (its audio through `audio`), with frame-accurate seeking; writes MP4/M4A (H.264, H.265, HEVC with alpha, AAC-LC) and WebM (VP9, with alpha) ([README](video/README.md)).
 - `viewer`: an SDL3 player for all of the above.

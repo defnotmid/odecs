@@ -31,6 +31,7 @@ Backend :: enum {
 	VideoToolbox,
 	AVCodec,
 	MediaFoundation,
+	AudioToolbox,
 }
 // Automatic tries the tiers in this order: hardware, then odecs' own codecs,
 // then a system library (libavcodec) for what neither has.
@@ -44,7 +45,7 @@ provider_tier :: proc(backend: Backend) -> Tier {
 	switch backend {
 	case .Vulkan, .VideoToolbox:
 		return .Hardware
-	case .AVCodec, .MediaFoundation:
+	case .AVCodec, .MediaFoundation, .AudioToolbox:
 		return .System
 	case .Native:
 		return .Native

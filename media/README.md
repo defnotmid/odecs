@@ -1,8 +1,8 @@
 # Common codec API
 
 `media` owns provider selection, streaming calls, borrowing and drain state.
-The `native`, `vulkan`, `videotoolbox`, `mediafoundation` and `avcodec` child
-packages are explicit providers.
+The `native`, `vulkan`, `videotoolbox`, `mediafoundation`, `audiotoolbox` and
+`avcodec` child packages are explicit providers.
 They use our own Odin codecs, Odin's `vendor:vulkan` bindings (Vulkan is loaded
 with `core:dynlib` at runtime), and Apple's VideoToolbox through
 [`videotoolbox`](videotoolbox/README.md); no external codec library is
@@ -59,11 +59,11 @@ err = media.drain(&session, {packet=write_packet,user=&output})
 
 `Automatic` tries implemented hardware providers (`Tier.Hardware`: `Vulkan`,
 `VideoToolbox`), then native ones (`Tier.Native`), then system providers
-(`Tier.System`: `MediaFoundation` on Windows, then `AVCodec`, both loaded at
-runtime with `core:dynlib`; see [`mediafoundation`](mediafoundation/README.md)
-and [`avcodec`](avcodec/README.md)) for what neither admits, regardless of array
-order. `Require_Hardware` returns an error
-when hardware admission fails and never accepts a software system codec;
+(`Tier.System`: `MediaFoundation` on Windows and `AudioToolbox` on macOS, then
+`AVCodec`; see [`mediafoundation`](mediafoundation/README.md),
+[`audiotoolbox`](audiotoolbox/README.md) and [`avcodec`](avcodec/README.md)) for
+what neither admits, regardless of array order. `Require_Hardware` returns an
+error when hardware admission fails and never accepts a software system codec;
 `Native` bypasses hardware and system providers. VideoToolbox counts as
 hardware here: in `Automatic` it may use Apple's software codecs, under
 `Require_Hardware` only the hardware ones. In automatic mode `hardware_error`
