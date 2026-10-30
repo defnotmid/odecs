@@ -11,8 +11,8 @@ when hardware is absent), Vulkan Video on Linux and Windows. Encoding
 likewise uses VideoToolbox on macOS and Vulkan Video on Linux and Windows, and the
 native codecs elsewhere (and for alpha and VP9). Native H.264 and H.265 are
 built only with `-define:ODECS_PATENTED=true` ([media](../media/README.md));
-without it they go through VideoToolbox, Vulkan Video or runtime-loaded
-`libavcodec`, and an H.265 file with an auxiliary alpha layer decodes its base
+without it they go through VideoToolbox, Vulkan Video, Media Foundation (Windows)
+or runtime-loaded `libavcodec`, and an H.265 file with an auxiliary alpha layer decodes its base
 colour layer opaquely.
 
 ## Writing

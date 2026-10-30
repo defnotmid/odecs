@@ -11,6 +11,7 @@ import avcd "./h264/decoder"
 import hevcd "./h265/decoder"
 import media "../media"
 import avcodec "../media/avcodec"
+import mediafoundation "../media/mediafoundation"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
@@ -542,9 +543,9 @@ video_config :: proc(r: ^Reader) -> media.Config {
 // The video decoders in admission order. VideoToolbox reports itself
 // unavailable off Apple platforms, Vulkan Video on them.
 @(private)
-video_providers :: proc(r: ^Reader) -> [4]media.Provider {
+video_providers :: proc(r: ^Reader) -> [5]media.Provider {
 	shared := r.config.gpu_context != nil ? r.config.gpu_context : r.own_context
-	return {native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared), avcodec.provider()}
+	return {native.provider(r.config.native_options), videotoolbox.provider(), vulkan.provider(shared), mediafoundation.provider(), avcodec.provider()}
 }
 
 @(private)

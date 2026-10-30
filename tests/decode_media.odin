@@ -2,6 +2,7 @@ package main
 
 import media "../media"
 import avcodec "../media/avcodec"
+import mediafoundation "../media/mediafoundation"
 import native "../media/native"
 import videotoolbox "../media/videotoolbox"
 import vulkan "../media/vulkan"
@@ -15,8 +16,9 @@ import "core:time"
 //
 // Decodes an Annex B stream through media, one NAL unit per packet,
 // with VideoToolbox or Vulkan Video (where available), the native decoder,
-// or (system) the system's libavcodec alone, and writes the visible 4:2:0 frames in display order: yuv420p, or
-// yuv420p10le above 8 bits ("-" only counts them, to time decoding alone).
+// or (system) the system codecs alone (Media Foundation, libavcodec), and
+// writes the visible 4:2:0 frames in display order: yuv420p, or yuv420p10le
+// above 8 bits ("-" only counts them, to time decoding alone).
 // WxH and depth=N (8 by default) describe the stream as a container would;
 // Vulkan Video admits a stream only with them.
 main :: proc() {
@@ -77,7 +79,7 @@ main :: proc() {
 
 	session: media.Session
 	providers := []media.Provider{videotoolbox.provider(), vulkan.provider(), native.provider()}
-	if system do providers = []media.Provider{avcodec.provider()}
+	if system do providers = []media.Provider{mediafoundation.provider(), avcodec.provider()}
 	if e := media.open(&session, config, providers); e != .None {fmt.eprintln("open:", e); os.exit(1)}
 	defer media.close(&session)
 	start := time.tick_now()
