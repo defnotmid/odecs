@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Vorbis gate: odin test audio/vorbis, every fixture (tests/vorbis_fixtures.sh)
-# through odecs/audio against libvorbis (tests/vorbis_compare.odin: the same
+# through oicut/audio against libvorbis (tests/vorbis_compare.odin: the same
 # frame count, SNR at least 90 dB), and a fuzz pass. libvorbis and libogg are
 # built from the pinned sources (tools/fetch_third_party.sh libvorbis libogg)
 # into .work/vorbis-oracle. Development only.

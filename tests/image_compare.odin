@@ -1,7 +1,7 @@
-// Decodes image files with odecs/image and with stb_image (the development
+// Decodes image files with oicut/image and with stb_image (the development
 // oracle, through Odin's vendor:stb/image) and compares the RGBA8 results:
 // identical for the lossless formats, PSNR for JPEG (IDCT rounding may
-// differ); Radiance HDR as f32 against stbi_loadf, identical bits. Also reports the best of five decode times and odecs' peak
+// differ); Radiance HDR as f32 against stbi_loadf, identical bits. Also reports the best of five decode times and oicut's peak
 // allocation.
 //   odin run tests/image_compare.odin -file -o:speed -- file...
 package image_compare
@@ -37,11 +37,11 @@ main :: proc() {
 			fmt.printfln("%-26s both refuse (%v)", name, ierr)
 			continue
 		case ref == nil:
-			fmt.printfln("%-26s stb refuses, odecs decodes %dx%d", name, img.width, img.height)
+			fmt.printfln("%-26s stb refuses, oicut decodes %dx%d", name, img.width, img.height)
 			image.destroy_image(&img, mem.tracking_allocator(&track))
 			continue
 		case ierr != .None:
-			fmt.printfln("%-26s FAIL odecs %v, stb decodes %dx%d", name, ierr, w, h)
+			fmt.printfln("%-26s FAIL oicut %v, stb decodes %dx%d", name, ierr, w, h)
 			stbi.image_free(ref)
 			failed += 1
 			continue
@@ -61,7 +61,7 @@ main :: proc() {
 			if psnr < worst_psnr do worst_psnr, worst_file = psnr, name
 			verdict = fmt.tprintf("%s PSNR %.2f dB", ok ? "ok  " : "FAIL", psnr)
 		} else {
-			// stb fills a GIF's background with red and blue swapped; odecs
+			// stb fills a GIF's background with red and blue swapped; oicut
 			// writes the table's colour (gif.decode).
 			gif_file := image.format_of(data) == .GIF
 			swapped := 0
@@ -120,10 +120,10 @@ compare_hdr :: proc(name: string, data: []u8) -> bool {
 		fmt.printfln("%-26s both refuse (%v)", name, err)
 		return true
 	case ref == nil:
-		fmt.printfln("%-26s stb refuses, odecs decodes %dx%d", name, i.width, i.height)
+		fmt.printfln("%-26s stb refuses, oicut decodes %dx%d", name, i.width, i.height)
 		return true
 	case err != .None:
-		fmt.printfln("%-26s FAIL odecs %v, stb decodes %dx%d", name, err, w, h)
+		fmt.printfln("%-26s FAIL oicut %v, stb decodes %dx%d", name, err, w, h)
 		return false
 	case i.width != int(w) || i.height != int(h):
 		fmt.printfln("%-26s FAIL size %dx%d, stb %dx%d", name, i.width, i.height, w, h)

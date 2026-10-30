@@ -3,8 +3,8 @@
 // FFmpeg's decoded alpha plane, random frame_at seeks against the sequential
 // frames, seek latency, and PCM against FFmpeg's f32 decode.
 //
-//   odin build tests/movie_alpha.odin -file -o:speed -out:/tmp/odecs-movie-alpha
-//   /tmp/odecs-movie-alpha FILE [ORACLE.yuv|-] [THREADS] [PCM.f32]
+//   odin build tests/movie_alpha.odin -file -o:speed -out:/tmp/oicut-movie-alpha
+//   /tmp/oicut-movie-alpha FILE [ORACLE.yuv|-] [THREADS] [PCM.f32]
 //
 // The oracle is FFmpeg's planar decode (tests/alpha_fixtures.sh writes
 // NAME.yuv and NAME.fmt); without one only consistency is checked.

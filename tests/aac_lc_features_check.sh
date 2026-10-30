@@ -2,7 +2,7 @@
 # Decoder feature interoperability only. This script never builds binaries or
 # generates fixtures. Run the feature-export unit suite serially beforehand:
 #   mkdir -p .work/aac-lc-complete/features
-#   odin test audio/aac/decoder -define:ODECS_AAC_FEATURE_EXPORT=true ...
+#   odin test audio/aac/decoder -define:OICUT_AAC_FEATURE_EXPORT=true ...
 # Then supply prepared native binaries:
 #   AAC_DECODE_BIN=/absolute/path/decode-aac \
 #   AUDIO_COMPARE_BIN=/absolute/path/audio-compare \

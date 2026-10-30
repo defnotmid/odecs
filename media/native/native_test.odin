@@ -176,7 +176,7 @@ test_video_round_trip_matches_reconstruction :: proc(t: ^testing.T) {
 		reconstructed: [dynamic]u8
 		defer {delete(packets.data); delete(packets.ranges); delete(reconstructed)}
 		encoder: media.Session
-		enabled := (cfg.codec == .H264 && ODECS_NATIVE_H264) || (cfg.codec == .H265 && ODECS_NATIVE_H265)
+		enabled := (cfg.codec == .H264 && OICUT_NATIVE_H264) || (cfg.codec == .H265 && OICUT_NATIVE_H265)
 		testing.expect_value(
 			t,
 			media.open(&encoder, cfg, []media.Provider{provider()}),
@@ -344,7 +344,7 @@ must_not_probe :: proc(config: media.Config, user: rawptr) -> media.Error {panic
 
 @(test)
 test_native_device_input_is_rejected_before_consumption :: proc(t: ^testing.T) {
-	cfg := media.default_config(ODECS_NATIVE_H264 ? .H264 : .VP9, .Encode)
+	cfg := media.default_config(OICUT_NATIVE_H264 ? .H264 : .VP9, .Encode)
 	cfg.width, cfg.height, cfg.preference = 16, 16, .Native
 	session: media.Session
 	testing.expect_value(
@@ -365,7 +365,7 @@ test_native_device_input_is_rejected_before_consumption :: proc(t: ^testing.T) {
 		surface   = &dummy,
 	}
 	testing.expect_value(t, media.encode_video(&session, frame, {}), media.Error.Unsupported)
-	when ODECS_NATIVE_H264 {
+	when OICUT_NATIVE_H264 {
 		testing.expect(t, !session.failed && ((^State)(session.state)).avc_encoder.frames_coded == 0)
 	}
 	buffers: [3][1024]u8
@@ -374,7 +374,7 @@ test_native_device_input_is_rejected_before_consumption :: proc(t: ^testing.T) {
 		media.encode_video(&session, test_video_input(cfg, 0, &buffers), {}),
 		media.Error.None,
 	)
-	when ODECS_NATIVE_H264 {
+	when OICUT_NATIVE_H264 {
 		testing.expect(t, ((^State)(session.state)).avc_encoder.frames_coded == 1)
 	}
 }
@@ -393,7 +393,7 @@ test_selection_fallback_and_owned_allocator :: proc(t: ^testing.T) {
 			open = unavailable_open,
 		},
 	}
-	cfg := media.default_config(ODECS_NATIVE_H265 ? .H265 : .VP9, .Decode)
+	cfg := media.default_config(OICUT_NATIVE_H265 ? .H265 : .VP9, .Decode)
 	session: media.Session
 	cfg.preference = .Require_Hardware
 	testing.expect_value(
@@ -430,7 +430,7 @@ test_selection_fallback_and_owned_allocator :: proc(t: ^testing.T) {
 @(test)
 test_streaming_decode_is_bounded_and_malformed_input_stops :: proc(t: ^testing.T) {
 	for codec in ([]media.Codec{.H264, .H265}) {
-		if (codec == .H264 && !ODECS_NATIVE_H264) || (codec == .H265 && !ODECS_NATIVE_H265) do continue
+		if (codec == .H264 && !OICUT_NATIVE_H264) || (codec == .H265 && !OICUT_NATIVE_H265) do continue
 		cfg := media.default_config(codec, .Encode)
 		cfg.preference, cfg.width, cfg.height = .Native, 16, 16
 		encoder: media.Session

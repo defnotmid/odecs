@@ -8,7 +8,7 @@
 #   bash tests/mp3_check.sh [work-dir]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work=${1:-/tmp/odecs-mp3}
+work=${1:-/tmp/oicut-mp3}
 fx="$work/fx"
 vectors=third_party/minimp3/vectors
 mkdir -p "$fx"

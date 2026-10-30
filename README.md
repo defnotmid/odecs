@@ -1,12 +1,12 @@
-# odecs
+# oicut
 
-<img src="assets/logo.svg" width="128" alt="odecs: a pixel-art turntable">
+<img src="assets/logo.svg" width="128" alt="oicut: a punk pixel-art hedgehog">
 
 Native Odin media codecs and containers: video, audio and image decoding and
 encoding with no FFmpeg or other codec library at runtime. Hardware video
 coding goes through Vulkan Video on Linux and Windows and VideoToolbox on macOS, with the
 native codecs as the software path; native H.264 and H.265 are compiled in only
-with `-define:ODECS_PATENTED=true` ([media](media/README.md)). MIT licensed ([LICENSE](LICENSE)).
+with `-define:OICUT_PATENTED=true` ([media](media/README.md)). MIT licensed ([LICENSE](LICENSE)).
 
 ## Packages
 
@@ -63,15 +63,15 @@ threads of their own.
 
 ## Using it
 
-The packages import each other by relative path, so odecs can be vendored
+The packages import each other by relative path, so oicut can be vendored
 into a project or used as a collection:
 
 ```sh
-odin build . -collection:deps=path/to/parent-of-odecs
+odin build . -collection:deps=path/to/parent-of-oicut
 ```
 
 ```odin
-import video "deps:odecs/video"
+import video "deps:oicut/video"
 
 config := video.default_writer_config(1920, 1080, 30000, 1001)
 w: video.Writer
@@ -84,16 +84,16 @@ video.destroy(&w)
 Each package's README covers its API, limits and how it was verified.
 
 Requirements:
-- A recent Odin nightly; odecs is built and tested with `dev-2026-10`.
+- A recent Odin nightly; oicut is built and tested with `dev-2026-10`.
 - For hardware video, a Vulkan driver with Vulkan Video (loaded at runtime;
   without one the native codecs are used) or macOS VideoToolbox. Without
-  `-define:ODECS_PATENTED=true`, H.264 and H.265 have only these.
+  `-define:OICUT_PATENTED=true`, H.264 and H.265 have only these.
 - The viewer uses `vendor:sdl3`: `odin build viewer -o:speed && ./viewer.bin FILE`.
 - The SPIR-V for the compute shaders is committed; `shaders/build.sh`
   rebuilds it with `slangc`.
 
 Unit tests run with `odin test`, for example `odin test video/vp9/encoder`.
-The `tests/` scripts compare odecs with reference decoders and encoders
+The `tests/` scripts compare oicut with reference decoders and encoders
 (FFmpeg, libvpx, libwebp and others); they are development tools and need
 those binaries installed.
 
@@ -130,5 +130,5 @@ scripts are for development only.
 
 The [`demo/`](demo/README.md) is a script for
 [onimite](https://github.com/defnotmid/onimite), an Odin + Lua video
-framework built on odecs. It carries its own asset notices in
+framework built on oicut. It carries its own asset notices in
 `demo/LICENSES/` (SIL OFL fonts, an MIT avatar clip).

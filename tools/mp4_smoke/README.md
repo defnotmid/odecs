@@ -13,7 +13,7 @@
    only an oracle here.
 
 ```sh
-odin build tools/mp4_smoke -o:speed -define:ODECS_PATENTED=true -out:/tmp/mp4_smoke  # --native needs it
+odin build tools/mp4_smoke -o:speed -define:OICUT_PATENTED=true -out:/tmp/mp4_smoke  # --native needs it
 /tmp/mp4_smoke /tmp/smoke.mp4                       # 640x360, 90 frames, H.264, automatic backend
 /tmp/mp4_smoke /tmp/smoke265.mp4 --codec h265 --native --frames 30
 /tmp/mp4_smoke /tmp/ntsc.mp4 --fps 30000/1001 --size 1280x720 --no-faststart

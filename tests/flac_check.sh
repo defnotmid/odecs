@@ -7,7 +7,7 @@
 #   bash tests/flac_check.sh [work-dir]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work=${1:-/tmp/odecs-flac}
+work=${1:-/tmp/oicut-flac}
 fx="$work/fx"
 mkdir -p "$fx"
 fail=0

@@ -3,8 +3,8 @@
 // Matroska file and the same streams remuxed to MP4 (tests/mkv_check.sh),
 // whose path is verified against FFmpeg separately.
 //
-//   odin build tests/movie_equal.odin -file -o:speed -out:/tmp/odecs-movie-equal
-//   /tmp/odecs-movie-equal A B [--no-audio]
+//   odin build tests/movie_equal.odin -file -o:speed -out:/tmp/oicut-movie-equal
+//   /tmp/oicut-movie-equal A B [--no-audio]
 package movie_equal
 
 import native "../media/native"

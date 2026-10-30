@@ -69,7 +69,7 @@ per fixture under AddressSanitizer. `odin test vorbis` checks:
 spec says. A stream whose first page implies a negative start loses those
 samples. libvorbis can only drop what it still holds in its buffer, so for
 out-of-spec streams whose first page carries many packets (FFmpeg
-stream-copy cuts), odecs starts later than libvorbis. The spec limits a
+stream-copy cuts), oicut starts later than libvorbis. The spec limits a
 start trim to the first two packets, so in-spec streams agree.
 
 ## Speed

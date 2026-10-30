@@ -1,6 +1,6 @@
 package media_vulkan
 
-@(require) import "core:fmt" // the opt-in ODECS_GPU_TRACE output
+@(require) import "core:fmt" // the opt-in OICUT_GPU_TRACE output
 import vk "vendor:vulkan"
 
 Output_Storage :: enum {
@@ -114,7 +114,7 @@ crop_planes :: proc(f: ^Decoder_Frame, planes: [3][]u8) {
 // Host pictures in flight: decode, readback and the caller's work on the
 // previous picture overlap. Device output keeps one, as its surface is
 // borrowed until the next call.
-DECODE_DEPTH :: #config(ODECS_DECODE_DEPTH, 3)
+DECODE_DEPTH :: #config(OICUT_DECODE_DEPTH, 3)
 
 // What one picture in flight owns from submission until it is returned.
 @(private)
@@ -150,7 +150,7 @@ Decoder :: struct {
 init_decoder :: proc(dec: ^Decoder, config: Decoder_Config) -> (err: Error) {
 	stage := "arguments"
 	defer when #config(
-		ODECS_GPU_TRACE,
+		OICUT_GPU_TRACE,
 		false,
 	) {if err != .None do fmt.eprintln("Vulkan decoder init:", stage, err)}
 	if dec == nil || dec.device.instance != nil do return .Invalid_Argument
@@ -210,7 +210,7 @@ init_decoder :: proc(dec: ^Decoder, config: Decoder_Config) -> (err: Error) {
 	stage = "create video session"
 	if result := d.a.CreateVideoSessionKHR(d.handle, &info, nil, &dec.session);
 	   result !=
-	   .SUCCESS {when #config(ODECS_GPU_TRACE, false) {fmt.eprintln(result)}; return .Driver_Error}
+	   .SUCCESS {when #config(OICUT_GPU_TRACE, false) {fmt.eprintln(result)}; return .Driver_Error}
 	stage = "bind video session memory"
 	bind_video_session_memory(d, dec.session, &dec.session_memory) or_return
 	stage = "allocate output images"
@@ -258,7 +258,7 @@ init_decoder :: proc(dec: ^Decoder, config: Decoder_Config) -> (err: Error) {
 
 set_decoder_parameters :: proc(dec: ^Decoder, parameters: ^Decode_Parameters) -> (err: Error) {
 	defer when #config(
-		ODECS_GPU_TRACE,
+		OICUT_GPU_TRACE,
 		false,
 	) {if err != .None do fmt.eprintln("Vulkan decoder parameters:", err)}
 	if dec == nil || !dec.initialized || dec.failed || parameters == nil do return .Invalid_Argument
@@ -314,7 +314,7 @@ set_decoder_parameters :: proc(dec: ^Decoder, parameters: ^Decode_Parameters) ->
 	handle: vk.VideoSessionParametersKHR
 	if result := d.a.CreateVideoSessionParametersKHR(d.handle, &info, nil, &handle);
 	   result !=
-	   .SUCCESS {when #config(ODECS_GPU_TRACE, false) {fmt.eprintln(result)}; return .Driver_Error}
+	   .SUCCESS {when #config(OICUT_GPU_TRACE, false) {fmt.eprintln(result)}; return .Driver_Error}
 	if dec.parameters != 0 do d.a.DestroyVideoSessionParametersKHR(d.handle, dec.parameters, nil)
 	dec.parameters = handle
 	return .None
@@ -339,7 +339,7 @@ decode_picture :: proc(
 ) {
 	stage := "arguments"
 	defer when #config(
-		ODECS_GPU_TRACE,
+		OICUT_GPU_TRACE,
 		false,
 	) {if err != .None do fmt.eprintln("Vulkan decode:", stage, err)}
 	if dec == nil || !dec.initialized || dec.failed || dec.parameters == 0 || len(packet) == 0 || len(picture.slice_offsets) == 0 || picture.setup_slot < 0 || picture.setup_slot >= len(dec.dpb) || len(picture.references) > dec.config.max_references do return frame, false, .Invalid_Argument

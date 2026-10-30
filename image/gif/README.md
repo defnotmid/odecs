@@ -27,7 +27,7 @@ for _ in 0 ..< a.frame_count {
 
 - **`decode`:** the first frame as stb_image gives it, the suite's reference.
   Where the frame doesn't reach and the background index is above zero, the
-  background colour is filled in. stb swaps red and blue there; odecs writes
+  background colour is filled in. stb swaps red and blue there; oicut writes
   the colour from the table.
 - **`Animation`:** frames composited as browsers show them. The canvas starts
   transparent. A Background disposal clears the frame's rectangle to

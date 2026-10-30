@@ -22,7 +22,7 @@ test_bound_context_never_probes_other_devices :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, session.state == nil)
 	config.preference = .Automatic
-	when native.ODECS_NATIVE_H264 {
+	when native.OICUT_NATIVE_H264 {
 		testing.expect_value(
 			t,
 			media.open(&session, config, []media.Provider{bound, native.provider()}),
@@ -46,7 +46,7 @@ test_known_unsupported_profile_selects_native_before_stream_input :: proc(t: ^te
 	providers := []media.Provider{provider(), native.provider()}
 	session: media.Session
 	testing.expect_value(t, probe(config, nil), media.Error.Unsupported)
-	when native.ODECS_NATIVE_H265 {
+	when native.OICUT_NATIVE_H265 {
 		testing.expect_value(t, media.open(&session, config, providers), media.Error.None)
 		testing.expect_value(t, session.backend, media.Backend.Native)
 		testing.expect_value(t, session.hardware_error, media.Error.Unsupported)

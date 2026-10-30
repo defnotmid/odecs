@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# odecs against the reference implementations: decoding and encoding speed on
+# oicut against the reference implementations: decoding and encoding speed on
 # one pinned core, and the encoders' size at equal quality (BD-rate); plus
 # the alpha-video and Vulkan Video figures the demo shows. Each
 # figure is one row of BENCHMARKS.tsv, replaced when its case runs again;
 # BENCHMARKS.md is generated from it and demo/facts.lua reads it.
 # Development only: the references are built here from third_party/ at the
 # commits in THIRD_PARTY_REFERENCES.md (stb_image is Odin's vendored copy)
-# and are never linked into odecs.
+# and are never linked into oicut.
 #
 #   bash tools/fetch_third_party.sh ffmpeg libvpx opus libwebp openh264 libjpeg-turbo libvorbis libogg \
 #     x264 x265 dav1d Vulkan-Headers
@@ -29,7 +29,7 @@ WORK=$(realpath "$WORK")
 REF=$WORK/ref BIN=$WORK/bin IN=$WORK/inputs OUT=$WORK/out
 TSV=BENCHMARKS.tsv DOC=BENCHMARKS.md
 VECTORS=${VECTORS:-.work/opusfx/vectors/opus_newvectors}
-HEADER=$'id\tlabel\todecs\treference\tunit\tratio\tagainst\tdate\trevision\tmachine\tload\tbasis'
+HEADER=$'id\tlabel\toicut\treference\tunit\tratio\tagainst\tdate\trevision\tmachine\tload\tbasis'
 
 FFMPEG="FFmpeg n9.0.2"
 LIBVPX="libvpx 1.17.0"
@@ -120,15 +120,15 @@ build() {
 	c++ -std=c++17 -O3 tests/x264_benchmark.cpp $($pc --cflags --libs x264) -o "$BIN/x264"
 	# shellcheck disable=SC2046
 	c++ -std=c++17 -O3 tests/x265_benchmark.cpp $($pc --cflags --libs x265) -o "$BIN/x265"
-	odin_build() { odin build "$1" -file -o:speed -microarch:native -define:ODECS_PATENTED=true "${@:2}"; }
-	odin_build tests/decode_benchmark.odin -out:"$BIN/odecs_decode"
-	odin_build tests/benchmark.odin -out:"$BIN/odecs_h264"
-	odin_build tests/encode_timing_h265.odin -out:"$BIN/odecs_h265"
-	odin_build tests/vp9_encode_check.odin -out:"$BIN/odecs_vp9"
-	odin_build tests/audio_timing.odin -out:"$BIN/odecs_audio"
+	odin_build() { odin build "$1" -file -o:speed -microarch:native -define:OICUT_PATENTED=true "${@:2}"; }
+	odin_build tests/decode_benchmark.odin -out:"$BIN/oicut_decode"
+	odin_build tests/benchmark.odin -out:"$BIN/oicut_h264"
+	odin_build tests/encode_timing_h265.odin -out:"$BIN/oicut_h265"
+	odin_build tests/vp9_encode_check.odin -out:"$BIN/oicut_vp9"
+	odin_build tests/audio_timing.odin -out:"$BIN/oicut_audio"
 	odin_build tests/audio_compare.odin -out:"$BIN/audio_compare"
 	odin_build tests/audio_fixture.odin -out:"$BIN/audio_fixture"
-	odin_build tests/video_decode_timing.odin -out:"$BIN/odecs_streams"
+	odin_build tests/video_decode_timing.odin -out:"$BIN/oicut_streams"
 	odin_build tests/yuv_dump.odin -out:"$BIN/dump_h264"
 	odin_build tests/decode_h265.odin -out:"$BIN/dump_h265"
 	odin_build tests/bd_rate.odin -out:"$BIN/bd_rate"
@@ -138,10 +138,10 @@ build() {
 	odin build tests/jpeg_compare.odin -file -o:speed -extra-linker-flags:"-L$prefix/lib" -out:"$BIN/jpeg_compare_default"
 	odin_build tests/vorbis_compare.odin -extra-linker-flags:"-L$prefix/lib" -out:"$BIN/vorbis_compare"
 	# The figures onimite sees: its builds are -o:speed for any x86-64.
-	odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$BIN/odecs_alpha"
+	odin build tests/movie_alpha.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$BIN/oicut_alpha"
 	for depth in 1 3; do
-		odin build tests/movie_decode_timing.odin -file -o:speed -define:ODECS_DECODE_DEPTH=$depth -out:"$BIN/gpu_decode$depth"
-		odin build tests/movie_encode_timing.odin -file -o:speed -define:ODECS_ENCODE_DEPTH=$depth -out:"$BIN/gpu_encode$depth"
+		odin build tests/movie_decode_timing.odin -file -o:speed -define:OICUT_DECODE_DEPTH=$depth -out:"$BIN/gpu_decode$depth"
+		odin build tests/movie_encode_timing.odin -file -o:speed -define:OICUT_ENCODE_DEPTH=$depth -out:"$BIN/gpu_encode$depth"
 	done
 }
 
@@ -210,15 +210,15 @@ revision() {
 	if [ -n "$delta" ]; then echo "$base+$(printf '%s' "$delta" | sha256sum | cut -c1-6)"; else echo "$base"; fi
 }
 
-# record ID LABEL ODECS REFERENCE UNIT AGAINST [BASIS]: one row, replacing the
-# row with the same id. The ratio is odecs' cost against the reference:
-# above 1, odecs is slower (time) or larger (size). BASIS is what the time
+# record ID LABEL OICUT REFERENCE UNIT AGAINST [BASIS]: one row, replacing the
+# row with the same id. The ratio is oicut's cost against the reference:
+# above 1, oicut is slower (time) or larger (size). BASIS is what the time
 # covers, for the multiple of real time: seconds of media for a time ("320s"),
 # or the clip's frame rate for frames per second or ms per frame ("25fps").
 record() {
 	local ratio="" machine=$MACHINE row
 	if [ -z "$3" ] || { [ -n "$6" ] && [ "$5" != "% BD-rate" ] && [ -z "$4" ]; }; then
-		echo "$1: a value was not measured (odecs '$3', reference '$4')" >&2
+		echo "$1: a value was not measured (oicut '$3', reference '$4')" >&2
 		exit 1
 	fi
 	case $5 in
@@ -287,13 +287,13 @@ decode_one() { # id file kind label against decoder threads
 	[ "$2" = bryce.webp ] && path=.work/webpfx/testdata/bryce.webp
 	[ -n "$7" ] && on=(env THREADS="$7")
 	[ "$3" != image ] && basis=$(duration "$path")
-	ours=$("${on[@]}" "$BIN/odecs_decode" "$path" "$3")
+	ours=$("${on[@]}" "$BIN/oicut_decode" "$path" "$3")
 	if [ "$3" = image ]; then
 		theirs=$("${on[@]}" "$BIN/reference_webp" "$path")
 	else
 		theirs=$("${on[@]}" "$BIN/reference_decode" "$path" "$3" ${6:+"$6"})
 	fi
-	# FFmpeg trims the audio encoders' delay and padding; odecs leaves that to the caller.
+	# FFmpeg trims the audio encoders' delay and padding; oicut leaves that to the caller.
 	awk -v a="$(echo "$ours" | sed -n 's/.* \(frames\|samples\|pixels\)=\([0-9]*\).*/\2/p')" \
 		-v b="$(echo "$theirs" | sed -n 's/.* \(frames\|samples\|pixels\)=\([0-9]*\).*/\2/p')" \
 		'BEGIN {d = a - b; exit !(b > 0 && (d < 0 ? -d : d) <= b / 1000)}' || { echo "$1: unit counts differ" >&2; return 1; }
@@ -312,7 +312,7 @@ decode_webp_corpus() {
 			size=$(od -An -tu4 -j $((off + 4)) -N4 "$f" | tr -d ' ')
 			off=$((off + 8 + size + (size & 1)))
 		done
-		a=$(pinned "$BIN/odecs_decode" "$f" image | field codec_ms)
+		a=$(pinned "$BIN/oicut_decode" "$f" image | field codec_ms)
 		b=$(pinned "$BIN/reference_webp" "$f" | field codec_ms)
 		ours[$kind]=$(awk -v s="${ours[$kind]:-0}" -v v="$a" 'BEGIN {print s + v}')
 		theirs[$kind]=$(awk -v s="${theirs[$kind]:-0}" -v v="$b" 'BEGIN {print s + v}')
@@ -326,7 +326,7 @@ decode_webp_corpus() {
 }
 
 # tests/image_fixtures.sh's 1080p JPEGs (cjpeg from a frame of OpenH264's
-# fixture) against libjpeg-turbo with its SIMD, odecs built for this machine,
+# fixture) against libjpeg-turbo with its SIMD, oicut built for this machine,
 # for x86-64-v3 (AVX2) and for any x86-64; the best of several decodes.
 decode_jpeg() {
 	local spec file id label target line suffix
@@ -337,14 +337,14 @@ decode_jpeg() {
 			line=$(pinned "$BIN/jpeg_compare_$target" "$IN/image/$file" | grep "^${file%.jpg}")
 			if [[ $line == *FAIL* ]]; then echo "$line" >&2; return 1; fi
 			suffix="" && [ $target != native ] && suffix=/$target
-			record "decode/$id$suffix" "$label, 1920×1080$([ $target != native ] && echo ", odecs built for $target")" \
+			record "decode/$id$suffix" "$label, 1920×1080$([ $target != native ] && echo ", oicut built for $target")" \
 				"$(echo "$line" | sed -n 's/.*; \([0-9.]*\) ms (turbo.*/\1/p')" \
 				"$(echo "$line" | sed -n 's/.*(turbo \([0-9.]*\),.*/\1/p')" ms "libjpeg-turbo 3.1.2"
 		done
 	done
 }
 
-# odecs/image against stb_image 2.27 (Odin's vendor:stb), which it replaced
+# oicut/image against stb_image 2.27 (Odin's vendor:stb), which it replaced
 # suite-wide: the same files through both, the best of five each; lossless
 # formats must be identical (tests/image_compare.odin).
 STB=(
@@ -387,10 +387,10 @@ decode_streams() { # codec file label reference-decoder
 	IFS=, read -r -a slots <<<"$SLOTS"
 	for n in 1 12 16; do
 		cpus=$(IFS=,; echo "${slots[*]:0:$n}")
-		ours=$(VIDEO_CPUS="$cpus" "$BIN/odecs_streams" "$IN/$2" "$1" 1920 1080 162 "$n")
+		ours=$(VIDEO_CPUS="$cpus" "$BIN/oicut_streams" "$IN/$2" "$1" 1920 1080 162 "$n")
 		theirs=$(VIDEO_CPUS="$cpus" "$BIN/reference_streams" "$IN/$2" 162 "$n")
 		if [ "$(echo "$ours" | field verification_hash)" != "$(echo "$theirs" | field verification_hash)" ]; then
-			echo "decode/streams-$1: odecs and FFmpeg pictures differ" >&2
+			echo "decode/streams-$1: oicut and FFmpeg pictures differ" >&2
 			return 1
 		fi
 		record "decode/streams-$1/$n" "$3, $(plural "$n" stream) of one decoder thread each" \
@@ -413,15 +413,15 @@ check_stream() {
 }
 
 # encode_point CODEC ENC QP [timed]: one stream of the 54 frames at QP, ours
-# (odecs) or the reference's (x); timed runs pinned with every round, the
+# (oicut) or the reference's (x); timed runs pinned with every round, the
 # others once (ROUNDS=1). Writes its harness line and BYTES:PSNR beside it.
 encode_point() {
 	local codec=$1 enc=$2 qp=$3 out=$OUT/$1-$2-$3.$1 log on=(env ROUNDS=1)
 	[ "${4:-}" = timed ] && on=(taskset -c "$CPU")
 	case $codec-$enc in
-	h264-odecs) log=$("${on[@]}" "$BIN/odecs_h264" "$IN/encode.yuv" $W $H $FRAMES 1 4 "$qp" "$out") ;;
+	h264-oicut) log=$("${on[@]}" "$BIN/oicut_h264" "$IN/encode.yuv" $W $H $FRAMES 1 4 "$qp" "$out") ;;
 	h264-x) log=$("${on[@]}" "$BIN/x264" "$IN/encode.yuv" $W $H $FRAMES 1 4 "$qp" "$out") ;;
-	h265-odecs) log=$("${on[@]}" "$BIN/odecs_h265" "$IN/encode.yuv" $W $H $FRAMES --qp "$qp" --workers 1 --out "$out") ;;
+	h265-oicut) log=$("${on[@]}" "$BIN/oicut_h265" "$IN/encode.yuv" $W $H $FRAMES --qp "$qp" --workers 1 --out "$out") ;;
 	h265-x) log=$("${on[@]}" "$BIN/x265" "$IN/encode.yuv" $W $H $FRAMES "$qp" "$out" --pool-threads 1 --no-wpp) ;;
 	esac
 	echo "$log" > "$out.log"
@@ -438,16 +438,16 @@ encode_sweep() {
 	local codec=$1 qp enc pids=() ours="" theirs="" against label
 	mkdir -p "$OUT"
 	for qp in 22 32 37; do
-		for enc in odecs x; do
+		for enc in oicut x; do
 			encode_point "$codec" $enc $qp &
 			pids+=($!)
 		done
 	done
 	wait_all "${pids[@]}"
-	encode_point "$codec" odecs 27 timed
+	encode_point "$codec" oicut 27 timed
 	encode_point "$codec" x 27 timed
 	for qp in 22 27 32 37; do
-		ours+=${ours:+,}$(cat "$OUT/$codec-odecs-$qp.$codec.point")
+		ours+=${ours:+,}$(cat "$OUT/$codec-oicut-$qp.$codec.point")
 		theirs+=${theirs:+,}$(cat "$OUT/$codec-x-$qp.$codec.point")
 	done
 	if [ "$codec" = h264 ]; then
@@ -457,7 +457,7 @@ encode_sweep() {
 		against="$X265, medium with the same tools"
 		label="H.265, 1080p, 54 frames, one core (x265: P frames only, one reference, 64 to 8 CUs, no AMP or rectangular)"
 	fi
-	record "encode/$codec/speed" "$label, QP 27" "$(field fps < "$OUT/$codec-odecs-27.$codec.log")" \
+	record "encode/$codec/speed" "$label, QP 27" "$(field fps < "$OUT/$codec-oicut-27.$codec.log")" \
 		"$(field fps < "$OUT/$codec-x-27.$codec.log")" fps "$against" "${CLIP_FPS}fps"
 	record "encode/$codec/bd-rate" "$label, QP 22 to 37" "$("$BIN/bd_rate" "$ours" "$theirs" | field bd_rate)" "" "% BD-rate" "$against"
 }
@@ -469,7 +469,7 @@ encode_h265() { encode_sweep h265; }
 encode_h264_16() {
 	local ours theirs
 	mkdir -p "$OUT"
-	ours=$("$BIN/odecs_h264" "$IN/encode.yuv" $W $H $FRAMES 16 16 27 "$OUT/h264-16.264")
+	ours=$("$BIN/oicut_h264" "$IN/encode.yuv" $W $H $FRAMES 16 16 27 "$OUT/h264-16.264")
 	theirs=$("$BIN/x264" "$IN/encode.yuv" $W $H $FRAMES 16 16 27 "$OUT/x264-16.264")
 	check_stream h264 "$OUT/h264-16.264" > /dev/null
 	record encode/h264-16/speed "H.264, 1080p, 54 frames, 16 slices on 16 workers, QP 27" \
@@ -480,10 +480,10 @@ encode_h264_16() {
 # keyframe, all eight encodes in parallel and untimed; then the speed, pinned
 # with nothing else running: ours at q 100 (seven runs) against cq-level 25
 # (about the same quantizer).
-vp9_point() { # odecs|libvpx q|cq: writes BYTES:PSNR to $OUT/vp9-<enc>-<q>.point
+vp9_point() { # oicut|libvpx q|cq: writes BYTES:PSNR to $OUT/vp9-<enc>-<q>.point
 	local log out=$OUT/vp9-$1-$2
-	if [ "$1" = odecs ]; then
-		log=$("$BIN/odecs_vp9" "$out" $W $H "$2" 1 $FRAMES 0 "$IN/encode.yuv" 0 120)
+	if [ "$1" = oicut ]; then
+		log=$("$BIN/oicut_vp9" "$out" $W $H "$2" 1 $FRAMES 0 "$IN/encode.yuv" 0 120)
 		ffmpeg -v error -y -i "$out.webm" -pix_fmt yuv420p -f rawvideo "$out.yuv"
 	else
 		log=$(ROUNDS=1 "$BIN/reference_vp9_encode" "$IN/encode.yuv" $W $H $FRAMES "$2" 120 "$out.ivf")
@@ -495,13 +495,13 @@ vp9_point() { # odecs|libvpx q|cq: writes BYTES:PSNR to $OUT/vp9-<enc>-<q>.point
 encode_vp9() {
 	local q cq pids=() ours="" theirs="" runs=() i
 	mkdir -p "$OUT"
-	for q in 60 100 140 180; do vp9_point odecs $q & pids+=($!); done
+	for q in 60 100 140 180; do vp9_point oicut $q & pids+=($!); done
 	for cq in 15 25 35 45; do vp9_point libvpx $cq & pids+=($!); done
 	wait_all "${pids[@]}"
-	for q in 60 100 140 180; do ours+=${ours:+,}$(cat "$OUT/vp9-odecs-$q.point"); done
+	for q in 60 100 140 180; do ours+=${ours:+,}$(cat "$OUT/vp9-oicut-$q.point"); done
 	for cq in 15 25 35 45; do theirs+=${theirs:+,}$(cat "$OUT/vp9-libvpx-$cq.point"); done
 	for i in 1 2 3 4 5 6 7; do
-		runs+=("$(pinned "$BIN/odecs_vp9" - $W $H 100 1 $FRAMES 0 "$IN/encode.yuv" 0 120 | field fps)")
+		runs+=("$(pinned "$BIN/oicut_vp9" - $W $H 100 1 $FRAMES 0 "$IN/encode.yuv" 0 120 | field fps)")
 	done
 	local label="VP9, 1080p, 54 frames, one core, four tile columns (libvpx: good, cpu-used 4, no lag or alt-ref)"
 	record encode/vp9/speed "$label, q 100 against cq-level 25" "$(printf '%s\n' "${runs[@]}" | median)" \
@@ -515,9 +515,9 @@ encode_vp9() {
 encode_aac() {
 	local ours theirs snr=()
 	mkdir -p "$OUT"
-	ours=$(pinned "$BIN/odecs_audio" encode "$IN/source.s16le" 48000 2 192000 1 "$OUT/aac-odecs.aac")
+	ours=$(pinned "$BIN/oicut_audio" encode "$IN/source.s16le" 48000 2 192000 1 "$OUT/aac-oicut.aac")
 	theirs=$(pinned "$BIN/reference_audio" encode "$IN/source.s16le" 48000 2 192000 1 "$OUT/aac-ffmpeg.aac")
-	for enc in odecs ffmpeg; do
+	for enc in oicut ffmpeg; do
 		"$BIN/reference_audio" decode "$OUT/aac-$enc.aac" 1 "$OUT/aac-$enc.s16le" > /dev/null
 		snr+=("$("$BIN/audio_compare" quality "$IN/source.s16le" "$OUT/aac-$enc.s16le" 48000 2 1024 |
 			grep -m1 'section=overall' | field snr_db)")
@@ -542,26 +542,26 @@ encode_aac_fixture() {
 		label="AAC-LC, the 12 s fixture, $kind"
 		for n in 1 16; do
 			if [ "$n" = 1 ]; then
-				ours=$(pinned "$BIN/odecs_audio" encode "$src" "$rate" "$ch" "$bits" 1 "$OUT/aac-$id-odecs.aac")
+				ours=$(pinned "$BIN/oicut_audio" encode "$src" "$rate" "$ch" "$bits" 1 "$OUT/aac-$id-oicut.aac")
 				theirs=$(pinned "$BIN/reference_audio" encode "$src" "$rate" "$ch" "$bits" 1 "$OUT/aac-$id-ffmpeg.aac")
 				record "encode/aac-fixture/$id/speed" "$label, one stream" "$(echo "$ours" | grep -m1 codec_ms= | field codec_ms)" \
 					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac" 12s
 			else
-				ours=$(taskset -c "$MULTI_CPUS" "$BIN/odecs_audio" encode "$src" "$rate" "$ch" "$bits" 16 "$OUT/aac-$id-odecs-16.aac")
+				ours=$(taskset -c "$MULTI_CPUS" "$BIN/oicut_audio" encode "$src" "$rate" "$ch" "$bits" 16 "$OUT/aac-$id-oicut-16.aac")
 				theirs=$(taskset -c "$MULTI_CPUS" "$BIN/reference_audio" encode "$src" "$rate" "$ch" "$bits" 16 "$OUT/aac-$id-ffmpeg-16.aac")
-				cmp "$OUT/aac-$id-odecs.aac" "$OUT/aac-$id-odecs-16.aac"
+				cmp "$OUT/aac-$id-oicut.aac" "$OUT/aac-$id-oicut-16.aac"
 				cmp "$OUT/aac-$id-ffmpeg.aac" "$OUT/aac-$id-ffmpeg-16.aac"
 				record "encode/aac-fixture/$id/speed-16" "$label, 16 independent streams" "$(echo "$ours" | grep -m1 codec_ms= | field codec_ms)" \
 					"$(echo "$theirs" | grep -m1 aggregate | field codec_ms)" ms "$FFMPEG aac" 192s
 			fi
 		done
-		for enc in odecs ffmpeg; do
+		for enc in oicut ffmpeg; do
 			"$BIN/reference_audio" decode "$OUT/aac-$id-$enc.aac" 1 "$OUT/aac-$id-$enc.s16le" > /dev/null
 			"$BIN/audio_compare" quality "$src" "$OUT/aac-$id-$enc.s16le" "$rate" "$ch" 1024 > "$OUT/aac-$id-$enc.quality"
 		done
 		for section in tone_chirp transient noise; do
 			record "encode/aac-fixture/$id/snr-$section" "$label, SNR of the ${section/_/ and } third after FFmpeg's decoder" \
-				"$(grep "section=$section " "$OUT/aac-$id-odecs.quality" | field snr_db)" \
+				"$(grep "section=$section " "$OUT/aac-$id-oicut.quality" | field snr_db)" \
 				"$(grep "section=$section " "$OUT/aac-$id-ffmpeg.quality" | field snr_db)" dB "$FFMPEG aac"
 		done
 	done
@@ -571,20 +571,20 @@ encode_aac_fixture() {
 # one keyframe: ours at q 60 to 180 against libvpx at cq-level 36 to 60, and
 # both lossless (libvpx's output must equal the source).
 encode_vp9_animation() {
-	local i q cq ours="" theirs="" log out src=$OUT/vp9-anim-odecs-60.source.yuv w=320 h=180 n=30 lossless_ours
+	local i q cq ours="" theirs="" log out src=$OUT/vp9-anim-oicut-60.source.yuv w=320 h=180 n=30 lossless_ours
 	local qs=(60 100 140 180) cqs=(36 44 52 60)
 	mkdir -p "$OUT"
 	for i in 0 1 2 3; do
 		q=${qs[$i]} cq=${cqs[$i]}
-		log=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-$q" $w $h "$q" 1 $n 0 animation 0 120)
-		ffmpeg -v error -y -i "$OUT/vp9-anim-odecs-$q.webm" -pix_fmt yuv420p -f rawvideo "$OUT/vp9-anim-odecs-$q.yuv"
-		ours+=${ours:+,}$(echo "$log" | field bytes):$(psnr "$src" $w $h $n "$OUT/vp9-anim-odecs-$q.yuv")
+		log=$(pinned "$BIN/oicut_vp9" "$OUT/vp9-anim-oicut-$q" $w $h "$q" 1 $n 0 animation 0 120)
+		ffmpeg -v error -y -i "$OUT/vp9-anim-oicut-$q.webm" -pix_fmt yuv420p -f rawvideo "$OUT/vp9-anim-oicut-$q.yuv"
+		ours+=${ours:+,}$(echo "$log" | field bytes):$(psnr "$src" $w $h $n "$OUT/vp9-anim-oicut-$q.yuv")
 		out=$OUT/vp9-anim-libvpx-$cq.ivf
 		log=$(ROUNDS=1 "$BIN/reference_vp9_encode" "$src" $w $h $n "$cq" 120 "$out")
 		ffmpeg -v error -y -i "$out" -pix_fmt yuv420p -f rawvideo "$out.yuv"
 		theirs+=${theirs:+,}$(echo "$log" | field bytes):$(psnr "$src" $w $h $n "$out.yuv")
 	done
-	lossless_ours=$(pinned "$BIN/odecs_vp9" "$OUT/vp9-anim-odecs-0" $w $h 0 1 $n 0 animation 0 120 | field bytes)
+	lossless_ours=$(pinned "$BIN/oicut_vp9" "$OUT/vp9-anim-oicut-0" $w $h 0 1 $n 0 animation 0 120 | field bytes)
 	log=$(ROUNDS=1 "$BIN/reference_vp9_encode" "$src" $w $h $n lossless 120 "$OUT/vp9-anim-libvpx-lossless.ivf")
 	ffmpeg -v error -y -i "$OUT/vp9-anim-libvpx-lossless.ivf" -pix_fmt yuv420p -f rawvideo "$OUT/vp9-anim-libvpx-lossless.yuv"
 	cmp "$src" "$OUT/vp9-anim-libvpx-lossless.yuv"
@@ -601,10 +601,10 @@ encode_vp9_workers() {
 	for spec in "100|16|0|q100|q 100 colour, 16 frames" "0|8|1|lossless-alpha|lossless colour and alpha, 8 frames"; do
 		IFS='|' read -r q frames alpha id kind <<<"$spec"
 		for workers in 1 4; do
-			"$BIN/odecs_vp9" - $W $H 100 "$workers" 4 0 animation 0 120 > /dev/null
+			"$BIN/oicut_vp9" - $W $H 100 "$workers" 4 0 animation 0 120 > /dev/null
 			best=0
 			for r in 1 2 3; do
-				fps=$("$BIN/odecs_vp9" - $W $H "$q" "$workers" "$frames" "$alpha" animation 0 120 | field fps)
+				fps=$("$BIN/oicut_vp9" - $W $H "$q" "$workers" "$frames" "$alpha" animation 0 120 | field fps)
 				best=$(awk -v a="$best" -v b="$fps" 'BEGIN {print (b > a ? b : a)}')
 			done
 			record "encode/vp9-workers/$id-${workers}w" "VP9, the 1080p synthetic animation, $kind, $(plural "$workers" worker)" "$best" "" fps "" 30fps
@@ -612,7 +612,7 @@ encode_vp9_workers() {
 	done
 }
 
-# Alpha video through video.Reader (odecs only) ----------------------------
+# Alpha video through video.Reader (oicut only) ----------------------------
 
 ALPHA=(
 	"prores4444|prores_4444_1080p.mov|ProRes 4444 + alpha, 1080p"
@@ -628,7 +628,7 @@ alpha_one() { # id file label
 	for threads in 1 8; do
 		fps=() seek=()
 		for r in 1 2 3 4 5; do
-			if [ $threads = 1 ]; then out=$(pinned "$BIN/odecs_alpha" "$path" - 1); else out=$("$BIN/odecs_alpha" "$path" - 8); fi
+			if [ $threads = 1 ]; then out=$(pinned "$BIN/oicut_alpha" "$path" - 1); else out=$("$BIN/oicut_alpha" "$path" - 8); fi
 			fps+=("$(echo "$out" | sed -n 's/.*frames, \([0-9.]*\) fps.*/\1/p')")
 			seek+=("$(echo "$out" | sed -n 's/.*latency median \([0-9.]*\) ms.*/\1/p')")
 		done
@@ -685,7 +685,7 @@ gpu_encode() {
 		theirs=$("$BIN/reference_vulkan_encode" $codec)
 		record "gpu/encode-$codec/ffmpeg-vulkan" "$name, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder" \
 			"$ours" "$(echo "$theirs" | field ms_per_frame)" ms/frame "$FFMPEG Vulkan Video" 30fps
-		record "gpu/encode-$codec/ffmpeg-vulkan-bytes" "$name, 900 1080p frames at QP 23, size (odecs in MP4)" \
+		record "gpu/encode-$codec/ffmpeg-vulkan-bytes" "$name, 900 1080p frames at QP 23, size (oicut in MP4)" \
 			"$ours_bytes" "$(echo "$theirs" | field bytes)" bytes "$FFMPEG Vulkan Video"
 	done
 }
@@ -774,7 +774,7 @@ doc() {
 		return (x >= 100 ? sprintf("%.0f", x) : x >= 10 ? sprintf("%.1f", x) : sprintf("%.2f", x)) "×"
 	}
 	function realtimes(i,   a, b) {
-		a = realtime(odecs[i], unit[i], basis[i]); b = realtime(reference[i], unit[i], basis[i])
+		a = realtime(oicut[i], unit[i], basis[i]); b = realtime(reference[i], unit[i], basis[i])
 		return b == "" ? a : a " / " b
 	}
 	function table(prefix, title, intro,   i, k, n) {
@@ -782,21 +782,21 @@ doc() {
 		if (!n) return
 		print "## " title "\n\n" intro "\n"
 		if (prefix == "alpha/") {
-			print "| Figure | odecs | Unit | × real time | Machine | Measured |\n| --- | --- | --- | --- | --- | --- |"
+			print "| Figure | oicut | Unit | × real time | Machine | Measured |\n| --- | --- | --- | --- | --- | --- |"
 			for (k = 1; k <= ncase; k++) for (i = 1; i <= rows; i++) if (rank[i] == k && index(id[i], prefix) == 1)
-				printf "| %s | %s | %s | %s | %s | %s |\n", label[i], num(odecs[i]), unit[i], realtimes(i), machine[i], measured(i)
+				printf "| %s | %s | %s | %s | %s | %s |\n", label[i], num(oicut[i]), unit[i], realtimes(i), machine[i], measured(i)
 		} else {
-			print "| Input | odecs | Reference | Unit | Ratio | × real time (odecs / reference) | Reference implementation | Machine | Measured |"
+			print "| Input | oicut | Reference | Unit | Ratio | × real time (oicut / reference) | Reference implementation | Machine | Measured |"
 			print "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
 			for (k = 1; k <= ncase; k++) for (i = 1; i <= rows; i++) if (rank[i] == k && index(id[i], prefix) == 1)
 				printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", label[i],
-					unit[i] == "% BD-rate" ? sprintf("%+.1f%%", odecs[i]) : num(odecs[i]), num(reference[i]),
+					unit[i] == "% BD-rate" ? sprintf("%+.1f%%", oicut[i]) : num(oicut[i]), num(reference[i]),
 					unit[i], ratio[i], realtimes(i), against[i], machine[i], measured(i)
 		}
 		print ""
 	}
 	NR > 1 {
-		rows++; id[rows] = $1; label[rows] = $2; odecs[rows] = $3; reference[rows] = $4; unit[rows] = $5
+		rows++; id[rows] = $1; label[rows] = $2; oicut[rows] = $3; reference[rows] = $4; unit[rows] = $5
 		ratio[rows] = $6; against[rows] = $7; date[rows] = $8; rev[rows] = $9; machine[rows] = $10; load[rows] = $11; basis[rows] = $12
 	}
 	END {
@@ -818,14 +818,14 @@ doc() {
 		print "Generated by `bash tests/compare.sh` from [BENCHMARKS.tsv](BENCHMARKS.tsv), one row per figure;"
 		print "rerun a case to replace its rows (`bash tests/compare.sh run decode/vp9`), never edit this file."
 		print "The references are built from their pinned sources (THIRD_PARTY_REFERENCES.md). A ratio above 1"
-		print "means odecs is slower, or for frame rates that the reference is faster. Measured gives the date,"
-		print "the odecs revision (`+` and a hash when the working copy had changes) and the load average."
+		print "means oicut is slower, or for frame rates that the reference is faster. Measured gives the date,"
+		print "the oicut revision (`+` and a hash when the working copy had changes) and the load average."
 		print "× real time is how many times faster than playback each side runs: the length of the media over"
 		print "the time taken, video at its clip'\''s frame rate (25 fps for the camera clips, 30 for the synthetic"
 		print "ones); for independent streams it is how many real-time streams run at once.\n"
 		table("decode/", "Decoding", "One thread pinned to one core, packets or the file resident in memory, opening the decoder not timed; the median of seven after a warmup unless the input says otherwise. The video is OpenH264'\''s 1080p fixture looped three times; the audio is the 320 s of decoded RFC 8251 Opus test vectors; both are encoded with x264, x265, libvpx, `prores_ks`, libwebp, `mjpeg` and FFmpeg'\''s audio encoders.")
-		table("encode/", "Encoding", "Resident input, a fresh encoder per round, the median of seven. Speed is at one operating point; BD-rate is odecs'\''s size change at equal PSNR (FFmpeg'\''s sample-weighted Y, U, V) over four, piecewise-linear in log rate: negative means odecs is smaller. Every stream is decoded by FFmpeg and by odecs, identically. The video is OpenH264'\''s 54-frame 1080p fixture.")
-		table("alpha/", "Alpha video (odecs only)", "`tests/movie_alpha.odin` through `video.Reader`, file input, frames converted to RGBA; the clips are `tests/alpha_fixtures.sh --large`'\''s. One thread pinned to one core; eight threads unpinned. Medians of five runs; seeks are the median of 40 random `frame_at` calls.")
+		table("encode/", "Encoding", "Resident input, a fresh encoder per round, the median of seven. Speed is at one operating point; BD-rate is oicut'\''s size change at equal PSNR (FFmpeg'\''s sample-weighted Y, U, V) over four, piecewise-linear in log rate: negative means oicut is smaller. Every stream is decoded by FFmpeg and by oicut, identically. The video is OpenH264'\''s 54-frame 1080p fixture.")
+		table("alpha/", "Alpha video (oicut only)", "`tests/movie_alpha.odin` through `video.Reader`, file input, frames converted to RGBA; the clips are `tests/alpha_fixtures.sh --large`'\''s. One thread pinned to one core; eight threads unpinned. Medians of five runs; seeks are the median of 40 random `frame_at` calls.")
 		table("gpu/", "Vulkan Video", "Decode: `tests/movie_decode_timing.odin` through `video.Reader`'\''s planar output, the file read as it goes, the best of five per run and the median of three runs; against FFmpeg'\''s Vulkan Video with each frame downloaded, and dav1d on the CPU, both with packets in memory. Encode: `tests/movie_encode_timing.odin`, the median of five; its output bytes are identical at every depth. Run on request only: `bash tests/compare.sh run gpu/`.")
 	}' order="$(cases | tr '\n' ' ')" "$TSV" > "$DOC"
 	echo "wrote $DOC"

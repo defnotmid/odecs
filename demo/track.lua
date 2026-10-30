@@ -2,7 +2,7 @@
 -- scenes (the title has two: the intro bar and the slam). timeline.lua and
 -- video.lua read it back for every cut and pop.
 --
--- Why: odecs turns pixels into bits and back, so the music is textured and
+-- Why: oicut turns pixels into bits and back, so the music is textured and
 -- precise with a clear pulse: West London broken beat after Bugz in the
 -- Attic's "Booty La La". Its decisions: a live kit whose snare leaves the
 -- backbeat every other bar, swung sixteenth hats with ghosts, a fingered

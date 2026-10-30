@@ -8,7 +8,7 @@
 #   bash tests/mkv_check.sh [work-dir]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work=${1:-/tmp/odecs-mkv}
+work=${1:-/tmp/oicut-mkv}
 fx="$work/fx"
 mkdir -p "$fx"
 fail=0
@@ -16,10 +16,10 @@ pass() { printf '  %-48s ok\n' "$1"; }
 bad() { printf '  %-48s FAIL\n' "$1"; fail=1; }
 
 odin test container/webm
-odin test video -o:speed -define:ODECS_PATENTED=true
-odin build tests/movie_equal.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_equal"
-odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_alpha"
-odin build tests/alpha_fuzz.odin -file -o:speed -define:ODECS_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
+odin test video -o:speed -define:OICUT_PATENTED=true
+odin build tests/movie_equal.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$work/movie_equal"
+odin build tests/movie_alpha.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$work/movie_alpha"
+odin build tests/alpha_fuzz.odin -file -o:speed -define:OICUT_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
 odin build tests/vp9_encode_check.odin -file -o:speed -out:"$work/vp9_encode_check"
 
 echo "== WebM chapters round trip and ffprobe oracle"

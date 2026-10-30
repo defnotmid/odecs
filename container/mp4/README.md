@@ -169,7 +169,7 @@ mp4.close(&r)
 
 ```sh
 odin test container/mp4
-bash tests/mp4_check.sh /tmp/odecs-mp4
+bash tests/mp4_check.sh /tmp/oicut-mp4
 ```
 
 The unit tests round-trip reordered video and primed audio, with and without

@@ -4,16 +4,16 @@
 # dependency. Usage: bash tests/mp4_check.sh [work-dir]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work=${1:-/tmp/odecs-mp4}
+work=${1:-/tmp/oicut-mp4}
 mkdir -p "$work"
 fail=0
 pass() { printf '  %-44s ok\n' "$1"; }
 bad() { printf '  %-44s FAIL\n' "$1"; fail=1; }
 
 odin test container/mp4
-odin test video -o:speed -define:ODECS_PATENTED=true
-odin build tools/mp4_smoke -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_smoke"
-odin build tests/mp4_interop.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/mp4_interop"
+odin test video -o:speed -define:OICUT_PATENTED=true
+odin build tools/mp4_smoke -o:speed -define:OICUT_PATENTED=true -out:"$work/mp4_smoke"
+odin build tests/mp4_interop.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$work/mp4_interop"
 
 reference() { # file -> ref.rgba / ref.pcm next to it
 	if ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 "$1" | grep -q .; then
@@ -38,10 +38,10 @@ interop() { # file [args]
 	if "$work/mp4_interop" "$f" "$rgba" "$pcm" --first-time "$first" "$@" > "$f.log" 2>&1; then pass "$(basename "$f") $*"; else bad "$(basename "$f") $*"; cat "$f.log" || true; fi
 }
 
-echo "== odecs output: smoke round trips, FFmpeg decode and interop"
+echo "== oicut output: smoke round trips, FFmpeg decode and interop"
 for spec in "h264 --native" "h264" "h265 --native --frames 30" "h265" "h264 --native --fps 30000/1001 --size 1280x720 --frames 45 --no-faststart" "h264 --native --size 320x240 --no-audio" "h264 --native --chapters"; do
 	set -- $spec
-	name="$work/odecs-$(printf %s "$spec" | tr -c '[:alnum:]' _).mp4"
+	name="$work/oicut-$(printf %s "$spec" | tr -c '[:alnum:]' _).mp4"
 	codec=$1; shift
 	if "$work/mp4_smoke" "$name" --codec "$codec" "$@" > "$name.smoke" 2>&1; then pass "smoke $spec"; else bad "smoke $spec"; cat "$name.smoke" || true; continue; fi
 	if [ -n "$(ffmpeg -v error -i "$name" -f null - 2>&1)" ]; then bad "ffmpeg decodes cleanly: $spec"; else pass "ffmpeg decodes cleanly: $spec"; fi

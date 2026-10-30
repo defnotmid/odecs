@@ -5,9 +5,9 @@ package media_vulkan
 @(require) import "core:slice"
 @(require) import "core:testing"
 
-// This gate is explicitly requested with ODECS_GPU_CONTEXT_TEST=true. It uses
+// This gate is explicitly requested with OICUT_GPU_CONTEXT_TEST=true. It uses
 // actual devices/sessions and fails rather than skipping unavailable hardware.
-when #config(ODECS_GPU_CONTEXT_TEST, false) {
+when #config(OICUT_GPU_CONTEXT_TEST, false) {
 	Context_GPU_Host_Frame :: struct {
 		y, u, v: []u16,
 	}
@@ -180,9 +180,9 @@ when #config(ODECS_GPU_CONTEXT_TEST, false) {
 
 	@(test)
 	context_real_foreign_device_and_mixed_inputs :: proc(t: ^testing.T) {
-		w, h := #config(ODECS_GPU_WIDTH, 386), #config(ODECS_GPU_HEIGHT, 242)
-		depth, gop := #config(ODECS_GPU_DEPTH, 8), #config(ODECS_GPU_GOP, 15)
-		codec_name := #config(ODECS_GPU_CODEC, "h264")
+		w, h := #config(OICUT_GPU_WIDTH, 386), #config(OICUT_GPU_HEIGHT, 242)
+		depth, gop := #config(OICUT_GPU_DEPTH, 8), #config(OICUT_GPU_GOP, 15)
+		codec_name := #config(OICUT_GPU_CODEC, "h264")
 		codec: Codec = codec_name == "h265" ? .H265 : .H264
 		testing.expect(
 			t,
@@ -372,7 +372,7 @@ when #config(ODECS_GPU_CONTEXT_TEST, false) {
 		testing.expect_value(t, sink.foreign_refusals, 1)
 		testing.expect_value(t, sink.self_refusals, 1)
 		testing.expect(t, slice.equal(expected[:], sink.stream[:]))
-		path := codec == .H264 ? "/tmp/odecs-context-mixed.264" : "/tmp/odecs-context-mixed.265"
+		path := codec == .H264 ? "/tmp/oicut-context-mixed.264" : "/tmp/oicut-context-mixed.265"
 		testing.expect(t, os.write_entire_file(path, sink.stream[:]) == nil)
 		context_gpu_destroy_decoder(device_decoder)
 		destroy_encoder(&mixed)

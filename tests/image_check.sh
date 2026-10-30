@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Image gate: every fixture (tests/image_fixtures.sh) through odecs/image
+# Image gate: every fixture (tests/image_fixtures.sh) through oicut/image
 # against stb_image (tests/image_compare.odin: lossless formats identical,
 # JPEG at least 45 dB), every JPEG against libjpeg-turbo (identical),
 # every GIF animation frame against a browser's (Chromium's ImageDecoder,

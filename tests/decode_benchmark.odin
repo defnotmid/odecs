@@ -1,4 +1,4 @@
-// odecs half of tests/compare.sh's decode cases: one track of a file, demuxed once
+// oicut half of tests/compare.sh's decode cases: one track of a file, demuxed once
 // by video.Reader's containers into resident packets, then decoded by the
 // native provider through media, a fresh session per round. Decode and drain
 // are timed (opening the session is not), median of seven after a warmup.
@@ -85,7 +85,7 @@ main :: proc() {
 		units = count.units
 	}
 	slice.sort(times[:])
-	fmt.printfln("odecs decode: codec=%v %s=%d packets=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f",
+	fmt.printfln("oicut decode: codec=%v %s=%d packets=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f",
 		config.codec, is_video ? "frames" : "samples", units, len(packets), times[3], times[0], times[6])
 }
 
@@ -104,7 +104,7 @@ image :: proc(path: string) {
 		if round > 0 do times[round - 1] = ms
 	}
 	slice.sort(times[:])
-	fmt.printfln("odecs decode: codec=WebP pixels=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f", width * height, times[3], times[0], times[6])
+	fmt.printfln("oicut decode: codec=WebP pixels=%d codec_ms=%.3f min_ms=%.3f max_ms=%.3f", width * height, times[3], times[0], times[6])
 }
 
 video_track :: proc(r: ^video.Reader, setup: ^[dynamic][]u8, packets: ^[dynamic]media.Packet) -> media.Config {

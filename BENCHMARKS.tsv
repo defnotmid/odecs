@@ -1,4 +1,4 @@
-id	label	odecs	reference	unit	ratio	against	date	revision	machine	load	basis
+id	label	oicut	reference	unit	ratio	against	date	revision	machine	load	basis
 decode/aac	AAC-LC, 128 kb/s stereo, 320 s	141.850	79.611	ms	1.78	FFmpeg n9.0.2 aac	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.21	320.635000s
 decode/webp-lossy	WebP lossy, 1920×1080	9.284	7.220	ms	1.29	libwebp 1.6.0	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54	
 decode/vorbis	Vorbis, quality 5 stereo, 320 s (best of several)	183.67	273.59	ms	0.67	libvorbis 1.3.7	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79	320.635000s
@@ -16,14 +16,14 @@ decode/opus-voip16-libopus	Opus speech (libopus voip), 16 kb/s mono	235.394	226.
 decode/opus-voip32	Opus speech (libopus voip), 32 kb/s stereo	359.767	251.822	ms	1.43	FFmpeg n9.0.2 opus	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.50	320.641500s
 decode/opus-voip32-libopus	Opus speech (libopus voip), 32 kb/s stereo	360.365	372.724	ms	0.97	libopus 1.6.1	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.54	320.641500s
 decode/jpeg-420	JPEG baseline 4:2:0, quality 85, 1920×1080	2.70	2.74	ms	0.99	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-420/x86-64-v3	JPEG baseline 4:2:0, quality 85, 1920×1080, odecs built for x86-64-v3	3.34	2.73	ms	1.22	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-420/default	JPEG baseline 4:2:0, quality 85, 1920×1080, odecs built for default	4.18	2.73	ms	1.53	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-420/x86-64-v3	JPEG baseline 4:2:0, quality 85, 1920×1080, oicut built for x86-64-v3	3.34	2.73	ms	1.22	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-420/default	JPEG baseline 4:2:0, quality 85, 1920×1080, oicut built for default	4.18	2.73	ms	1.53	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
 decode/jpeg-444	JPEG baseline 4:4:4, quality 92, 1920×1080	3.99	3.97	ms	1.01	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-444/x86-64-v3	JPEG baseline 4:4:4, quality 92, 1920×1080, odecs built for x86-64-v3	4.70	3.96	ms	1.19	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-444/default	JPEG baseline 4:4:4, quality 92, 1920×1080, odecs built for default	5.59	3.97	ms	1.41	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-444/x86-64-v3	JPEG baseline 4:4:4, quality 92, 1920×1080, oicut built for x86-64-v3	4.70	3.96	ms	1.19	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-444/default	JPEG baseline 4:4:4, quality 92, 1920×1080, oicut built for default	5.59	3.97	ms	1.41	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
 decode/jpeg-progressive	JPEG progressive 4:2:0, quality 85, 1920×1080	8.14	7.49	ms	1.09	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-progressive/x86-64-v3	JPEG progressive 4:2:0, quality 85, 1920×1080, odecs built for x86-64-v3	8.65	7.69	ms	1.12	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
-decode/jpeg-progressive/default	JPEG progressive 4:2:0, quality 85, 1920×1080, odecs built for default	9.26	7.51	ms	1.23	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-progressive/x86-64-v3	JPEG progressive 4:2:0, quality 85, 1920×1080, oicut built for x86-64-v3	8.65	7.69	ms	1.12	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
+decode/jpeg-progressive/default	JPEG progressive 4:2:0, quality 85, 1920×1080, oicut built for default	9.26	7.51	ms	1.23	libjpeg-turbo 3.1.2	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
 decode/stb/png-rgb8	PNG, 8-bit RGB, 1920×1080	30.34	33.45	ms	0.91	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.77	
 decode/stb/png-rgba8	PNG, 8-bit RGBA, 1920×1080	34.88	29.17	ms	1.20	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79	
 decode/stb/gif	GIF, 256 colours, 1920×1080	5.88	10.13	ms	0.58	stb_image 2.27 (Odin vendor:stb)	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	1.79	
@@ -45,11 +45,11 @@ gpu/decode-av1/dav1d-all	720p 10-bit AV1 (SVT-AV1), 162 frames, three pictures i
 gpu/encode-h264/depth1	H.264, 900 1080p I420 frames through video.Writer, 1 picture in flight	2.548		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.33	30fps
 gpu/encode-h264/depth3	H.264, 900 1080p I420 frames through video.Writer, 3 pictures in flight	2.012		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.20	30fps
 gpu/encode-h264/ffmpeg-vulkan	H.264, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder	2.012	1.820	ms/frame	1.11	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.34	30fps
-gpu/encode-h264/ffmpeg-vulkan-bytes	H.264, 900 1080p frames at QP 23, size (odecs in MP4)	57667402	58185060	bytes	0.99	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.34	
+gpu/encode-h264/ffmpeg-vulkan-bytes	H.264, 900 1080p frames at QP 23, size (oicut in MP4)	57667402	58185060	bytes	0.99	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.34	
 gpu/encode-h265/depth1	H.265, 900 1080p I420 frames through video.Writer, 1 picture in flight	2.063		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.29	30fps
 gpu/encode-h265/depth3	H.265, 900 1080p I420 frames through video.Writer, 3 pictures in flight	1.531		ms/frame			2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.17	30fps
 gpu/encode-h265/ffmpeg-vulkan	H.265, 900 1080p frames, three pictures in flight against FFmpeg's Vulkan Video encoder	1.531	1.330	ms/frame	1.15	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.24	30fps
-gpu/encode-h265/ffmpeg-vulkan-bytes	H.265, 900 1080p frames at QP 23, size (odecs in MP4)	67301934	74640222	bytes	0.90	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.24	
+gpu/encode-h265/ffmpeg-vulkan-bytes	H.265, 900 1080p frames at QP 23, size (oicut in MP4)	67301934	74640222	bytes	0.90	FFmpeg n9.0.2 Vulkan Video	2026-10-27	f38150cd+be185d	Radeon RX 9070 XT, AMD Ryzen 9 9900X3D	1.24	
 decode/h264-high	H.264 High, 8-bit, 1080p, 162 frames	1392.979	1062.725	ms	1.31	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.83	6.480000s
 decode/h264-high10	H.264 High 10, 4:2:0	1501.686	1190.028	ms	1.26	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.62	6.480000s
 decode/h264-high422	H.264 High 4:2:2, 10-bit	1730.765	1384.757	ms	1.25	FFmpeg n9.0.2 h264	2026-10-27	f38150cd+be185d	AMD Ryzen 9 9900X3D	2.58	6.480000s

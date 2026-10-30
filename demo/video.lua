@@ -1,9 +1,9 @@
--- odecs in 28 seconds: an onimite script (Odin + Lua video framework,
+-- oicut in 28 seconds: an onimite script (Odin + Lua video framework,
 -- https://github.com/defnotmid/onimite) showing the codecs it decodes and
 -- encodes with. Music included: the soundtrack is an odawg song
 -- (track.lua), 112 BPM, and every cut and pop sits on its grid (beat.lua,
 -- timeline.lua): the picture pumps on the kicks the drums really play and
--- flashes on the timpani. Numbers on screen come from odecs' docs (facts.lua).
+-- flashes on the timpani. Numbers on screen come from oicut's docs (facts.lua).
 --
 --     onimite render demo/video.lua -o demo/demo.mp4
 
@@ -60,7 +60,7 @@ local function hud(f, b)
   local section = 1
   for i, s in ipairs(SCENES) do if b >= s.start then section = i end end
   group({ opacity = 0.8 }, function()
-    text { "ODECS · MEDIA CODECS", x = 60, y = 66, font = ui.MONO, size = 16, fill = ui.DIM }
+    text { "OICUT · MEDIA CODECS", x = 60, y = 66, font = ui.MONO, size = 16, fill = ui.DIM }
     text { string.format("%d BPM   BAR %02d.%d", score.sections[score.section(f).index].bpm, bar, q), x = 1830,
       y = 66, align = "right", font = ui.MONO, size = 16, fill = ui.DIM }
     rect { x = 1844, y = 53, w = 14, h = 14, fill = ui.A, opacity = 0.2 + 0.8 * beat.pulse(b, 7) }

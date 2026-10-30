@@ -21,7 +21,7 @@ import "core:slice"
 
 Error :: enum {
 	None,
-	Unsupported, // not a JPEG, or a kind odecs does not decode (lossless, 12-bit, arithmetic)
+	Unsupported, // not a JPEG, or a kind oicut does not decode (lossless, 12-bit, arithmetic)
 	Invalid,     // malformed or truncated, or `pixels` too small for decode_into
 	Out_Of_Memory,
 }

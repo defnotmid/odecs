@@ -108,7 +108,7 @@ test_audiotoolbox_aac :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, probe(config, nil), media.Error.None)
 	at := []media.Provider{provider()}
-	odecs := []media.Provider{native.provider()}
+	oicut := []media.Provider{native.provider()}
 
 	// The source, keyed like the decoders' output.
 	source: Decoded
@@ -128,14 +128,14 @@ test_audiotoolbox_aac :: proc(t: ^testing.T) {
 	log.infof("Apple round trip: %.1f dB over %d samples, priming %d", db, n, -apple.indices[0])
 	testing.expectf(t, n > (FRAMES - 4) * 2048 && db > 20, "Apple round trip: %.1f dB over %d samples", db, n)
 
-	// odecs' encoder, decoded by Apple and by odecs: the same picture of it.
+	// oicut's encoder, decoded by Apple and by oicut: the same picture of it.
 	ours: Packets
 	defer {delete(ours.data); delete(ours.ranges); delete(ours.indices)}
-	if !encode(t, odecs, &ours) do return
-	by_apple, by_odecs: Decoded
-	defer {delete(by_apple.samples); delete(by_odecs.samples)}
-	if !decode(t, at, &ours, &by_apple) || !decode(t, odecs, &ours, &by_odecs) do return
-	db, n = snr(&by_odecs, &by_apple)
-	log.infof("odecs' AAC through Apple against odecs: %.1f dB over %d samples", db, n)
-	testing.expectf(t, n > (FRAMES - 4) * 2048 && db > 40, "odecs' AAC through Apple and odecs: %.1f dB over %d samples", db, n)
+	if !encode(t, oicut, &ours) do return
+	by_apple, by_oicut: Decoded
+	defer {delete(by_apple.samples); delete(by_oicut.samples)}
+	if !decode(t, at, &ours, &by_apple) || !decode(t, oicut, &ours, &by_oicut) do return
+	db, n = snr(&by_oicut, &by_apple)
+	log.infof("oicut's AAC through Apple against oicut: %.1f dB over %d samples", db, n)
+	testing.expectf(t, n > (FRAMES - 4) * 2048 && db > 40, "oicut's AAC through Apple and oicut: %.1f dB over %d samples", db, n)
 }

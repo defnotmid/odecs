@@ -1,11 +1,11 @@
 // video.Reader decode time per frame with planar output and the hardware
 // decoder required: the file opened once per round (not timed), next_frame
-// timed to the end of the stream, best of ROUNDS. -define:ODECS_DECODE_DEPTH=1
+// timed to the end of the stream, best of ROUNDS. -define:OICUT_DECODE_DEPTH=1
 // keeps one picture in flight instead of three. tests/compare.sh runs it
 // (the gpu/ cases) on its inputs.
 //
-//   odin build tests/movie_decode_timing.odin -file -o:speed -out:/tmp/odecs-movie-decode
-//   /tmp/odecs-movie-decode FILE
+//   odin build tests/movie_decode_timing.odin -file -o:speed -out:/tmp/oicut-movie-decode
+//   /tmp/oicut-movie-decode FILE
 package movie_decode_timing
 
 import video "../video"

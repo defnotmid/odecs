@@ -35,7 +35,7 @@ fl -5 -o "$out/ref_16_8ch.flac" "$out/src/s16_8ch.wav"
 fl --lax -l 32 -b 16384 -r 15 -o "$out/ref_lax_order32.flac" "$out/src/s24.wav"
 fl --lax -b 65535 -o "$out/ref_lax_block65535.flac" "$out/src/s16.wav"
 fl -5 --no-seektable --no-padding -o "$out/ref_bare.flac" "$out/src/s16.wav"
-fl -5 -T TITLE=gate -T ARTIST=odecs --padding=10000 -o "$out/ref_tagged.flac" "$out/src/s16.wav"
+fl -5 -T TITLE=gate -T ARTIST=oicut --padding=10000 -o "$out/ref_tagged.flac" "$out/src/s16.wav"
 # 12-bit: the low 4 bits of 16-bit samples zeroed, so every subframe has
 # wasted bits.
 ff -i "$out/src/s16.wav" -af "aeval=floor(val(0)*2048)/2048|floor(val(1)*2048)/2048" -c:a pcm_s16le "$out/src/s16_wasted.wav"

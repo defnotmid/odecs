@@ -75,7 +75,7 @@ The MDCT tables are computed once at startup and shared by every decoder.
 - **Fuzzing:** a pass under AddressSanitizer, with mutated packets and losses, mutated and random multistream packets with random layouts, and mutated Ogg files.
 
 Decode speed on one core against libopus 1.6.1 (built with its SSE4.1 and AVX2
-intrinsics; odecs uses none) and FFmpeg's `opus`, on music at 128 kb/s and on
+intrinsics; oicut uses none) and FFmpeg's `opus`, on music at 128 kb/s and on
 speech-tuned streams at 16 and 32 kb/s, is in [BENCHMARKS.md](../../BENCHMARKS.md)
 (`bash tests/compare.sh run decode/opus`).
 

@@ -3,7 +3,7 @@ package media_audiotoolbox
 import media ".."
 
 // AAC through Apple's AudioToolbox (AudioConverter): decoding AAC-LC, HE-AAC
-// and HE-AAC v2, which odecs' own decoder refuses, and AAC-LC encoding. It
+// and HE-AAC v2, which oicut's own decoder refuses, and AAC-LC encoding. It
 // is a system-tier provider (media.Tier.System), so in Automatic it serves
 // what the native AAC codec does not admit. Mono and stereo only: wider
 // layouts would need Apple's channel order mapped. Off Apple platforms every
@@ -14,7 +14,7 @@ import media ".."
 // decoded rate (twice the core rate for HE-AAC). Encoding takes 1024-sample
 // frames and writes raw AAC packets; the first packet's sample_index is minus
 // the encoder's priming (2112 samples with Apple's encoder), so a container
-// trims it as it does odecs' own.
+// trims it as it does oicut's own.
 provider :: proc() -> media.Provider {
 	return {backend = .AudioToolbox, name = "AudioToolbox", probe = probe, open = open}
 }

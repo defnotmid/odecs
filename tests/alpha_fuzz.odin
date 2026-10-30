@@ -3,8 +3,8 @@
 // end to end on mutated files. Every input must be accepted or refused with
 // an error; a crash, bounds failure or sanitizer report fails the run.
 //
-//   odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/odecs-alpha-fuzz
-//   /tmp/odecs-alpha-fuzz ITERATIONS FIXTURE...
+//   odin build tests/alpha_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/oicut-alpha-fuzz
+//   /tmp/oicut-alpha-fuzz ITERATIONS FIXTURE...
 package alpha_fuzz
 
 import mp4 "../container/mp4"

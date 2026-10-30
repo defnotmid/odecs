@@ -8,7 +8,7 @@ package media_vulkan
 
 // This gate executes a real sampled-plane Slang compute shader on the exposed
 // queue, with the exported readiness timeline, before checking its output.
-when #config(ODECS_GPU_SURFACE_TEST, false) {
+when #config(OICUT_GPU_SURFACE_TEST, false) {
 	Surface_Consumer :: struct {
 		decoder:    ^Decoder,
 		command:    Command,
@@ -225,7 +225,7 @@ when #config(ODECS_GPU_SURFACE_TEST, false) {
 
 	@(test)
 	device_decode_compute :: proc(t: ^testing.T) {
-		fixture :: #config(ODECS_GPU_SURFACE_FIXTURE, "")
+		fixture :: #config(OICUT_GPU_SURFACE_FIXTURE, "")
 		testing.expect(t, fixture != "")
 		if fixture == "" do return
 		data, error := os.read_entire_file(fixture, context.allocator)
@@ -259,7 +259,7 @@ when #config(ODECS_GPU_SURFACE_TEST, false) {
 		testing.expect_value(t, flush_h265_decoder(&d, receive_surface, &c), Error.None)
 		testing.expect_value(t, c.err, Error.None)
 		testing.expect(t, c.frames > 0)
-		testing.expect(t, os.write_entire_file("/tmp/odecs-gpu-surface.yuv", c.result[:]) == nil)
+		testing.expect(t, os.write_entire_file("/tmp/oicut-gpu-surface.yuv", c.result[:]) == nil)
 	}
 
 	receive_avc_surface :: proc(frame: H264_Frame, user: rawptr) {
@@ -268,7 +268,7 @@ when #config(ODECS_GPU_SURFACE_TEST, false) {
 
 	@(test)
 	device_avc_decode_compute :: proc(t: ^testing.T) {
-		fixture :: #config(ODECS_GPU_AVC_SURFACE_FIXTURE, "")
+		fixture :: #config(OICUT_GPU_AVC_SURFACE_FIXTURE, "")
 		if fixture == "" do return
 		data, error := os.read_entire_file(fixture, context.allocator)
 		testing.expect(t, error == nil)
@@ -303,7 +303,7 @@ when #config(ODECS_GPU_SURFACE_TEST, false) {
 		testing.expect(t, c.frames > 0)
 		testing.expect(
 			t,
-			os.write_entire_file("/tmp/odecs-gpu-avc-surface.yuv", c.result[:]) == nil,
+			os.write_entire_file("/tmp/oicut-gpu-avc-surface.yuv", c.result[:]) == nil,
 		)
 	}
 }

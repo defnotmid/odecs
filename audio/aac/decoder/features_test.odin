@@ -8,7 +8,7 @@ import "core:math"
 import "core:slice"
 import "core:testing"
 
-FEATURE_EXPORT :: #config(ODECS_AAC_FEATURE_EXPORT, false)
+FEATURE_EXPORT :: #config(OICUT_AAC_FEATURE_EXPORT, false)
 
 @(private)
 feature_banks_equal :: #force_no_inline proc(actual, expected: []aac.Filterbank) -> bool {

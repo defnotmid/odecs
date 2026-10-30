@@ -215,5 +215,5 @@ for the alpha stream (`Packet.alpha`). QP 0..51 maps to
 `base_q_idx = 5 * qp`. Frame timestamps come from the rational frame rate in
 nanoseconds, without accumulating rounded deltas, and the last frame gets
 its actual duration. Audio is refused rather than dropped.
-`tests/movie_alpha_write.odin` covers it; its WebM decodes in odecs
+`tests/movie_alpha_write.odin` covers it; its WebM decodes in oicut
 identically to libvpx and passes `tests/vp9_browser_check.sh`.

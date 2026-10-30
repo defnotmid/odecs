@@ -1,8 +1,8 @@
 // Development-only FFmpeg Vulkan Video encoder for tests/compare.sh, set up
-// as video.Writer sets up odecs' (tests/movie_encode_timing.odin): the same
+// as video.Writer sets up oicut's (tests/movie_encode_timing.odin): the same
 // 30 synthetic I420 pictures cycled, constant QP 23, a keyframe every 15,
 // IDR and P pictures with one reference. Each picture is converted to NV12
-// and uploaded inside the timer, as odecs uploads its I420 planes. Five fresh
+// and uploaded inside the timer, as oicut uploads its I420 planes. Five fresh
 // encoders, whose outputs must be identical; the median, init not timed.
 //   reference_vulkan_encode h264|h265 [W H FRAMES]
 #define _POSIX_C_SOURCE 200809L

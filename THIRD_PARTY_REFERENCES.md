@@ -4,7 +4,7 @@ Reference implementations studied, ported or used as development oracles,
 each pinned to an exact commit. `bash tools/fetch_third_party.sh [name...]`
 fetches them into `third_party/` (a shallow fetch of that commit, or the
 whole history where the host refuses one, then a detached checkout; existing
-trees are left as they are). `third_party/` is never committed. What odecs
+trees are left as they are). `third_party/` is never committed. What oicut
 took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 
 | Reference | Used for | Local path | Commit | Commit date | License |
@@ -30,11 +30,11 @@ took from each, and under which license, is in [PROVENANCE.md](PROVENANCE.md).
 | [x264](https://code.videolan.org/videolan/x264) 0.165, the stable branch | oracle: H.264 encode speed and size baseline (`tests/compare.sh`; only that development harness links it) | `third_party/x264` | `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` | 2025-06-08 | GPL-2.0-or-later |
 | [x265](https://bitbucket.org/multicoreware/x265_git) 4.2 | oracle: H.265 encode speed and size baseline (`tests/compare.sh`; only that development harness links it) | `third_party/x265` | `e444744c03978c1fb4e037168967020cf2648427` | 2026-04-19 | GPL-2.0-or-later |
 | [dav1d](https://code.videolan.org/videolan/dav1d) 1.5.4 | oracle: AV1 decode speed baseline (`tests/compare.sh` links it into its FFmpeg build) | `third_party/dav1d` | `54706fc6bc0cdecab7e9593974a4039cc038fca7` | 2026-07-14 | BSD-2-Clause |
-| [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) v1.4.366 | builds the FFmpeg oracle's Vulkan Video decoding (`tests/compare.sh`); odecs uses Odin's `vendor:vulkan` | `third_party/Vulkan-Headers` | `73814d006638aa00bd553215b054f0f02e457e22` | 2026-10-23 | Apache-2.0 or MIT |
+| [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) v1.4.366 | builds the FFmpeg oracle's Vulkan Video decoding (`tests/compare.sh`); oicut uses Odin's `vendor:vulkan` | `third_party/Vulkan-Headers` | `73814d006638aa00bd553215b054f0f02e457e22` | 2026-10-23 | Apache-2.0 or MIT |
 
 Submodules and dependencies are not fetched (Kvazaar's optional `greatest`
 test submodule is not recreated). hevc.js's notices also name BSD-3-Clause
-mp4box.js and CC-BY-3.0 Big Buck Bunny media, which odecs does not use.
+mp4box.js and CC-BY-3.0 Big Buck Bunny media, which oicut does not use.
 
 ## License file hashes
 

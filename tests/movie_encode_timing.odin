@@ -4,8 +4,8 @@
 // MP4 hash checks that every run (and every encoder change) writes the
 // same bytes.
 //
-//   odin build tests/movie_encode_timing.odin -file -o:speed -out:/tmp/odecs-movie-encode
-//   /tmp/odecs-movie-encode [h264|h265] [W H FRAMES] [out.mp4]
+//   odin build tests/movie_encode_timing.odin -file -o:speed -out:/tmp/oicut-movie-encode
+//   /tmp/oicut-movie-encode [h264|h265] [W H FRAMES] [out.mp4]
 package movie_encode_timing
 
 import mp4 "../container/mp4"

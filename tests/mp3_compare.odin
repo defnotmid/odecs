@@ -5,8 +5,8 @@
 // (gapless-trimmed like FFmpeg when the stream has a LAME tag). Reports the
 // decode speed.
 //
-//   odin build tests/mp3_compare.odin -file -o:speed -out:/tmp/odecs-mp3-compare
-//   /tmp/odecs-mp3-compare FILE [REF.pcm|REF.f32]
+//   odin build tests/mp3_compare.odin -file -o:speed -out:/tmp/oicut-mp3-compare
+//   /tmp/oicut-mp3-compare FILE [REF.pcm|REF.f32]
 package mp3_compare
 
 import mp3 "../audio/mp3"

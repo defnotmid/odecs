@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Alpha-video gate: ProRes in QuickTime and VP9 (with alpha) in WebM, decoded
-# by odecs and compared with FFmpeg, plus video.Reader end to end, QuickTime
+# by oicut and compared with FFmpeg, plus video.Reader end to end, QuickTime
 # PCM, and a short fuzz pass. FFmpeg is a development oracle only.
 #   bash tests/alpha_check.sh [work-dir] [--large]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work=${1:-/tmp/odecs-alpha}
+work=${1:-/tmp/oicut-alpha}
 large=${2:-}
 mkdir -p "$work"
 fail=0
@@ -17,11 +17,11 @@ odin test video/vp9
 odin test video/vp9/decoder
 odin test container/webm
 odin test container/mp4
-odin test video -o:speed -define:ODECS_PATENTED=true
+odin test video -o:speed -define:OICUT_PATENTED=true
 odin build tests/alpha_compare.odin -file -o:speed -out:"$work/alpha_compare"
-odin build tests/movie_alpha.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_alpha"
-odin build tests/alpha_fuzz.odin -file -o:speed -define:ODECS_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
-odin build tests/movie_planar.odin -file -o:speed -define:ODECS_PATENTED=true -out:"$work/movie_planar"
+odin build tests/movie_alpha.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$work/movie_alpha"
+odin build tests/alpha_fuzz.odin -file -o:speed -define:OICUT_PATENTED=true -sanitize:address -out:"$work/alpha_fuzz"
+odin build tests/movie_planar.odin -file -o:speed -define:OICUT_PATENTED=true -out:"$work/movie_planar"
 bash tests/alpha_fixtures.sh "$work/fx" $large > /dev/null
 
 echo "== decoded planes against FFmpeg (ProRes colour within 1, VP9 and alpha exact)"

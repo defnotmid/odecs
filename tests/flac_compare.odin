@@ -4,8 +4,8 @@
 // decode, and random seeks against the sequential decode. Reports decode
 // speed.
 //
-//   odin build tests/flac_compare.odin -file -o:speed -out:/tmp/odecs-flac-compare
-//   /tmp/odecs-flac-compare FILE.flac [ORACLE.f32|-]
+//   odin build tests/flac_compare.odin -file -o:speed -out:/tmp/oicut-flac-compare
+//   /tmp/oicut-flac-compare FILE.flac [ORACLE.f32|-]
 package flac_compare
 
 import flac "../audio/flac"

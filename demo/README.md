@@ -1,13 +1,13 @@
-# odecs demo
+# oicut demo
 
-A 28 second showcase of odecs, music included: 1920x1080, 60 fps, 112 BPM.
+A 28 second showcase of oicut, music included: 1920x1080, 60 fps, 112 BPM.
 It is an [onimite](https://github.com/defnotmid/onimite) script (Odin + Lua
-video framework, which decodes its clips and encodes its output with odecs),
-not part of odecs' build.
+video framework, which decodes its clips and encodes its output with oicut),
+not part of oicut's build.
 
 | bars | scene | what |
 | --- | --- | --- |
-| 1-2 | Title | the codecs and containers odecs handles land one on each note of the marimba hook, then the wordmark slams in on the timpani |
+| 1-2 | Title | the codecs and containers oicut handles land one on each note of the marimba hook, then the wordmark slams in on the timpani |
 | 3-5 | Alpha | the ProRes 4444 avatar and its VP9-alpha WebM, decoded on the frame clock and composited live over sliding stripes with a glow, each with its decode numbers |
 | 6-7 | WebP | `bryce.webp` (11158×2156 lossy) panned across the frame, with its decode time |
 | 8-10 | Encode | three charts a bar each: Vulkan Video decoding and encoding, whose bars shrink on beat 3 (a pizzicato note) from one picture at a time to three in flight, then the pooled native H.264 encoder next to x264 |
@@ -16,7 +16,7 @@ not part of odecs' build.
 ## Render
 
 With an [onimite release](https://github.com/defnotmid/onimite/releases)
-on the PATH, from the odecs directory:
+on the PATH, from the oicut directory:
 
 ```sh
 sh demo/fetch.sh && onimite render demo/video.lua --qp 22 -o demo/demo.mp4
@@ -69,7 +69,7 @@ everything happens; `beat.lua` is the clock and easing on the song's beat;
 
 - `transparent.mov` (fetched): ProRes 4444 with alpha, the avatar clip of
   fframes' audio-announce example, MIT (`media/fframes-MIT.txt`).
-- `avatar_vp9_alpha.webm` (fetched, an asset of odecs' v0.0.12 release):
+- `avatar_vp9_alpha.webm` (fetched, an asset of oicut's v0.0.12 release):
   the same avatar as VP9 with an alpha stream, made from it with FFmpeg;
   fframes' MIT licence.
 - `bryce.webp` (fetched): from libwebp's test corpus,

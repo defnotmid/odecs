@@ -27,9 +27,9 @@ get() {
 get transparent.mov 23b70a14328a74bfde0bd253c423ee883b650b8790ab8fcfabde670b079a9284 \
 	https://raw.githubusercontent.com/dmtrKovalenko/fframes/f962cd6df51d19fa06462d470fc57e90cc0f17b0/examples/audio-announce/dynamic_media/transparent.mov
 # The same avatar as VP9 with an alpha stream, made from it with FFmpeg: an
-# asset of odecs' v0.0.12 release.
+# asset of oicut's v0.0.12 release.
 get avatar_vp9_alpha.webm 008d65eb0e8d958c9cbacf31183f6ec91248c3c21346f9145bdeac9375fb783b \
-	https://github.com/defnotmid/odecs/releases/download/v0.0.12/avatar_vp9_alpha.webm
+	https://github.com/defnotmid/oicut/releases/download/v0.0.12/avatar_vp9_alpha.webm
 # 11158x2156 lossy WebP from libwebp's test corpus, at the commit
 # tests/webp_fixtures.sh pins (gitiles serves a file base64).
 get bryce.webp a0921902341af61a058297ce7851220c26b12eb0a2e8946ebefa6906ebb64e52 \

@@ -33,7 +33,7 @@ Backend :: enum {
 	MediaFoundation,
 	AudioToolbox,
 }
-// Automatic tries the tiers in this order: hardware, then odecs' own codecs,
+// Automatic tries the tiers in this order: hardware, then oicut's own codecs,
 // then a system library (libavcodec) for what neither has.
 Tier :: enum {
 	Hardware,

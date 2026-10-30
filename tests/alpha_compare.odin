@@ -1,10 +1,10 @@
-// Decodes a ProRes .mov or VP9 .webm fixture with odecs and compares every
+// Decodes a ProRes .mov or VP9 .webm fixture with oicut and compares every
 // frame with FFmpeg's raw decode written by tests/alpha_fixtures.sh
 // (NAME.yuv in NAME.fmt layout). Reports per-plane max and mean absolute
 // differences and the share of differing samples.
 //
-//   odin build tests/alpha_compare.odin -file -o:speed -out:/tmp/odecs-alpha-compare
-//   /tmp/odecs-alpha-compare FIXTURE.mov|webm [ORACLE.yuv] [THREADS]
+//   odin build tests/alpha_compare.odin -file -o:speed -out:/tmp/oicut-alpha-compare
+//   /tmp/oicut-alpha-compare FIXTURE.mov|webm [ORACLE.yuv] [THREADS]
 package alpha_compare
 
 import common "../common"

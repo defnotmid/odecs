@@ -1,11 +1,11 @@
 # Provenance
 
-odecs is MIT licensed. This file records what each package was written from,
+oicut is MIT licensed. This file records what each package was written from,
 and what it was ported from, with each source's license. Everything ported
 is under a license compatible with MIT (MIT, BSD-2-Clause, BSD-3-Clause,
 Apache-2.0, CC0, public domain), and the notices those licenses require
 are kept beside the code. No code from copyleft projects (FFmpeg, x264, x265)
-is in odecs; they are used only as binaries to make fixtures and check output.
+is in oicut; they are used only as binaries to make fixtures and check output.
 
 The reference sources are pinned in
 [THIRD_PARTY_REFERENCES.md](THIRD_PARTY_REFERENCES.md) and fetched by
@@ -77,7 +77,7 @@ as PDMP3 implements them; their cosine tables and windows are computed.
 `jpeg` is our own decoder, written from ITU-T T.81 (baseline and
 progressive, Huffman coding). Its IDCT is the Loeffler, Ligtenberg and
 Moschytz factorisation with 13-bit fixed-point constants. libjpeg-turbo is
-the oracle and the speed to meet. Where T.81 leaves room, odecs follows its
+the oracle and the speed to meet. Where T.81 leaves room, oicut follows its
 behaviour, so the output is identical to libjpeg-turbo at its defaults:
 - the IDCT's rounding;
 - the alternating rounding of fancy upsampling;
@@ -139,7 +139,7 @@ reference streams as fixtures.
 
 ## Oracles and reading only
 
-None of the following is linked into odecs or copied into it:
+None of the following is linked into oicut or copied into it:
 - **FFmpeg (LGPL)** was used as a binary: to write fixtures, decode reference pictures and PCM, and read bitstreams (`trace_headers`).
   - The H.265 decoder's CABAC decision uses the technique of FFmpeg's branchless `get_cabac`, computing both outcomes and masking. That is an idea, not code: the routine is the H.265 specification's DecodeDecision, written in Odin with the specification's tables.
   - While chasing an AV1 GPU fault, FFmpeg's `vulkan_av1.c` and `av1dec.c`, and Mesa's `radv_video.c` and `ac_vcn_dec.c` (MIT), were read to compare what each passes to the driver. Nothing was copied; the parser and frontend were written and verified first.

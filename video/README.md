@@ -10,7 +10,7 @@ VideoToolbox on macOS (H.264 and HEVC, falling back to Apple's software codecs
 when hardware is absent), Vulkan Video on Linux and Windows. Encoding
 likewise uses VideoToolbox on macOS and Vulkan Video on Linux and Windows, and the
 native codecs elsewhere (and for alpha and VP9). Native H.264 and H.265 are
-built only with `-define:ODECS_PATENTED=true` ([media](../media/README.md));
+built only with `-define:OICUT_PATENTED=true` ([media](../media/README.md));
 without it they go through VideoToolbox, Vulkan Video, Media Foundation (Windows)
 or runtime-loaded `libavcodec`, and an H.265 file with an auxiliary alpha layer decodes its base
 colour layer opaquely.
@@ -85,7 +85,7 @@ video.destroy(&w)
   BlockAdditional 1, which Chrome, Firefox and Edge composite. Files are
   still several times larger than libvpx's (see `video/vp9/encoder`).
 - **Transparency:** `transparency = .Premultiplied` or `.Straight` keeps alpha
-  as an H.265 auxiliary alpha layer (native encoder, `ODECS_PATENTED` builds; Annex F, laid out as
+  as an H.265 auxiliary alpha layer (native encoder, `OICUT_PATENTED` builds; Annex F, laid out as
   Apple's VideoToolbox encoder writes it), which Safari, QuickTime and
   AVFoundation play as transparent video. `alpha` still says how the RGBA
   input relates to its alpha; `write_i420` and `write_nv12` take an alpha
@@ -305,8 +305,8 @@ Colour conversion and the reader's overhead (`tests/movie_timing.odin`, pinned t
 ## Validation
 
 ```sh
-odin test video -o:speed -define:ODECS_PATENTED=true
-bash tests/mp4_check.sh /tmp/odecs-mp4
+odin test video -o:speed -define:OICUT_PATENTED=true
+bash tests/mp4_check.sh /tmp/oicut-mp4
 odin run tools/mp4_smoke -o:speed -- /tmp/smoke.mp4 --codec h264
 ```
 

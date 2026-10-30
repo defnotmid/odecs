@@ -78,7 +78,7 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 // picture submitted ENCODE_DEPTH-1 calls earlier and drain publishes the rest,
 // so upload, encode and readback overlap across pictures. At 1080p on RADV
 // two already keep the encoder busy (3.6 -> 2.0 ms/frame H.264).
-ENCODE_DEPTH :: #config(ODECS_ENCODE_DEPTH, 3)
+ENCODE_DEPTH :: #config(OICUT_ENCODE_DEPTH, 3)
 
 @(private, rodata)
 GPU_CODECS := #partial [media.Codec]Codec {

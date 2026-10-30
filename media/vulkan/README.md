@@ -26,7 +26,7 @@ the driver; decoding through this package does not run the native pixel decoder.
 | HEVC decode | Main 8-bit / Main10 8 or 10-bit, progressive 4:2:0, admitted native syntax |
 | AV1 decode | Main 8 or 10-bit 4:2:0, host output; syntax from `av1`; see [its scope](../../video/av1/README.md) |
 
-Host decode keeps `DECODE_DEPTH` (3; `-define:ODECS_DECODE_DEPTH=n`) pictures
+Host decode keeps `DECODE_DEPTH` (3; `-define:OICUT_DECODE_DEPTH=n`) pictures
 in flight, each with its own output image, bitstream and readback buffers.
 `decode_picture` returns the picture submitted two calls earlier, and
 `finish_decoder` returns the rest. The frontends keep a queue of what each
@@ -41,7 +41,7 @@ only the interleaved chroma is split; P010 is shifted down in one pass.
 `append_frame_samples` writes a frame tightly (yuv420p/yuv420p10le).
 
 Decode time per frame through `video.Reader`, one picture in flight against
-three (`-define:ODECS_DECODE_DEPTH`), and against FFmpeg's Vulkan Video with
+three (`-define:OICUT_DECODE_DEPTH`), and against FFmpeg's Vulkan Video with
 each frame downloaded, is in [BENCHMARKS.md](../../BENCHMARKS.md)
 (`bash tests/compare.sh run gpu/decode`, `tests/movie_decode_timing.odin`).
 
@@ -78,7 +78,7 @@ queued (nil before that). After the last picture, call `flush_encoder` or
 the call returns, and Surface input waits only for its GPU copy, so both input
 borrows still end with the call. The bitstream is identical at every depth.
 The common Vulkan media adapter uses three pictures in flight and flushes them
-in `drain` (`-define:ODECS_ENCODE_DEPTH` sets the depth). When it came in, 900 1080p I420 frames through `video.Writer` on an RX 9070 XT
+in `drain` (`-define:OICUT_ENCODE_DEPTH` sets the depth). When it came in, 900 1080p I420 frames through `video.Writer` on an RX 9070 XT
 (`tests/movie_encode_timing.odin`): H.264 3.64 → 2.01 ms/frame, HEVC 3.59 →
 1.56 ms/frame, with identical MP4 bytes; the hardware encoder became the bound
 (the encoding thread about 30% busy). The current figures at depths 1 and 3
@@ -218,20 +218,20 @@ Ordinary tests do not require a GPU. Hardware flags request actual execution
 and fail when the required hardware is unavailable.
 
 ```sh
-odin test media/vulkan -o:speed -define:ODECS_PATENTED=true
-odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_TEST=true \
-  -define:ODECS_GPU_CODEC=h265 -define:ODECS_GPU_WIDTH=384 \
-  -define:ODECS_GPU_HEIGHT=240 -define:ODECS_GPU_DEPTH=10 \
-  -define:ODECS_GPU_QP=26 -define:ODECS_GPU_GOP=15 \
-  -define:ODECS_GPU_FRAMES=37
-ffmpeg -v error -i /tmp/odecs-gpu-h265.265 -f null -
+odin test media/vulkan -o:speed -define:OICUT_PATENTED=true
+odin test media/vulkan -o:speed -define:OICUT_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:OICUT_GPU_TEST=true \
+  -define:OICUT_GPU_CODEC=h265 -define:OICUT_GPU_WIDTH=384 \
+  -define:OICUT_GPU_HEIGHT=240 -define:OICUT_GPU_DEPTH=10 \
+  -define:OICUT_GPU_QP=26 -define:OICUT_GPU_GOP=15 \
+  -define:OICUT_GPU_FRAMES=37
+ffmpeg -v error -i /tmp/oicut-gpu-h265.265 -f null -
 ```
 
-Encoder gate flags are `ODECS_GPU_TEST`, `ODECS_GPU_CODEC` (`h264`/`h265`),
-`ODECS_GPU_WIDTH`, `ODECS_GPU_HEIGHT`, `ODECS_GPU_DEPTH`, `ODECS_GPU_QP`,
-`ODECS_GPU_GOP` and `ODECS_GPU_FRAMES`. Output is
-`/tmp/odecs-gpu-h264.264` or `/tmp/odecs-gpu-h265.265`.
-`ODECS_GPU_TRACE=true` prints the selected encoder device and decoder failure
+Encoder gate flags are `OICUT_GPU_TEST`, `OICUT_GPU_CODEC` (`h264`/`h265`),
+`OICUT_GPU_WIDTH`, `OICUT_GPU_HEIGHT`, `OICUT_GPU_DEPTH`, `OICUT_GPU_QP`,
+`OICUT_GPU_GOP` and `OICUT_GPU_FRAMES`. Output is
+`/tmp/oicut-gpu-h264.264` or `/tmp/oicut-gpu-h265.265`.
+`OICUT_GPU_TRACE=true` prints the selected encoder device and decoder failure
 stage. The environment must expose a real Vulkan device; device discovery from
 a sandbox without `/dev/dri` does not validate execution.
 
@@ -239,13 +239,13 @@ For the resident shader gate, provide a low-delay HEVC fixture, optionally also
 a low-delay H.264 fixture:
 
 ```sh
-odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:ODECS_GPU_SURFACE_TEST=true \
-  -define:ODECS_GPU_SURFACE_FIXTURE=/absolute/low-delay.265 \
-  -define:ODECS_GPU_AVC_SURFACE_FIXTURE=/absolute/low-delay.264
+odin test media/vulkan -o:speed -define:OICUT_PATENTED=true -define:ODIN_TEST_THREADS=1 -define:OICUT_GPU_SURFACE_TEST=true \
+  -define:OICUT_GPU_SURFACE_FIXTURE=/absolute/low-delay.265 \
+  -define:OICUT_GPU_AVC_SURFACE_FIXTURE=/absolute/low-delay.264
 ```
 
-Compare `/tmp/odecs-gpu-surface.yuv` and
-`/tmp/odecs-gpu-avc-surface.yuv` with planar reference decodes using the fixture's
+Compare `/tmp/oicut-gpu-surface.yuv` and
+`/tmp/oicut-gpu-avc-surface.yuv` with planar reference decodes using the fixture's
 bit depth. P010 results are little-endian 16-bit samples with values 0..1023.
 
 The shared-device gate generates 37 pictures and compares an all-host reference
@@ -254,14 +254,14 @@ a real second Context, lazy-frontend `Busy`, constructor refusal rollback and
 surface preflight without consuming history:
 
 ```sh
-odin test media/vulkan -o:speed -define:ODECS_PATENTED=true -define:ODIN_TEST_THREADS=1 \
-  -define:ODECS_GPU_CONTEXT_TEST=true -define:ODECS_GPU_CODEC=h265 \
-  -define:ODECS_GPU_DEPTH=10 -define:ODECS_GPU_WIDTH=386 \
-  -define:ODECS_GPU_HEIGHT=242 -define:ODECS_GPU_GOP=15
+odin test media/vulkan -o:speed -define:OICUT_PATENTED=true -define:ODIN_TEST_THREADS=1 \
+  -define:OICUT_GPU_CONTEXT_TEST=true -define:OICUT_GPU_CODEC=h265 \
+  -define:OICUT_GPU_DEPTH=10 -define:OICUT_GPU_WIDTH=386 \
+  -define:OICUT_GPU_HEIGHT=242 -define:OICUT_GPU_GOP=15
 ```
 
 Use `h264`/8, `h265`/8 and `h265`/10 to cover all encode formats. Mixed streams
-are saved to `/tmp/odecs-context-mixed.264` or `.265`.
+are saved to `/tmp/oicut-context-mixed.264` or `.265`.
 All three 386×242 gates passed: 25 surface frames and 12 host frames per stream
 matched the all-host encoded bitstream exactly. Each also passed real foreign
 Context and self-image refusal, below-device-minimum decoder constructor
@@ -271,9 +271,9 @@ feeding surface encode, and compares complete output bitstreams and pixels with
 native decode plus host upload:
 
 ```sh
-odin build tests/media_pipeline.odin -file -o:speed -out:/tmp/odecs-media-pipeline
-/tmp/odecs-media-pipeline /absolute/low-delay.265 h265 400 256 10 \
-  /tmp/odecs-device-crop 6 4 386 242
+odin build tests/media_pipeline.odin -file -o:speed -out:/tmp/oicut-media-pipeline
+/tmp/oicut-media-pipeline /absolute/low-delay.265 h265 400 256 10 \
+  /tmp/oicut-device-crop 6 4 386 242
 ```
 
 The final public matrix passed twelve 37-picture cases: six direct cases and

@@ -1,6 +1,6 @@
 package media_vulkan
 
-@(require) import "core:fmt" // the opt-in ODECS_GPU_TRACE output
+@(require) import "core:fmt" // the opt-in OICUT_GPU_TRACE output
 import vk "vendor:vulkan"
 
 // Progressive H.264 High / HEVC Main or Main10, 4:2:0, constant QP, low-delay
@@ -93,7 +93,7 @@ init_encoder :: proc(e: ^Encoder, config: Config) -> (err: Error) {
 	}
 	caps, encode_caps, h264_caps := open_device(&e.device, r, config.device_index, config.shared_context) or_return
 	when #config(
-		ODECS_GPU_TRACE,
+		OICUT_GPU_TRACE,
 		false,
 	) {fmt.eprintln("Vulkan encoder:", string(cstring(raw_data(e.device.properties.deviceName[:]))), "DPB capability", caps.flags)}
 	e.encode_caps = h264_caps

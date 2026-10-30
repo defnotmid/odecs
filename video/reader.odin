@@ -457,7 +457,7 @@ sps_color :: proc(r: ^Reader, codec: Video_Codec) -> (color: media.Color) {
 				append(&scratch, b)
 				zeros = b == 0 ? zeros + 1 : 0
 			}
-			if v, ok := hevcd.parse_vps(scratch[:]); ok && v.alpha_layer_id != 0 && native.ODECS_NATIVE_H265 && r.config.preference != .Require_Hardware do r.video.has_alpha = true
+			if v, ok := hevcd.parse_vps(scratch[:]); ok && v.alpha_layer_id != 0 && native.OICUT_NATIVE_H265 && r.config.preference != .Require_Hardware do r.video.has_alpha = true
 			continue
 		}
 		// The base layer's SPS (an alpha layer has its own, with layer id 1).
@@ -551,11 +551,11 @@ video_providers :: proc(r: ^Reader) -> [5]media.Provider {
 @(private)
 undecodable_detail :: proc(r: ^Reader) -> string {
 	if r.video.codec == .AV1 do return "AV1 needs a GPU with Vulkan Video AV1 decoding (Main, 4:2:0, 8 or 10 bits)"
-	when !native.ODECS_NATIVE_H264 {
-		if r.video.codec == .H264 do return "no VideoToolbox, Vulkan Video or libavcodec H.264 decoder admits this track, and native H.264 is not built in (-define:ODECS_PATENTED=true)"
+	when !native.OICUT_NATIVE_H264 {
+		if r.video.codec == .H264 do return "no VideoToolbox, Vulkan Video or libavcodec H.264 decoder admits this track, and native H.264 is not built in (-define:OICUT_PATENTED=true)"
 	}
-	when !native.ODECS_NATIVE_H265 {
-		if r.video.codec == .H265 do return "no VideoToolbox, Vulkan Video or libavcodec H.265 decoder admits this track, and native H.265 is not built in (-define:ODECS_PATENTED=true)"
+	when !native.OICUT_NATIVE_H265 {
+		if r.video.codec == .H265 do return "no VideoToolbox, Vulkan Video or libavcodec H.265 decoder admits this track, and native H.265 is not built in (-define:OICUT_PATENTED=true)"
 	}
 	return "no decoder admits this video track"
 }

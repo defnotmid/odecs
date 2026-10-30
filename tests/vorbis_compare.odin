@@ -1,4 +1,4 @@
-// Decodes Ogg Vorbis files with odecs/audio and with libvorbis (vorbisfile,
+// Decodes Ogg Vorbis files with oicut/audio and with libvorbis (vorbisfile,
 // the reference decoder and the speed to meet) and compares the f32 PCM:
 // the same frame count, and the SNR of the difference (float decoders
 // differ in rounding). Times are the best of several decodes each.
@@ -52,7 +52,7 @@ reference :: proc(path: string, out: ^[dynamic]f32) -> (channels, rate: int, ok:
 		n := int(ov_read_float(&vf, &pcm, 4096, &section))
 		if n < 0 do return
 		if n == 0 do break
-		// libvorbis keeps the stream's order; odecs returns WAVE order.
+		// libvorbis keeps the stream's order; oicut returns WAVE order.
 		order, _ := audio.channel_order(.Vorbis, channels)
 		for i in 0 ..< n do for ch in 0 ..< channels do append(out, pcm[channels <= 8 ? int(order[ch]) : ch][i])
 	}
@@ -75,10 +75,10 @@ main :: proc() {
 			fmt.printfln("%-24s both refuse (%v)", name, aerr)
 			continue
 		case !ok:
-			fmt.printfln("%-24s libvorbis refuses, odecs decodes", name)
+			fmt.printfln("%-24s libvorbis refuses, oicut decodes", name)
 			continue
 		case aerr != .None:
-			fmt.printfln("%-24s FAIL odecs %v", name, aerr)
+			fmt.printfln("%-24s FAIL oicut %v", name, aerr)
 			failed += 1
 			continue
 		}

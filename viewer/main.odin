@@ -1,4 +1,4 @@
-// One player for everything odecs decodes: MP4/MOV (H.264, H.265, ProRes,
+// One player for everything oicut decodes: MP4/MOV (H.264, H.265, ProRes,
 // AAC, FLAC, PCM), WebM/MKV (VP9 with alpha, H.264, H.265, AAC, FLAC, PCM),
 // WAV, FLAC, MP3, Ogg Opus, raw Annex-B H.264/H.265 streams and ADTS AAC. Alpha shows over a checkerboard; audio plays with a visualizer.
 //
@@ -95,7 +95,7 @@ main :: proc() {
 		win_w, win_h = max(i32(f64(s.width) * scale), 320), max(i32(f64(s.height) * scale), 180)
 	}
 	name := path[strings.last_index_byte(path, '/') + 1:]
-	window := sdl.CreateWindow(fmt.ctprintf("odecs viewer: %s", name), win_w, win_h, {.RESIZABLE, .HIGH_PIXEL_DENSITY})
+	window := sdl.CreateWindow(fmt.ctprintf("oicut viewer: %s", name), win_w, win_h, {.RESIZABLE, .HIGH_PIXEL_DENSITY})
 	if window == nil {fmt.eprintln("SDL:", sdl.GetError()); os.exit(1)}
 	defer sdl.DestroyWindow(window)
 	p.renderer = sdl.CreateRenderer(window, nil)

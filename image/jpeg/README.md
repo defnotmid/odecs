@@ -54,7 +54,7 @@ portable `#simd`:
 These return `.Unsupported`.
 
 libjpeg-turbo smooths the blocks of a progressive image whose scans stop
-before refining the low AC coefficients. odecs does not, so such files
+before refining the low AC coefficients. oicut does not, so such files
 differ. Complete progressive files are identical.
 
 ## Verification
@@ -78,7 +78,7 @@ Against stb_image the same files are at least 58 dB PSNR. The fuzz pass
 ## Speed
 
 1080p decode times on one core against libjpeg-turbo 3.1.2 with its SIMD
-(AVX2), decoding into a reused buffer as `decode_into` does, with odecs built
+(AVX2), decoding into a reused buffer as `decode_into` does, with oicut built
 for this machine (`-microarch:native`), for `x86-64-v3` (AVX2) and for any
 x86-64, and against stb_image, are in [BENCHMARKS.md](../../BENCHMARKS.md)
 (`bash tests/compare.sh run 'decode/(jpeg|stb)'`). Built for AVX2 only, the gap

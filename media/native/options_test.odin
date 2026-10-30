@@ -28,8 +28,8 @@ test_native_options_admit_only_relevant_encode_geometry :: proc(t: ^testing.T) {
 		h265_tile_cols   = 999,
 		h265_tile_rows   = 999,
 	}
-	h264_ok: media.Error = ODECS_NATIVE_H264 ? .None : .Unavailable
-	h265_ok: media.Error = ODECS_NATIVE_H265 ? .None : .Unavailable
+	h264_ok: media.Error = OICUT_NATIVE_H264 ? .None : .Unavailable
+	h265_ok: media.Error = OICUT_NATIVE_H265 ? .None : .Unavailable
 	testing.expect_value(t, probe(cfg, &options), h264_ok)
 	cfg.codec = .H265
 	for &bad in ([]Options{{h265_tile_cols = 2}, {h265_tile_cols = 3, h265_tile_rows = 2}, {h265_tile_cols = 2, h265_tile_rows = 3}}) {
@@ -162,7 +162,7 @@ capture_native_lane :: proc(packet: media.Packet, user: rawptr) {
 @(test)
 test_native_provider_pool_and_ordered_lanes_preserve_bytes :: proc(t: ^testing.T) {
 	for codec in ([]media.Codec{.H264, .H265}) {
-		if (codec == .H264 && !ODECS_NATIVE_H264) || (codec == .H265 && !ODECS_NATIVE_H265) do continue
+		if (codec == .H264 && !OICUT_NATIVE_H264) || (codec == .H265 && !OICUT_NATIVE_H265) do continue
 		cfg := media.Config {
 			codec      = codec,
 			operation  = .Encode,
@@ -312,7 +312,7 @@ test_native_provider_pool_and_ordered_lanes_preserve_bytes :: proc(t: ^testing.T
 
 @(test)
 test_native_hevc_borrowed_u16_matches_normalized_fallback :: proc(t: ^testing.T) {
-	when !ODECS_NATIVE_H265 do return
+	when !OICUT_NATIVE_H265 do return
 	for depth in ([]int{8, 10}) do for chroma in ([]media.Chroma{.YUV420, .YUV422, .YUV444, .Monochrome}) {
 		cfg := media.Config {
 			codec      = .H265,

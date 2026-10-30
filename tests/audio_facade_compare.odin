@@ -1,14 +1,14 @@
-// Decodes audio files with odecs/audio and with miniaudio (vendor:miniaudio,
+// Decodes audio files with oicut/audio and with miniaudio (vendor:miniaudio,
 // what the suite used before: dr_wav, dr_flac, dr_mp3, stb_vorbis) and
 // compares the f32 PCM. WAV and FLAC must be identical, but for two
 // limits of miniaudio's: dr_wav maps 8-bit 128 to 1/255 where FFmpeg and
-// odecs give 0, and dr_flac decodes no 32-bit FLAC. MP3 and Vorbis are
+// oicut give 0, and dr_flac decodes no 32-bit FLAC. MP3 and Vorbis are
 // reported, not gated: their accuracy is gated against FFmpeg, the ISO
 // streams and libvorbis (mp3_check.sh, vorbis_check.sh), where dr_mp3 is
 // 70-89 dB from FFmpeg and miniaudio's 5.1 Vorbis is wrong. They are
 // aligned within a few thousand samples first, since decoders trim
 // encoder delay differently. Times are the
-// best of five; memory is odecs' peak allocation.
+// best of five; memory is oicut's peak allocation.
 //   odin run tests/audio_facade_compare.odin -file -o:speed -- file...
 package audio_facade_compare
 
@@ -72,11 +72,11 @@ main :: proc() {
 			fmt.printfln("%-28s both refuse (%v)", name, aerr)
 			continue
 		case !ok:
-			fmt.printfln("%-28s miniaudio refuses, odecs decodes %d ch %d Hz", name, a.channels, a.rate)
+			fmt.printfln("%-28s miniaudio refuses, oicut decodes %d ch %d Hz", name, a.channels, a.rate)
 			audio.destroy_audio(&a, mem.tracking_allocator(&track))
 			continue
 		case aerr != .None:
-			fmt.printfln("%-28s FAIL odecs %v, miniaudio decodes", name, aerr)
+			fmt.printfln("%-28s FAIL oicut %v, miniaudio decodes", name, aerr)
 			failed += 1
 			continue
 		}

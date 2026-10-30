@@ -15,7 +15,7 @@ codecs are AAC-LC, PCM, FLAC, MP3, Opus, ALAC and Vorbis. Mixing down and
 resampling are left to the caller.
 
 ```odin
-import audio "deps:odecs/audio"
+import audio "deps:oicut/audio"
 
 info, e := audio.info(data)           // headers only: present, codec, sample_rate, channels, samples, loop
 a, err := audio.decode(data)          // a whole file in memory as f32; audio.destroy_audio(&a)

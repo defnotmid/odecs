@@ -1,8 +1,8 @@
-// Decodes JPEG files with odecs/jpeg and with libjpeg-turbo (the reference
+// Decodes JPEG files with oicut/jpeg and with libjpeg-turbo (the reference
 // and the speed to meet: TurboJPEG at its defaults, its integer IDCT and fancy
 // upsampling) and compares the RGBA8 results, which must be identical.
 // CMYK and YCCK files are compared through libjpeg-turbo's CMYK output and
-// odecs' CMYK to RGB rule. Times are the best of several decodes each.
+// oicut's CMYK to RGB rule. Times are the best of several decodes each.
 // tests/image_check.sh builds the pinned libjpeg-turbo (tools/fetch_third_party.sh)
 // into .work/libjpeg-turbo and runs this; by hand:
 //   odin run tests/jpeg_compare.odin -file -o:speed -extra-linker-flags:-L.work/libjpeg-turbo -- file...
@@ -69,14 +69,14 @@ main :: proc() {
 			fmt.printfln("%-30s both refuse (%v)", name, ierr)
 			continue
 		case !ok:
-			fmt.printfln("%-30s libjpeg-turbo refuses (%s), odecs decodes %dx%d", name, tj3GetErrorStr(h), img.width, img.height)
+			fmt.printfln("%-30s libjpeg-turbo refuses (%s), oicut decodes %dx%d", name, tj3GetErrorStr(h), img.width, img.height)
 			jpeg.destroy_image(&img)
 			continue
 		case ierr == .Unsupported:
-			fmt.printfln("%-30s unsupported by odecs (libjpeg-turbo decodes %dx%d)", name, w, ht)
+			fmt.printfln("%-30s unsupported by oicut (libjpeg-turbo decodes %dx%d)", name, w, ht)
 			continue
 		case ierr != .None:
-			fmt.printfln("%-30s FAIL odecs %v, libjpeg-turbo decodes %dx%d", name, ierr, w, ht)
+			fmt.printfln("%-30s FAIL oicut %v, libjpeg-turbo decodes %dx%d", name, ierr, w, ht)
 			failed += 1
 			continue
 		}

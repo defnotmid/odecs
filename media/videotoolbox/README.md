@@ -38,7 +38,7 @@ sets before each keyframe.
 
 On the M4 at 1080p through `video.Writer`: H.264 about 164 fps and HEVC
 about 154 fps from I420 or NV12 (`tests/videotoolbox_encode_check.odin`),
-both decoded by odecs' native decoders and FFmpeg; QP 18, 30 and 40 give
+both decoded by oicut's native decoders and FFmpeg; QP 18, 30 and 40 give
 49.7, 43.6 and 37.8 dB (H.264, 720p).
 
 ## How it works

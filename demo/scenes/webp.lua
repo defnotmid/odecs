@@ -1,5 +1,5 @@
 -- bryce.webp, the largest image in libwebp's test corpus (11158x2156
--- lossy), decoded by odecs and panned across the frame.
+-- lossy), decoded by oicut and panned across the frame.
 
 local beat = require("beat")
 local ui = require("ui")

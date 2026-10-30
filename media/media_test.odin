@@ -148,7 +148,7 @@ test_tier_ordering_and_require_hardware_rejects_system :: proc(t: ^testing.T) {
 	testing.expect_value(t, session.hardware_error, Error.Unavailable)
 	testing.expect_value(t, close(&session), Error.None)
 
-	// System only when Native refuses too (H.264/H.265 without ODECS_PATENTED).
+	// System only when Native refuses too (H.264/H.265 without OICUT_PATENTED).
 	providers_system := []Provider {
 		{backend = .Native, name = "native", probe = probe_unavail, open = open_ok},
 		{backend = .AVCodec, name = "avcodec", probe = probe_ok, open = open_ok},

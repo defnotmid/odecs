@@ -2,10 +2,10 @@
 // RGBA8 straight alpha, rows top-down, the bytes as stored (no gamma or
 // colour profile applied, no EXIF orientation), as stb_image gives them; JPEG
 // as libjpeg-turbo decodes it. PNG, TGA and QOI go through Odin's core:image;
-// BMP, WebP, JPEG and GIF through odecs' own decoders (core:image's BMP drops
+// BMP, WebP, JPEG and GIF through oicut's own decoders (core:image's BMP drops
 // alpha). Radiance HDR decodes to linear f32 through decode_float_into.
 // Writing is PNG (png/encoder).
-package odecs_image
+package oicut_image
 
 import bmp "./bmp"
 import common "../common"

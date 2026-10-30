@@ -2,18 +2,18 @@
 # What CI runs (.github/workflows/ci.yml), runnable locally too:
 #
 #   bash .github/ci.sh check             # the facades' import layers; odin check -vet -strict-style, every package
-#                                        # (and with -define:ODECS_PATENTED=true where native H.264/H.265 is gated)
+#                                        # (and with -define:OICUT_PATENTED=true where native H.264/H.265 is gated)
 #   bash .github/ci.sh check --programs  # and the tests/*.odin programs (Linux-only tools), and that a
 #                                        # default build links no native H.264/H.265 coding
 #   bash .github/ci.sh test              # odin test, every package that has tests, and those whose tests
-#                                        # depend on the gate again with -define:ODECS_PATENTED=true (-o:none:
+#                                        # depend on the gate again with -define:OICUT_PATENTED=true (-o:none:
 #                                        # -o:speed spends minutes compiling, tests run in ~40 s)
 #
-# GPU and fixture tests stay off: they need -define:ODECS_GPU_TEST and friends.
+# GPU and fixture tests stay off: they need -define:OICUT_GPU_TEST and friends.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-out=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/odecs-ci
+out=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/oicut-ci
 mkdir -p "$out"
 exe=
 [ "${OS:-}" = Windows_NT ] && exe=.exe
@@ -35,7 +35,7 @@ normal() {
 	echo "${out[*]}"
 }
 
-# The odecs packages a package imports, itself included, transitively.
+# The oicut packages a package imports, itself included, transitively.
 imports() {
 	local -A seen=()
 	local queue=("$1") p f rel
@@ -84,9 +84,9 @@ check)
 	run "layers" layers
 	for p in $(packages); do run "check $p" odin check "$p" -vet -strict-style -no-entry-point; done
 	# Native H.264 and H.265 are compiled out by default: check and test those
-	# branches with -define:ODECS_PATENTED=true as well.
-	for p in $(git grep -l ODECS_PATENTED -- '*.odin' ':!tests' | xargs -n1 dirname | sort -u); do
-		run "check $p ODECS_PATENTED" odin check "$p" -vet -strict-style -no-entry-point -define:ODECS_PATENTED=true
+	# branches with -define:OICUT_PATENTED=true as well.
+	for p in $(git grep -l OICUT_PATENTED -- '*.odin' ':!tests' | xargs -n1 dirname | sort -u); do
+		run "check $p OICUT_PATENTED" odin check "$p" -vet -strict-style -no-entry-point -define:OICUT_PATENTED=true
 	done
 	if [ "${2:-}" = --programs ]; then
 		for f in tests/*.odin; do run "check $f" odin check "$f" -file -vet -strict-style; done
@@ -94,10 +94,10 @@ check)
 	fi
 	;;
 test)
-	for p in $(test_packages); do run "test $p" odin test "$p" -o:none -out:"$out/odecs-test$exe"; done
+	for p in $(test_packages); do run "test $p" odin test "$p" -o:none -out:"$out/oicut-test$exe"; done
 	# The packages whose tests change with the native H.264/H.265 gate, again with it on.
-	for p in $(git grep -l ODECS_NATIVE_H26 -- '*_test.odin' | xargs -n1 dirname | sort -u); do
-		run "test $p ODECS_PATENTED" odin test "$p" -o:none -define:ODECS_PATENTED=true -out:"$out/odecs-test$exe"
+	for p in $(git grep -l OICUT_NATIVE_H26 -- '*_test.odin' | xargs -n1 dirname | sort -u); do
+		run "test $p OICUT_PATENTED" odin test "$p" -o:none -define:OICUT_PATENTED=true -out:"$out/oicut-test$exe"
 	done
 	;;
 *)

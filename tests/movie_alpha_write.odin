@@ -6,9 +6,9 @@
 // video.Reader, and reports what a viewer would see: the frames composited
 // over black and over white, and alpha, as PSNR and maximum error.
 //
-//   odin build tests/movie_alpha_write.odin -file -o:speed -out:/tmp/odecs-movie-alpha-write
-//   /tmp/odecs-movie-alpha-write OUTDIR [WIDTH HEIGHT FRAMES QP]
-//   /tmp/odecs-movie-alpha-write --planar FILE.mov OUT.yuva
+//   odin build tests/movie_alpha_write.odin -file -o:speed -out:/tmp/oicut-movie-alpha-write
+//   /tmp/oicut-movie-alpha-write OUTDIR [WIDTH HEIGHT FRAMES QP]
+//   /tmp/oicut-movie-alpha-write --planar FILE.mov OUT.yuva
 //
 // OUTDIR receives alpha_premultiplied.mov, alpha_straight.mov (H.265),
 // alpha_vp9.webm and source.rgba (premultiplied RGBA, frame after frame). --planar writes the

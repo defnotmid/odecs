@@ -1,6 +1,6 @@
 -- Two alpha clips composited live over moving stripes: the ProRes 4444
 -- avatar (transparent.mov) and a VP9-alpha WebM of it, both decoded by
--- odecs on the frame clock, each with a coloured glow.
+-- oicut on the frame clock, each with a coloured glow.
 
 local beat = require("beat")
 local ui = require("ui")

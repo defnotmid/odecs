@@ -77,8 +77,8 @@ periodic_closed_idr :: proc(t: ^testing.T) {
 			for pic in part {destroy_picture(pic); free(pic)}
 			delete(part)
 		}
-		when #config(ODECS_PERIODIC_IDR_DIR, "") != "" {
-			prefix := fmt.aprintf("%s/periodic-%d-%d", #config(ODECS_PERIODIC_IDR_DIR, ""), depth, refs)
+		when #config(OICUT_PERIODIC_IDR_DIR, "") != "" {
+			prefix := fmt.aprintf("%s/periodic-%d-%d", #config(OICUT_PERIODIC_IDR_DIR, ""), depth, refs)
 			defer delete(prefix)
 			for extension, i in ([2]string{".265", ".rec.yuv"}) {
 				path := fmt.aprintf("%s%s", prefix, extension)

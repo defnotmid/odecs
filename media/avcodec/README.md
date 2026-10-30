@@ -22,5 +22,5 @@ configurations).
   time.
 - **Tier ordering:** `media.open` tries `Hardware` (`Vulkan`, `VideoToolbox`),
   then `Native`, then `System` (`AVCodec`): libavcodec decodes and encodes only
-  what neither admits, in practice H.264 and H.265 without `ODECS_PATENTED`. `Preference.Require_Hardware` never
+  what neither admits, in practice H.264 and H.265 without `OICUT_PATENTED`. `Preference.Require_Hardware` never
   admits `AVCodec`.

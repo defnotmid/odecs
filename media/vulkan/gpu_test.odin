@@ -35,18 +35,18 @@ invalid_config :: proc(t: ^testing.T) {
 	destroy_encoder(&e)
 }
 
-// Explicit hardware gate: odin test media/vulkan -define:ODECS_GPU_TEST=true.
+// Explicit hardware gate: odin test media/vulkan -define:OICUT_GPU_TEST=true.
 // A requested hardware gate must fail when hardware is unavailable, rather
 // than turn a skipped test into a claim of working hardware encoding.
 @(test)
 hardware_encode :: proc(t: ^testing.T) {
-	when #config(ODECS_GPU_TEST, false) {
-		w, h := #config(ODECS_GPU_WIDTH, 320), #config(ODECS_GPU_HEIGHT, 240)
-		qp := #config(ODECS_GPU_QP, 26)
-		depth := #config(ODECS_GPU_DEPTH, 8)
-		gop := #config(ODECS_GPU_GOP, 1)
-		frames := #config(ODECS_GPU_FRAMES, 3)
-		codec: Codec = #config(ODECS_GPU_CODEC, "h264") == "h265" ? .H265 : .H264
+	when #config(OICUT_GPU_TEST, false) {
+		w, h := #config(OICUT_GPU_WIDTH, 320), #config(OICUT_GPU_HEIGHT, 240)
+		qp := #config(OICUT_GPU_QP, 26)
+		depth := #config(OICUT_GPU_DEPTH, 8)
+		gop := #config(OICUT_GPU_GOP, 1)
+		frames := #config(OICUT_GPU_FRAMES, 3)
+		codec: Codec = #config(OICUT_GPU_CODEC, "h264") == "h265" ? .H265 : .H264
 		// The synchronous encoder and one with three pictures in flight must
 		// write the same stream; the latter returns each packet two calls late.
 		streams: [2][dynamic]u8
@@ -114,7 +114,7 @@ hardware_encode :: proc(t: ^testing.T) {
 		}
 		testing.expect(t, len(streams[0]) > 0 && string(streams[0][:]) == string(streams[1][:]))
 		stream := streams[0]
-		path := codec == .H264 ? "/tmp/odecs-gpu-h264.264" : "/tmp/odecs-gpu-h265.265"
+		path := codec == .H264 ? "/tmp/oicut-gpu-h264.264" : "/tmp/oicut-gpu-h265.265"
 		testing.expect(t, os.write_entire_file(path, stream[:]) == nil)
 	}
 }

@@ -1,8 +1,8 @@
 // movie timing: colour conversion kernels and the playback path's cost
 // over raw decoding, with resident input, median of 7.
 //
-//   odin build tests/movie_timing.odin -file -o:speed -microarch:native -out:/tmp/odecs-movie-timing
-//   taskset -c 23 /tmp/odecs-movie-timing [W H FRAMES]
+//   odin build tests/movie_timing.odin -file -o:speed -microarch:native -out:/tmp/oicut-movie-timing
+//   taskset -c 23 /tmp/oicut-movie-timing [W H FRAMES]
 package movie_timing
 
 import mp4 "../container/mp4"

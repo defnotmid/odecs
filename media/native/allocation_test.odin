@@ -36,7 +36,7 @@ native_allocation_failure :: proc(
 test_native_avc_lazy_storage_failure_maps_diagnostic_and_preserves_delivery_lifetime :: proc(
 	t: ^testing.T,
 ) {
-	when !ODECS_NATIVE_H264 do return
+	when !OICUT_NATIVE_H264 do return
 	cfg := media.Config {
 		codec      = .H264,
 		operation  = .Encode,

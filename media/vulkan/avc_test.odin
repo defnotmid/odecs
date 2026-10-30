@@ -201,7 +201,7 @@ h264_declared_format_admission :: proc(t: ^testing.T) {
 	d.backend.initialized = false
 }
 
-when #config(ODECS_GPU_AVC_TEST, false) {
+when #config(OICUT_GPU_AVC_TEST, false) {
 	H264_Test_Output :: struct {
 		bytes:  [dynamic]u8,
 		frames: int,
@@ -216,8 +216,8 @@ when #config(ODECS_GPU_AVC_TEST, false) {
 	// The reference is the full planar output in display order.
 	@(test)
 	h264_hardware_decode :: proc(t: ^testing.T) {
-		fixture :: #config(ODECS_GPU_AVC_FIXTURE, "")
-		reference :: #config(ODECS_GPU_AVC_REFERENCE, "")
+		fixture :: #config(OICUT_GPU_AVC_FIXTURE, "")
+		reference :: #config(OICUT_GPU_AVC_REFERENCE, "")
 		testing.expect(t, fixture != "" && reference != "")
 		if fixture == "" || reference == "" do return
 		data, e := os.read_entire_file(fixture, context.allocator)

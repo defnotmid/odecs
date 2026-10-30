@@ -1,11 +1,10 @@
-# The odecs logo: a 32x32 pixel-art turntable seen from above, a record on
-# the platter, the tonearm resting in the groove. Writes an SVG whose parts
-# are groups a script can show or hide by id, to spin the record:
+# The oicut logo: a 32x32 pixel-art punk hedgehog seen from the side, facing
+# right: brown quills with a red, cyan-tipped mohawk cut along the ridge, a
+# scowl, a safety pin through the ear and a studded collar. Writes an SVG whose
+# parts are groups a script can show or hide by id, to blink:
 #
-#   body     plinth, platter, record, label, tonearm, pitch slider (always on)
-#   shine_a  the light on the grooves (on)     shine_b, shine_c  the record turned
-#                                              a third and two thirds
-#   led      the power light lit (on)
+#   body     quills, mohawk, face, ear, collar, feet (always on)
+#   eye      the eye open (on)                  blink  the eye shut (off)
 #   silhouette  every pixel visible by default as one outline (off): the shape
 #               to morph, extrude or collide
 #
@@ -16,9 +15,9 @@ import math, sys
 
 W = H = 32
 PAL = {
-  'O': '#1b1a2e', 'P': '#4a4670', 'p': '#35324f', 'L': '#6c68a0', 'R': '#14131d', 'g': '#302e47',
-  'G': '#57547a', 'C': '#2ee6f0', 'c': '#17a9c4', 'h': '#0b0b12', 'A': '#d8deeb', 'a': '#8a90aa',
-  'r': '#ff5a4e', 'Y': '#ffe14d', 'y': '#8a6a3c', 'W': '#ffffff',
+  'O': '#1b1a2e', 'Q': '#5a4334', 'q': '#8c6a4c', 'u': '#3e2e25', 'r': '#ff5a4e', 's': '#c43a35',
+  'C': '#2ee6f0', 'F': '#efd2a6', 'f': '#c99d70', 'k': '#ff8fa3', 'h': '#0b0b12', 'W': '#ffffff',
+  'A': '#d8deeb', 'a': '#8a90aa', 'R': '#14131d',
 }
 
 def grid():
@@ -28,78 +27,103 @@ def put(g, x, y, c):
     if 0 <= x < W and 0 <= y < H:
         g[y][x] = c
 
-# ---- the plinth: a rounded box, lit along the top, shaded along the bottom ------
+def tri(t):
+    # A triangle wave, 0 at whole t and 1 halfway between: one spike per period.
+    f = t - math.floor(t)
+    return 1 - abs(2 * f - 1)
+
+def ell(x, y, cx, cy, rx, ry):
+    return math.hypot((x + 0.5 - cx) / rx, (y + 0.5 - cy) / ry)
+
+# ---- the body: an oval of quills, spikes off the back, the mohawk on the ridge -------
 body = grid()
-X0, Y0, X1, Y1 = 1, 3, 30, 28
-for y in range(Y0, Y1 + 1):
-    for x in range(X0, X1 + 1):
-        if x in (X0, X1) and y in (Y0, Y1):
-            continue
-        put(body, x, y, 'O' if x in (X0, X1) or y in (Y0, Y1) else 'P')
-for x in range(X0 + 1, X1):
-    put(body, x, Y0 + 1, 'L')
-    put(body, x, Y1 - 1, 'p')
-for x in (X0 + 2, X0 + 3, X1 - 3, X1 - 2):
-    put(body, x, Y1 + 1, 'O')   # little feet
+cx, cy, RX, RY = 14.0, 20.0, 11.0, 8.0
 
-# ---- the record: grooves, a cyan label, the spindle --------------------------------
-cx, cy, R = 12.0, 16.0, 8.4
-def rad(x, y):
-    return math.hypot(x + 0.5 - cx, y + 0.5 - cy)
-for y in range(H):
-    for x in range(W):
-        d = rad(x, y)
-        if R + 0.9 < d <= R + 1.8:
-            put(body, x, y, 'O')
-        elif R < d <= R + 0.9:
-            put(body, x, y, 'a' if (x + 0.5 - cx) + (y + 0.5 - cy) > -2 else 'A')   # the platter's rim
-        elif d <= R:
-            put(body, x, y, 'C' if d <= 3.3 else 'R')
-            if d > 3.3 and any(lo < d <= hi for lo, hi in ((4.5, 5.2), (6.2, 6.9))):
-                put(body, x, y, 'g')   # grooves
-            if 2.0 < d <= 3.3 and (x + 0.5 - cx) + (y + 0.5 - cy) > 1.0:
-                put(body, x, y, 'c')   # the label's shade
-for (x, y) in [(11, 15), (12, 15), (11, 16), (12, 16)]:
-    put(body, x, y, 'h')
-
-# ---- the tonearm: a counterweight, the pivot, the arm down to the headshell ----------
-def blob(cells, fill, light=()):
-    for (x, y) in cells:
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            if (x + dx, y + dy) not in cells and body[y + dy][x + dx] in '.PLp':
-                put(body, x + dx, y + dy, 'O')
-    for (x, y) in cells:
-        put(body, x, y, 'A' if (x, y) in light else fill)
-blob({(25, 5), (26, 5)}, 'a', {(25, 5)})
-blob({(24, 7), (25, 7), (26, 7), (24, 8), (25, 8), (26, 8), (24, 9), (25, 9), (26, 9)}, 'a', {(24, 7), (25, 7)})
-blob({(25, y) for y in range(10, 18)} | {(24, 18), (23, 19)}, 'A')
-blob({(19, 20), (20, 20), (21, 20), (22, 20), (19, 21), (20, 21), (21, 21)}, 'a', {(20, 20), (21, 20), (22, 20)})
-
-# ---- the pitch slider, the start button ------------------------------------------------
-for y in range(13, 23):
-    put(body, 28, y, 'O')
-blob({(27, 17), (28, 17), (29, 17)}, 'A')
-blob({(3, 25), (4, 25)}, 'a', {(3, 25)})
-
-# ---- the light on the record: three turns of a glint across the grooves -------------
-def shine(angle):
-    g = grid()
+# A spike from the oval's edge at angle a, leaning back by lean, length long:
+# pixels within its tapering triangle, the last tip_len of it in colour tip,
+# outlined over the spikes drawn before it so each stands apart.
+def spike(a, lean, long, half, fill, tip, tip_len):
+    bx, by = cx + RX * 0.9 * math.cos(a), cy + RY * 0.9 * math.sin(a)
+    da = a - lean
+    dx, dy = math.cos(da), math.sin(da)
+    cells = {}
     for y in range(H):
         for x in range(W):
-            d = rad(x, y)
-            if 3.9 < d <= R - 0.5 and body[y][x] in 'Rg':
-                a = math.atan2(y + 0.5 - cy, x + 0.5 - cx)
-                da = (a - angle + math.pi) % (2 * math.pi) - math.pi
-                if abs(da) < 0.22:
-                    put(g, x, y, 'G')
-    return g
-shine_a, shine_b, shine_c = shine(-2.4), shine(-2.4 + 2 * math.pi / 3), shine(-2.4 + 4 * math.pi / 3)
+            px, py = x + 0.5 - bx, y + 0.5 - by
+            t, s = px * dx + py * dy, -px * dy + py * dx
+            if 0 <= t <= long and abs(s) <= half * (1 - t / long) + 0.45:
+                cells[(x, y)] = tip if t > long - tip_len else fill
+    for (x, y) in cells:
+        for ddx, ddy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (x + ddx, y + ddy) not in cells:
+                put(body, x + ddx, y + ddy, 'O')
+    for (x, y), c in cells.items():
+        put(body, x, y, c)
+for i in range(6):
+    spike(-2.95 + 0.42 * i, 0.25, 3.2, 1.3, 'Q', 'q', 1.2)   # the rump and back, low quills
+for a in (2.85, 2.45):
+    spike(a, -0.2, 2.6, 1.2, 'Q', 'q', 1.0)
+for i, long in enumerate((5.5, 7.5, 8.5, 8.0, 6.0)):
+    spike(-2.2 + 0.33 * i, 0.45, long, 1.0, 'r', 'C', 2.0)  # the mohawk
 
-led = grid()
-put(led, 27, 25, 'r'); put(led, 28, 25, 'r')
+for y in range(H):
+    for x in range(W):
+        d = ell(x, y, cx, cy, RX, RY)
+        if d <= 1:
+            a = math.atan2(y + 0.5 - cy, x + 0.5 - cx)
+            streak = tri(a / 0.21) > 0.72 and d > 0.5
+            put(body, x, y, 'q' if streak else ('u' if d > 0.8 and y > cy + 3 else 'Q'))
 
-LAYERS = [('body', body, True), ('shine_a', shine_a, True), ('shine_b', shine_b, False),
-          ('shine_c', shine_c, False), ('led', led, True)]
+# ---- the face: a round cheek and a pointed snout, a scowl, the nose ------------------
+fx, fy = 22.5, 21.5
+def face(x, y):
+    return ell(x, y, fx, fy, 5.6, 5.0) <= 1 or ell(x, y, 26.6, 23.2, 3.4, 2.0) <= 1
+for y in range(H):
+    for x in range(W):
+        if face(x, y):
+            put(body, x, y, 'f' if y >= 24 and ell(x, y, fx, fy, 5.6, 5.0) > 0.55 else 'F')
+# the studded collar where the face meets the quills
+for y in range(H):
+    for x in range(W):
+        e = ell(x, y, fx, fy, 5.6, 5.0)
+        if 1.0 < e <= 1.3 and y >= 16 and body[y][x] in 'Qqu' and x < 21:
+            put(body, x, y, 'A' if (y - 16) % 3 == 1 else 'R')
+for (x, y) in [(29, 23), (30, 23), (29, 24)]:
+    put(body, x, y, 'h')   # the nose
+for (x, y) in [(21, 18), (22, 18), (23, 19), (24, 19)]:
+    put(body, x, y, 'h')   # the brow, low and angry
+for (x, y) in [(26, 25), (27, 25)]:
+    put(body, x, y, 'f')   # the mouth's crease
+
+# ---- the ear, with a safety pin through it -------------------------------------------
+for (x, y) in [(19, 15), (20, 15), (19, 16), (20, 16), (21, 16)]:
+    put(body, x, y, 'F')
+put(body, 20, 16, 'k')
+for (x, y) in [(18, 14), (18, 15), (18, 16)]:
+    put(body, x, y, 'a')
+put(body, 18, 13, 'A')
+
+# ---- the feet ----------------------------------------------------------------------------
+for (x, y) in [(9, 28), (10, 28), (18, 28), (19, 28), (20, 28)]:
+    put(body, x, y, 'f')
+
+# ---- the outline: every empty pixel beside a filled one --------------------------------
+edge = [(x, y) for y in range(H) for x in range(W) if body[y][x] == '.' and any(
+    0 <= x + dx < W and 0 <= y + dy < H and body[y + dy][x + dx] != '.' for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
+for (x, y) in edge:
+    put(body, x, y, 'O')
+
+eye = grid()
+for (x, y) in [(22, 19), (23, 20), (22, 20)]:
+    put(eye, x, y, 'h')
+put(eye, 22, 19, 'W')
+put(eye, 23, 19, 'h')
+
+blink = grid()
+for (x, y) in [(22, 20), (23, 20)]:
+    put(blink, x, y, 'h')
+
+LAYERS = [('body', body, True), ('eye', eye, True), ('blink', blink, False)]
 
 # Writes the outline of the mask's pixels as path data: one closed loop per
 # boundary, the pixels on its right (clockwise on screen), so holes wind the

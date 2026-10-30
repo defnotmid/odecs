@@ -4,8 +4,8 @@
 // allocated released; a crash, bounds failure or sanitizer report fails the
 // run.
 //
-//   odin build tests/image_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/odecs-image-fuzz
-//   /tmp/odecs-image-fuzz ITERATIONS FIXTURE...
+//   odin build tests/image_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/oicut-image-fuzz
+//   /tmp/oicut-image-fuzz ITERATIONS FIXTURE...
 package image_fuzz
 
 import gif "../image/gif"

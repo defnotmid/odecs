@@ -3,8 +3,8 @@
 // everything allocated released; a crash, bounds failure or sanitizer
 // report fails the run.
 //
-//   odin build tests/audio_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/odecs-audio-fuzz
-//   /tmp/odecs-audio-fuzz ITERATIONS FIXTURE...
+//   odin build tests/audio_fuzz.odin -file -o:speed -sanitize:address -out:/tmp/oicut-audio-fuzz
+//   /tmp/oicut-audio-fuzz ITERATIONS FIXTURE...
 package audio_fuzz
 
 import audio "../audio"

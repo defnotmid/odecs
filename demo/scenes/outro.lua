@@ -17,14 +17,14 @@ local function render(f, lb)
   local s = 1 + 0.3 * (1 - soft(lb)) + (lb < 8 and 0.02 * pulse(lb, 8) or 0)
   group({ opacity = fade, transform = { scale = s, origin = { 960, 420 } },
     shadow = { dx = 0, dy = 16, blur = 20, color = "#000000", opacity = 0.8 } }, function()
-    text { "odecs", x = 960, y = 500, align = "center", font = ui.SANS, size = 230, fill = ui.A }
+    text { "oicut", x = 960, y = 500, align = "center", font = ui.SANS, size = 230, fill = ui.A }
   end)
   group({ opacity = prog(lb, 1, 1.3) * fade }, function()
     text { "decode · encode · mux, in Odin", x = 960, y = 620, align = "center", font = ui.SANS, size = 44,
       fill = ui.TEXT }
   end)
   group({ opacity = prog(lb, T.WORDMARK, T.WORDMARK + 0.3) * fade }, function()
-    text { "this video: an onimite script, its H.264 + AAC encoded by odecs · odecs/demo", x = 960, y = 690,
+    text { "this video: an onimite script, its H.264 + AAC encoded by oicut · oicut/demo", x = 960, y = 690,
       align = "center", font = ui.MONO, size = 24, fill = ui.DIM }
   end)
 end

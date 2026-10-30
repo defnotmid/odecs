@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetches the reference sources into third_party/ at the commits recorded in
 # THIRD_PARTY_REFERENCES.md. They are development references and oracles
-# only: never committed (third_party/ is ignored), never linked into odecs.
+# only: never committed (third_party/ is ignored), never linked into oicut.
 # Existing trees are left as they are; delete one to fetch it again.
 #   bash tools/fetch_third_party.sh [name...]   (default: all)
 set -euo pipefail

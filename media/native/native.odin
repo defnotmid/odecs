@@ -17,11 +17,11 @@ import vp9e "../../video/vp9/encoder"
 // Native software H.264 and H.265 are omitted by default so `media` routes
 // H.264/H.265 exclusively through system/hardware providers (VideoToolbox,
 // Vulkan Video) without bundling software implementations.
-// Pass `-define:ODECS_PATENTED=true` (or `-define:ODECS_NATIVE_H264=true` /
-// `-define:ODECS_NATIVE_H265=true`) to compile in the native software codecs.
-ODECS_PATENTED :: #config(ODECS_PATENTED, false)
-ODECS_NATIVE_H264 :: #config(ODECS_NATIVE_H264, ODECS_PATENTED)
-ODECS_NATIVE_H265 :: #config(ODECS_NATIVE_H265, ODECS_PATENTED)
+// Pass `-define:OICUT_PATENTED=true` (or `-define:OICUT_NATIVE_H264=true` /
+// `-define:OICUT_NATIVE_H265=true`) to compile in the native software codecs.
+OICUT_PATENTED :: #config(OICUT_PATENTED, false)
+OICUT_NATIVE_H264 :: #config(OICUT_NATIVE_H264, OICUT_PATENTED)
+OICUT_NATIVE_H265 :: #config(OICUT_NATIVE_H265, OICUT_PATENTED)
 
 // The binding is read at probe/open. Each session snapshots its geometry and
 // borrows only the caller's persistent pool until close. Calls remain serial
@@ -165,8 +165,8 @@ probe :: proc(config: media.Config, user: rawptr) -> media.Error {
 	if user != nil {
 		if err := options_error(config, (^Options)(user)^); err != .None do return err
 	}
-	when !ODECS_NATIVE_H264 do if config.codec == .H264 do return .Unavailable
-	when !ODECS_NATIVE_H265 do if config.codec == .H265 do return .Unavailable
+	when !OICUT_NATIVE_H264 do if config.codec == .H264 do return .Unavailable
+	when !OICUT_NATIVE_H265 do if config.codec == .H265 do return .Unavailable
 	return .None
 }
 
@@ -217,14 +217,14 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 	if config.operation == .Decode {
 		switch config.codec {
 		case .H264:
-			when ODECS_NATIVE_H264 {
+			when OICUT_NATIVE_H264 {
 				s.avc_decoder = new(avcd.Decoder_State); avcd.init_decoder(s.avc_decoder)
 				s.avc_decoder.no_reordering = config.no_reordering
 			} else {
 				return .Unavailable
 			}
 		case .H265:
-			when ODECS_NATIVE_H265 {
+			when OICUT_NATIVE_H265 {
 				s.hevc_decoder = new(hevcd.Decoder); hevcd.init_decoder(s.hevc_decoder)
 			} else {
 				return .Unavailable
@@ -253,7 +253,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 	case .VP9:
 		return open_vp9_encoders(session, s, config, options)
 	case .H264:
-		when ODECS_NATIVE_H264 {
+		when OICUT_NATIVE_H264 {
 			s.avc_encoder = new(avce.Encoder_State)
 			avc_config := avce.Encoder_Config {
 				width               = config.width,
@@ -275,7 +275,7 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 			return .Unavailable
 		}
 	case .H265:
-		when ODECS_NATIVE_H265 {
+		when OICUT_NATIVE_H265 {
 			s.hevc_encoder = new(hevce.Encoder)
 			chroma: hevce.Chroma_Layout
 			switch config.chroma {
@@ -345,11 +345,11 @@ open_native :: proc(session: ^media.Session, config: media.Config, user: rawptr)
 @(private)
 close_native :: proc(session: ^media.Session) {
 	s := (^State)(session.state)
-	when ODECS_NATIVE_H264 {
+	when OICUT_NATIVE_H264 {
 		if s.avc_decoder != nil {avcd.destroy_decoder(s.avc_decoder); free(s.avc_decoder)}
 		if s.avc_encoder != nil {avce.destroy_encoder(s.avc_encoder); free(s.avc_encoder)}
 	}
-	when ODECS_NATIVE_H265 {
+	when OICUT_NATIVE_H265 {
 		if s.hevc_decoder != nil {
 			for p in s.decoded do hevcd.release_picture(s.hevc_decoder, p)
 			hevcd.destroy_decoder(s.hevc_decoder); free(s.hevc_decoder)
@@ -662,7 +662,7 @@ decode_one_nal :: proc(
 	data: []u8,
 	receiver: media.Receiver,
 ) -> media.Error {
-	when ODECS_NATIVE_H264 {
+	when OICUT_NATIVE_H264 {
 		if s.avc_decoder != nil {
 			if len(data) == 0 || data[0] & 0x80 != 0 do return .Invalid_Input
 			ready, err := avcd.decode_nal(s.avc_decoder, data)
@@ -675,7 +675,7 @@ decode_one_nal :: proc(
 			return .None
 		}
 	}
-	when ODECS_NATIVE_H265 {
+	when OICUT_NATIVE_H265 {
 		nal, ok := hevcd.parse_nal_into(data, &s.nal_scratch)
 		if !ok do return .Invalid_Input
 		if nal.type == .PREFIX_SEI_NUT {
@@ -789,7 +789,7 @@ encode_video_native :: proc(
 	frame := frame
 	if frame.chroma_interleaved do split_chroma(s, &frame) or_return
 	if s.vp9_encoders[0] != nil do return encode_vp9(session, s, frame, receiver)
-	when ODECS_NATIVE_H264 {
+	when OICUT_NATIVE_H264 {
 		if s.avc_encoder != nil {
 			if frame.storage_bits != 8 || frame.planes[1].stride != frame.planes[2].stride do return .Unsupported
 			is_idr := s.avc_encoder.frames_coded % s.avc_encoder.config.gop_size == 0
@@ -810,7 +810,7 @@ encode_video_native :: proc(
 			return .None
 		}
 	}
-	when ODECS_NATIVE_H265 {
+	when OICUT_NATIVE_H265 {
 		// The alpha plane is checked and copied before either layer advances.
 		if e := load_alpha(s, frame); e != .None do return e
 		sw, sh := media.chroma_subsampling(frame.chroma)
@@ -964,7 +964,7 @@ encode_audio_native :: proc(
 drain_native :: proc(session: ^media.Session, receiver: media.Receiver) -> media.Error {
 	s := (^State)(session.state)
 	if session.config.operation == .Encode {
-		when ODECS_NATIVE_H265 {
+		when OICUT_NATIVE_H265 {
 			if s.hevc_encoder != nil do hevce.flush_encoder(s.hevc_encoder, &s.encoded)
 		}
 		if s.aac_encoder != nil {
@@ -979,13 +979,13 @@ drain_native :: proc(session: ^media.Session, receiver: media.Receiver) -> media
 		}
 		emit_packet(s, .Annex_B, receiver)
 	} else {
-		when ODECS_NATIVE_H264 {
+		when OICUT_NATIVE_H264 {
 			if s.avc_decoder != nil {
 				if avcd.flush_decoder(s.avc_decoder) do emit_avc(s.avc_decoder.output, receiver)
 				for {p := avcd.next_output_frame(s.avc_decoder); if p == nil do break; emit_avc(p, receiver)}
 			}
 		}
-		when ODECS_NATIVE_H265 {
+		when OICUT_NATIVE_H265 {
 			if s.hevc_decoder != nil {
 				if !hevcd.flush_decoder(s.hevc_decoder, &s.decoded) do return .Codec_Error
 				if s.hevc_alpha != nil && !hevcd.flush_decoder(s.hevc_alpha, &s.alpha_pictures) do return .Codec_Error

@@ -111,7 +111,7 @@ create_shared_instance :: proc() {
 	if create == nil do return
 	app := vk.ApplicationInfo {
 		sType            = .APPLICATION_INFO,
-		pApplicationName = "odecs hardware video",
+		pApplicationName = "oicut hardware video",
 		apiVersion       = vk.API_VERSION_1_3,
 	}
 	info := vk.InstanceCreateInfo {

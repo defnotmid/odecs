@@ -3,7 +3,7 @@ package png_encoder
 import "core:slice"
 
 // A zlib stream (RFC 1950) of deflate data (RFC 1951) for PNG writing, in
-// Odin so odecs links no C compression library. Like zlib's Z_RLE strategy:
+// Odin so oicut links no C compression library. Like zlib's Z_RLE strategy:
 // runs of the previous byte become length/distance-1 matches, which is what
 // Paeth-filtered images compress to, and every DEFLATE_BLOCK symbols go out
 // as a dynamic Huffman block.

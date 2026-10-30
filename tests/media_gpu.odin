@@ -41,7 +41,7 @@ argument_int :: proc(index, fallback: int) -> int {
 
 main :: proc() {
 	hardware := len(os.args) > 1 && os.args[1] == "--hardware"
-	prefix := len(os.args) > 2 ? os.args[2] : "/tmp/odecs-media"
+	prefix := len(os.args) > 2 ? os.args[2] : "/tmp/oicut-media"
 	codec: media.Codec = .H264
 	if len(os.args) > 3 {
 		if os.args[3] == "h265" {codec = .H265} else if os.args[3] != "h264" do os.exit(1)
