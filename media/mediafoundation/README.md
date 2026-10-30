@@ -2,8 +2,8 @@
 
 `media/mediafoundation` is a system-tier (`media.Tier.System`) H.264 and H.265
 provider for Windows. It runs the synchronous transforms Windows ships:
-Microsoft's H.264 decoder and encoder, and its HEVC decoder where the HEVC
-Video Extensions are installed. `mfplat.dll` is loaded at runtime with
+Microsoft's H.264 decoder and encoder, and its HEVC decoder and encoder where
+the HEVC Video Extensions are installed. `mfplat.dll` is loaded at runtime with
 `core:dynlib`, so nothing is linked. Off Windows, or where Media Foundation is
 missing (N editions without the Media Feature Pack, Windows Server without the
 Media Foundation feature), `probe` reports `Unavailable`, so the provider can
@@ -22,11 +22,14 @@ be listed on every platform. `video.Reader` and `video.Writer` list it before
   pictures in low-latency mode, a keyframe every `gop_size` frames, and `qp`
   through the encoder's quality mode where it accepts one (an encoder that
   refuses keeps its default rate control). Output is Annex B; a first packet
-  without parameter sets gets the output type's sequence header. Windows
-  ships no software HEVC encoder, so H.265 encoding is refused unless one is
-  installed.
+  without parameter sets gets the output type's sequence header. H.265
+  encoding needs an HEVC encoder transform (the HEVC Video Extensions bring
+  one); without it H.265 is refused.
 
-`odin test media/mediafoundation` encodes 30 frames through Media Foundation,
-decodes them back and checks every frame (luma above 30 dB). Without Media
-Foundation it logs that and passes; off Windows it checks the provider
-reports itself unavailable.
+On a Windows 11 (26200) VM without a GPU, onimite v0.0.72 renders H.264 MP4
+through this provider (FFmpeg decodes it; 55.9 dB against the same render on
+Linux through Vulkan Video), and `tools/mp4_smoke` writes and reads back H.264
+and H.265 with seeks. `odin test media/mediafoundation` encodes 30 frames
+through Media Foundation, decodes them back and checks every frame (luma above
+30 dB). Without Media Foundation it logs that and passes; off Windows it checks
+the provider reports itself unavailable.

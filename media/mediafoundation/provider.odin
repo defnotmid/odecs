@@ -4,8 +4,8 @@ import media ".."
 
 // H.264 and HEVC through Windows Media Foundation: the synchronous decoder
 // and encoder transforms Windows ships (Microsoft's H.264 decoder and
-// encoder, and its HEVC decoder where the HEVC Video Extensions are
-// installed). mfplat.dll is loaded at runtime, so nothing is linked; off
+// encoder, and its HEVC decoder and encoder where the HEVC Video Extensions
+// are installed). mfplat.dll is loaded at runtime, so nothing is linked; off
 // Windows, or without Media Foundation (N editions, Server without the
 // feature), every probe reports .Unavailable and the provider can be listed
 // unconditionally. It is a system-tier provider (media.Tier.System).
